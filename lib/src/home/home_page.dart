@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api.dart';
@@ -18,11 +20,15 @@ class HomePage extends StatefulWidget {
     required this.session,
     required this.onSessionChanged,
     required this.onLogout,
+    required this.themeMode,
+    required this.onThemeModeChanged,
   });
 
   final AuthSession session;
   final ValueChanged<AuthSession> onSessionChanged;
   final Future<void> Function() onLogout;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -30,6 +36,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final TextEditingController _compose = TextEditingController();
+  final ImagePicker _imagePicker = ImagePicker();
   final List<FeedPost> _posts = [];
   final List<NotificationItem> _notificationsList = [];
   final Set<String> _followingAuthors = {};
@@ -38,6 +45,9 @@ class _HomePageState extends State<HomePage> {
   int _selectedTab = 0;
   bool _loading = true;
   String? _activeCity;
+  String _composeImageUrl = '';
+  bool _showInlineProfile = false;
+  String _inlineProfileUsername = '';
 
   @override
   void initState() {
@@ -50,6 +60,28 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _compose.dispose();
     super.dispose();
+  }
+
+  Uint8List? _dataUrlBytes(String value) {
+    if (!value.startsWith('data:')) return null;
+    final comma = value.indexOf(',');
+    if (comma < 0) return null;
+    try {
+      return base64Decode(value.substring(comma + 1));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Widget _mediaPreview(String value, {BoxFit fit = BoxFit.cover}) {
+    final bytes = _dataUrlBytes(value);
+    if (bytes != null) {
+      return Image.memory(bytes, fit: fit);
+    }
+    if (value.isNotEmpty) {
+      return Image.network(value, fit: fit);
+    }
+    return const SizedBox.shrink();
   }
 
   Future<void> _load() async {
@@ -181,13 +213,36 @@ class _HomePageState extends State<HomePage> {
     final res = await http.post(
       postsEndpoint(),
       headers: authJsonHeaders(widget.session.token),
-      body: jsonEncode({'text': text}),
+      body: jsonEncode({
+        'text': text,
+        if (_composeImageUrl.isNotEmpty) 'imageUrl': _composeImageUrl,
+      }),
     );
     if (res.statusCode == 201) {
       _compose.clear();
+      _composeImageUrl = '';
       await _load();
       if (mounted) Navigator.of(context).pop();
     }
+  }
+
+  Future<void> _pickComposeImage() async {
+    final picked = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 88,
+      maxWidth: 1600,
+    );
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _composeImageUrl =
+          'data:image/${picked.name.toLowerCase().endsWith(".png") ? "png" : "jpeg"};base64,${base64Encode(bytes)}';
+    });
+  }
+
+  void _clearComposeImage() {
+    setState(() => _composeImageUrl = '');
   }
 
   Future<void> _like(FeedPost post) async {
@@ -234,20 +289,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openProfile(String username) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ProfilePage(
-          username: username,
-          currentUser: widget.session.user,
-          token: widget.session.token,
-          posts: _posts,
-          onOpenUserProfile: _openProfile,
-          onLogout: widget.onLogout,
-          onSessionUpdated: widget.onSessionChanged,
-          onPostTap: _openComments,
-        ),
-      ),
-    );
+    setState(() {
+      _inlineProfileUsername = username;
+      _showInlineProfile = true;
+      _nav = 0;
+    });
   }
 
   Future<void> _openCityFeed(String city) async {
@@ -261,12 +307,16 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _goHome() async {
     if (_activeCity == null) {
-      setState(() => _nav = 0);
+      setState(() {
+        _nav = 0;
+        _showInlineProfile = false;
+      });
       return;
     }
     setState(() {
       _activeCity = null;
       _nav = 0;
+      _showInlineProfile = false;
       _loading = true;
     });
     await _load();
@@ -294,10 +344,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openNotifications() {
+    final isLight = widget.themeMode == ThemeMode.light;
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
-      backgroundColor: const Color(0xff141414),
+      backgroundColor: widget.themeMode == ThemeMode.light
+          ? Colors.white
+          : const Color(0xff141414),
       isScrollControlled: true,
       builder: (sheetContext) {
         return SafeArea(
@@ -340,12 +393,12 @@ class _HomePageState extends State<HomePage> {
                       children: [
                         Row(
                           children: [
-                            const Text(
+                            Text(
                               'Notifications',
                               style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w800,
-                                color: Colors.white,
+                                color: isLight ? Colors.black : Colors.white,
                               ),
                             ),
                             const Spacer(),
@@ -356,10 +409,14 @@ class _HomePageState extends State<HomePage> {
                                   if (!mounted) return;
                                   setSheetState(() {});
                                 },
-                                icon: const Icon(Icons.done_all, size: 18),
+                                icon: Icon(
+                                  Icons.done_all,
+                                  size: 18,
+                                  color: isLight ? Colors.black : const Color(0xffededed),
+                                ),
                                 label: const Text('Mark all read'),
                                 style: TextButton.styleFrom(
-                                  foregroundColor: const Color(0xffededed),
+                                  foregroundColor: isLight ? Colors.black : const Color(0xffededed),
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 10,
                                     vertical: 10,
@@ -369,22 +426,22 @@ class _HomePageState extends State<HomePage> {
                           ],
                         ),
                         const SizedBox(height: 4),
-                        const Text(
+                        Text(
                           'Activity',
                           style: TextStyle(
-                            color: Color(0xffb7b7b7),
+                            color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7),
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
                         const SizedBox(height: 12),
                         if (items.isEmpty)
-                          const Padding(
+                          Padding(
                             padding: EdgeInsets.symmetric(vertical: 32),
                             child: Center(
                               child: Text(
                                 'No notifications yet.',
-                                style: TextStyle(color: Color(0xffb7b7b7)),
+                                style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7)),
                               ),
                             ),
                           )
@@ -447,11 +504,12 @@ class _HomePageState extends State<HomePage> {
 
   void _openComments(FeedPost post) {
     final controller = TextEditingController();
+    final isLight = widget.themeMode == ThemeMode.light;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      backgroundColor: const Color(0xff141414),
+      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
       builder: (_) {
         return SafeArea(
           child: Padding(
@@ -464,21 +522,21 @@ class _HomePageState extends State<HomePage> {
               height: MediaQuery.sizeOf(context).height * 0.7,
               child: Column(
                 children: [
-                  const Text(
+                  Text(
                     'Comments',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
-                      color: Colors.white,
+                      color: isLight ? Colors.black : Colors.white,
                     ),
                   ),
                   const SizedBox(height: 12),
                   Expanded(
                     child: post.comments.isEmpty
-                        ? const Center(
+                        ? Center(
                             child: Text(
                               'No comments yet.',
-                              style: TextStyle(color: Color(0xffb7b7b7)),
+                              style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7)),
                             ),
                           )
                         : ListView.separated(
@@ -487,35 +545,36 @@ class _HomePageState extends State<HomePage> {
                                 const SizedBox(height: 10),
                             itemBuilder: (context, index) {
                               final comment = post.comments[index];
-                              final sep = comment.indexOf(': ');
-                              final author = sep > 0
-                                  ? comment.substring(0, sep)
-                                  : 'user';
-                              final text = sep > 0
-                                  ? comment.substring(sep + 2)
-                                  : comment;
                               return Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  _Avatar(name: author, radius: 15),
+                                  _PostAvatar(
+                                    username: comment.author,
+                                    avatarUrl: comment.avatarUrl,
+                                  ),
                                   const SizedBox(width: 10),
                                   Expanded(
-                                    child: RichText(
-                                      text: TextSpan(
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 14,
-                                        ),
-                                        children: [
-                                          TextSpan(
-                                            text: '$author ',
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                            ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          comment.author,
+                                          style: TextStyle(
+                                            color: isLight ? Colors.black : Colors.white,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
                                           ),
-                                          TextSpan(text: text),
-                                        ],
-                                      ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          comment.text,
+                                          style: TextStyle(
+                                            color: isLight ? Colors.black : Colors.white,
+                                            fontSize: 14,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
@@ -528,30 +587,40 @@ class _HomePageState extends State<HomePage> {
                       Expanded(
                         child: TextField(
                           controller: controller,
-                          style: const TextStyle(color: Colors.white),
-                          cursorColor: Colors.white,
+                          style: TextStyle(
+                            color: isLight ? Colors.black : Colors.white,
+                          ),
+                          cursorColor: isLight ? Colors.black : Colors.white,
                           decoration: InputDecoration(
                             hintText: 'Add a comment...',
-                            hintStyle: const TextStyle(
-                              color: Color(0xff9a9a9a),
+                            hintStyle: TextStyle(
+                              color: isLight ? const Color(0xff616161) : const Color(0xff9a9a9a),
                             ),
                             filled: true,
-                            fillColor: const Color(0xff1e1e1e),
+                            fillColor: isLight
+                                ? const Color(0xffeef1f5)
+                                : const Color(0xff1e1e1e),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(
-                                color: Color(0xff2a2a2a),
+                              borderSide: BorderSide(
+                                color: isLight
+                                    ? const Color(0xffd9dee6)
+                                    : const Color(0xff2a2a2a),
                               ),
                             ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(
-                                color: Color(0xff2a2a2a),
+                              borderSide: BorderSide(
+                                color: isLight
+                                    ? const Color(0xffd9dee6)
+                                    : const Color(0xff2a2a2a),
                               ),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(color: Colors.white),
+                              borderSide: BorderSide(
+                                color: isLight ? Colors.black : Colors.white,
+                              ),
                             ),
                           ),
                         ),
@@ -579,11 +648,13 @@ class _HomePageState extends State<HomePage> {
 
   void _openCreatePost() {
     _compose.clear();
+    _composeImageUrl = '';
+    final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       showDragHandle: false,
-      backgroundColor: const Color(0xff141414),
+      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff111111),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -596,103 +667,187 @@ class _HomePageState extends State<HomePage> {
               top: 8,
               bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xffb7b7b7),
-                        padding: EdgeInsets.zero,
-                      ),
-                      child: const Text('Cancel'),
-                    ),
-                    const Spacer(),
-                    const Text(
-                      'New post',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const Spacer(),
-                    FilledButton(
-                      onPressed: _createPost,
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 12,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                      child: const Text('Post'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
+            child: StatefulBuilder(
+              builder: (context, setSheetState) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: const Color(0xff2a2a2a),
-                      child: Text(
-                        initialFor(widget.session.user.username),
-                        style: const TextStyle(color: Colors.white),
-                      ),
+                    Row(
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xffa0a0a0),
+                            padding: EdgeInsets.zero,
+                          ),
+                          child: const Text('Cancel'),
+                        ),
+                        const Spacer(),
+                        Text(
+                          'New post',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: isLight ? Colors.black : Colors.white,
+                          ),
+                        ),
+                        const Spacer(),
+                        ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _compose,
+                          builder: (context, value, _) {
+                            final canPost = value.text.trim().isNotEmpty;
+                            return FilledButton(
+                              onPressed: canPost ? _createPost : null,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: isLight ? Colors.black : Colors.white,
+                                foregroundColor: isLight ? Colors.white : Colors.black,
+                                disabledBackgroundColor:
+                                    isLight ? const Color(0xffd9dee6) : const Color(0xff2f2f2f),
+                                disabledForegroundColor:
+                                    isLight ? const Color(0xff8a8a8a) : const Color(0xff8a8a8a),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                              child: const Text('Post'),
+                            );
+                          },
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        controller: _compose,
-                        minLines: 6,
-                        maxLines: 10,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          height: 1.35,
+                    const SizedBox(height: 16),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+                          child: Text(
+                            initialFor(widget.session.user.username),
+                            style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                          ),
                         ),
-                        cursorColor: Colors.white,
-                        decoration: const InputDecoration(
-                          hintText: 'What’s happening?',
-                          hintStyle: TextStyle(color: Color(0xff8f8f8f)),
-                          border: InputBorder.none,
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _compose,
+                            minLines: 5,
+                            maxLines: 10,
+                            style: TextStyle(
+                              color: isLight ? Colors.black : Colors.white,
+                              fontSize: 17,
+                              height: 1.4,
+                            ),
+                            cursorColor: isLight ? Colors.black : Colors.white,
+                            decoration: InputDecoration(
+                              hintText: 'What’s happening?',
+                              hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
+                              border: InputBorder.none,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_composeImageUrl.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: Stack(
+                          children: [
+                            AspectRatio(
+                              aspectRatio: 1.15,
+                              child: _mediaPreview(
+                                _composeImageUrl,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            Positioned(
+                              top: 10,
+                              right: 10,
+                              child: GestureDetector(
+                                onTap: _clearComposeImage,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: isLight ? Colors.black.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.65),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  padding: const EdgeInsets.all(8),
+                                  child: Icon(
+                                    Icons.close_rounded,
+                                    size: 18,
+                                    color: isLight ? Colors.black : Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
+                    ],
+                    const SizedBox(height: 12),
+                    Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _ComposeAction(
+                          icon: Icons.image_outlined,
+                          onTap: () async {
+                            await _pickComposeImage();
+                            setSheetState(() {});
+                          },
+                        ),
+                        _ComposeAction(
+                          icon: Icons.gif_box_outlined,
+                          onTap: () {},
+                        ),
+                        _ComposeAction(
+                          icon: Icons.poll_outlined,
+                          onTap: () {},
+                        ),
+                        const Spacer(),
+                        ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _compose,
+                          builder: (context, value, _) {
+                            final count = value.text.length;
+                            return AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: count > 240
+                                    ? const Color(0xff301818)
+                                    : (isLight ? const Color(0xffeef1f5) : const Color(0xff1a1a1a)),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: count > 240
+                                      ? const Color(0xff7a2f2f)
+                                      : (isLight ? const Color(0xffd9dee6) : const Color(0xff2c2c2c)),
+                                ),
+                              ),
+                              child: Text(
+                                '$count/280',
+                                style: TextStyle(
+                                  color: count > 240
+                                      ? const Color(0xffff9a9a)
+                                      : (isLight ? const Color(0xff616161) : const Color(0xff9a9a9a)),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ],
-                ),
-                const SizedBox(height: 12),
-                const Divider(height: 1, color: Color(0xff262626)),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: () {},
-                      icon: const Icon(Icons.image_outlined),
-                    ),
-                    IconButton(
-                      onPressed: () {},
-                      icon: const Icon(Icons.gif_box_outlined),
-                    ),
-                    IconButton(
-                      onPressed: () {},
-                      icon: const Icon(Icons.poll_outlined),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${_compose.text.length}/280',
-                      style: const TextStyle(color: Color(0xff8f8f8f)),
-                    ),
-                  ],
-                ),
-              ],
+                );
+              },
             ),
           ),
         );
@@ -704,7 +859,7 @@ class _HomePageState extends State<HomePage> {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
-      backgroundColor: const Color(0xff141414),
+      backgroundColor: Theme.of(context).brightness == Brightness.light ? Colors.white : const Color(0xff141414),
       isScrollControlled: true,
       builder: (_) {
         return SafeArea(
@@ -716,10 +871,10 @@ class _HomePageState extends State<HomePage> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
-                    color: Colors.white,
+                    color: Theme.of(context).brightness == Brightness.light ? Colors.black : Colors.white,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -744,8 +899,10 @@ class _HomePageState extends State<HomePage> {
             : _posts.where((post) => _followingAuthors.contains(post.author)).toList())
         : _posts;
 
+    final bodyTheme = widget.themeMode == ThemeMode.light;
+
     return Scaffold(
-      backgroundColor: const Color(0xff121212),
+      backgroundColor: bodyTheme ? const Color(0xfff3f4f6) : const Color(0xff121212),
       body: SafeArea(
         child: Column(
           children: [
@@ -753,6 +910,8 @@ class _HomePageState extends State<HomePage> {
               notifications: _notificationsList
                   .where((item) => !item.isRead)
                   .length,
+              userAvatarUrl: widget.session.user.avatarUrl,
+              themeMode: widget.themeMode,
               onProfileTap: () => _openProfile(widget.session.user.username),
               onNotificationsTap: _openNotifications,
               onMessagesTap: () => Navigator.of(context).push(
@@ -768,7 +927,20 @@ class _HomePageState extends State<HomePage> {
             ),
             const Divider(height: 1, color: Color(0xff232323)),
             Expanded(
-              child: _nav == 0
+              child: _showInlineProfile
+                  ? ProfilePage(
+                      username: _inlineProfileUsername,
+                      currentUser: widget.session.user,
+                      token: widget.session.token,
+                      posts: _posts,
+                      onOpenUserProfile: _openProfile,
+                      onLogout: widget.onLogout,
+                      onSessionUpdated: widget.onSessionChanged,
+                      onPostTap: _openComments,
+                      themeMode: widget.themeMode,
+                      onThemeModeChanged: widget.onThemeModeChanged,
+                    )
+                  : _nav == 0
                   ? RefreshIndicator(
                       onRefresh: _load,
                       child: CustomScrollView(
@@ -905,10 +1077,15 @@ class _HomePageState extends State<HomePage> {
             type: BottomNavigationBarType.fixed,
             showSelectedLabels: false,
             showUnselectedLabels: false,
-            selectedItemColor: Colors.white,
-            unselectedItemColor: const Color(0xff8c8c8c),
+            selectedItemColor:
+                widget.themeMode == ThemeMode.light ? Colors.black : Colors.white,
+            unselectedItemColor: widget.themeMode == ThemeMode.light
+                ? const Color(0xff6d6d6d)
+                : const Color(0xff8c8c8c),
             elevation: 0,
-            backgroundColor: const Color(0xff151515),
+            backgroundColor: widget.themeMode == ThemeMode.light
+                ? Colors.white
+                : const Color(0xff151515),
             iconSize: 26,
             selectedFontSize: 0,
             unselectedFontSize: 0,
@@ -960,11 +1137,15 @@ class _HomePageState extends State<HomePage> {
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.notifications,
+    required this.userAvatarUrl,
+    required this.themeMode,
     required this.onProfileTap,
     required this.onNotificationsTap,
     required this.onMessagesTap,
   });
   final int notifications;
+  final String userAvatarUrl;
+  final ThemeMode themeMode;
   final VoidCallback onProfileTap;
   final VoidCallback onNotificationsTap;
   final VoidCallback onMessagesTap;
@@ -976,15 +1157,11 @@ class _TopBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14),
         child: Row(
           children: [
-            const _LogoMark(),
+            _LogoMark(themeMode: themeMode),
             const Spacer(),
             _TopBarPill(
               onTap: onProfileTap,
-              child: const Icon(
-                Icons.person_outline_rounded,
-                color: Colors.white,
-                size: 22,
-              ),
+              child: _TopBarAvatar(url: userAvatarUrl),
             ),
             const SizedBox(width: 8),
             Stack(
@@ -992,9 +1169,9 @@ class _TopBar extends StatelessWidget {
               children: [
                 _TopBarPill(
                   onTap: onNotificationsTap,
-                  child: const Icon(
+                  child: Icon(
                     Icons.notifications_none_rounded,
-                    color: Colors.white,
+                    color: themeMode == ThemeMode.light ? Colors.black : Colors.white,
                     size: 22,
                   ),
                 ),
@@ -1016,8 +1193,8 @@ class _TopBar extends StatelessWidget {
                       alignment: Alignment.center,
                       child: Text(
                         notifications > 9 ? '9+' : '$notifications',
-                        style: const TextStyle(
-                          color: Colors.black,
+                        style: TextStyle(
+                          color: themeMode == ThemeMode.light ? Colors.white : Colors.black,
                           fontSize: 8.5,
                           fontWeight: FontWeight.w800,
                         ),
@@ -1029,9 +1206,9 @@ class _TopBar extends StatelessWidget {
             const SizedBox(width: 8),
             _TopBarPill(
               onTap: onMessagesTap,
-              child: const Icon(
+              child: Icon(
                 Icons.send_outlined,
-                color: Colors.white,
+                color: themeMode == ThemeMode.light ? Colors.black : Colors.white,
                 size: 21,
               ),
             ),
@@ -1052,8 +1229,9 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return Container(
-      color: const Color(0xff121212),
+      color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
       child: Row(
         children: [
@@ -1066,7 +1244,7 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
                   Text(
                     'For you',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: isLight ? Colors.black : Colors.white,
                       fontSize: 17,
                       fontWeight: selectedTab == 0 ? FontWeight.w800 : FontWeight.w500,
                     ),
@@ -1076,7 +1254,7 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
                     duration: const Duration(milliseconds: 180),
                     height: 2,
                     width: selectedTab == 0 ? 72 : 0,
-                    color: Colors.white,
+                    color: isLight ? Colors.black : Colors.white,
                   ),
                 ],
               ),
@@ -1091,7 +1269,7 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
                   Text(
                     'Following',
                     style: TextStyle(
-                      color: Colors.white70,
+                      color: isLight ? const Color(0xff616161) : Colors.white70,
                       fontSize: 17,
                       fontWeight: selectedTab == 1 ? FontWeight.w800 : FontWeight.w500,
                     ),
@@ -1101,7 +1279,7 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
                     duration: const Duration(milliseconds: 180),
                     height: 2,
                     width: selectedTab == 1 ? 84 : 0,
-                    color: Colors.white,
+                    color: isLight ? Colors.black : Colors.white,
                   ),
                 ],
               ),
@@ -1140,13 +1318,14 @@ class _FeedPostCard extends StatelessWidget {
   final VoidCallback onProfileTap;
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xff131313),
+          color: isLight ? Colors.white : const Color(0xff131313),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xff242424)),
+          border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1155,30 +1334,30 @@ class _FeedPostCard extends StatelessWidget {
               contentPadding: const EdgeInsets.fromLTRB(14, 4, 10, 0),
               leading: InkWell(
                 onTap: onProfileTap,
-                child: CircleAvatar(
-                  backgroundColor: const Color(0xff2a2a2a),
-                  child: Text(initialFor(post.author)),
+                child: _PostAvatar(
+                  username: post.author,
+                  avatarUrl: post.avatarUrl,
                 ),
               ),
               title: InkWell(
                 onTap: onProfileTap,
                 child: Text(
                   post.author,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w700,
-                    color: Colors.white,
+                    color: isLight ? Colors.black : Colors.white,
                   ),
                 ),
               ),
               subtitle: Text(
                 '${post.minutesAgo}m',
-                style: const TextStyle(color: Color(0xffb3b3b3)),
+                style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3)),
               ),
               trailing: IconButton(
                 onPressed: onMore,
-                icon: const Icon(
+                icon: Icon(
                   Icons.more_horiz_rounded,
-                  color: Colors.white,
+                  color: isLight ? Colors.black : Colors.white,
                   size: 22,
                 ),
               ),
@@ -1187,13 +1366,24 @@ class _FeedPostCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
                 post.text,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15.5,
                   height: 1.45,
-                  color: Colors.white,
+                  color: isLight ? Colors.black : Colors.white,
                 ),
               ),
             ),
+            if (post.imageUrl.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: AspectRatio(
+                    aspectRatio: 1.08,
+                    child: _FeedMedia(url: post.imageUrl),
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
               child: Row(
@@ -1204,32 +1394,32 @@ class _FeedPostCard extends StatelessWidget {
                       post.liked
                           ? Icons.favorite_rounded
                           : Icons.favorite_border_rounded,
-                      color: post.liked ? Colors.red : Colors.white,
+                      color: post.liked ? Colors.red : (isLight ? Colors.black : Colors.white),
                       size: 24,
                     ),
                   ),
                   IconButton(
                     onPressed: onComment,
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.mode_comment_outlined,
-                      color: Colors.white,
+                      color: isLight ? Colors.black : Colors.white,
                       size: 23,
                     ),
                   ),
                   IconButton(
                     onPressed: onShare,
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.send_outlined,
-                      color: Colors.white,
+                      color: isLight ? Colors.black : Colors.white,
                       size: 22,
                     ),
                   ),
                   const Spacer(),
                   IconButton(
                     onPressed: onSave,
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.bookmark_border_rounded,
-                      color: Colors.white,
+                      color: isLight ? Colors.black : Colors.white,
                       size: 24,
                     ),
                   ),
@@ -1242,9 +1432,9 @@ class _FeedPostCard extends StatelessWidget {
                 children: [
                   Text(
                     '${post.likes} likes',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w700,
-                      color: Colors.white,
+                      color: isLight ? Colors.black : Colors.white,
                     ),
                   ),
                   const Spacer(),
@@ -1271,7 +1461,9 @@ class _FeedPostCard extends StatelessWidget {
 }
 
 class _LogoMark extends StatelessWidget {
-  const _LogoMark();
+  const _LogoMark({required this.themeMode});
+
+  final ThemeMode themeMode;
 
   @override
   Widget build(BuildContext context) {
@@ -1281,7 +1473,29 @@ class _LogoMark extends StatelessWidget {
         'assets/neat_logo.png',
         height: 52,
         fit: BoxFit.contain,
+        color: themeMode == ThemeMode.light ? Colors.black : Colors.white,
+        colorBlendMode: BlendMode.srcIn,
       ),
+    );
+  }
+}
+
+class _TopBarAvatar extends StatelessWidget {
+  const _TopBarAvatar({required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _decodeDataUrl(url);
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return CircleAvatar(
+      radius: 11,
+      backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+      foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+      child: bytes == null
+          ? Icon(Icons.person_outline_rounded, color: isLight ? Colors.black : Colors.white, size: 18)
+          : null,
     );
   }
 }
@@ -1297,11 +1511,14 @@ class _TopBarPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return Material(
-      color: const Color(0xff171718),
+      color: isLight ? Colors.white : const Color(0xff171718),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: Color(0xff262626)),
+        side: BorderSide(
+          color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626),
+        ),
       ),
       child: InkWell(
         onTap: onTap,
@@ -1513,6 +1730,7 @@ class _SearchViewState extends State<_SearchView> {
   }
 
   Widget _buildUserTile(UserProfile user) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: InkWell(
@@ -1520,18 +1738,14 @@ class _SearchViewState extends State<_SearchView> {
         onTap: () => _openProfileAndRemember(user),
         child: Container(
           decoration: BoxDecoration(
-            color: const Color(0xff171718),
+            color: isLight ? Colors.white : const Color(0xff171718),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0xff262626)),
+            border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626)),
           ),
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: const Color(0xff2a2a2a),
-                child: Text(initialFor(user.username)),
-              ),
+              _PostAvatar(username: user.username, avatarUrl: user.avatarUrl),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -1539,23 +1753,23 @@ class _SearchViewState extends State<_SearchView> {
                   children: [
                     Text(
                       user.fullName.isNotEmpty ? user.fullName : user.username,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       '@${user.username} · ${user.city}',
-                      style: const TextStyle(
-                        color: Color(0xff9c9c9c),
+                      style: TextStyle(
+                        color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c),
                         fontSize: 12.5,
                       ),
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.white),
+              Icon(Icons.chevron_right_rounded, color: isLight ? Colors.black : Colors.white),
             ],
           ),
         ),
@@ -1580,6 +1794,7 @@ class _SearchViewState extends State<_SearchView> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return ListView(
       padding: const EdgeInsets.all(14),
       children: [
@@ -1587,25 +1802,25 @@ class _SearchViewState extends State<_SearchView> {
           controller: _controller,
           onChanged: _onChanged,
           onSubmitted: (_) => _onSearchSubmitted(),
-          style: const TextStyle(color: Colors.white),
-          cursorColor: Colors.white,
+          style: TextStyle(color: isLight ? Colors.black : Colors.white),
+          cursorColor: isLight ? Colors.black : Colors.white,
           decoration: InputDecoration(
-            prefixIcon: const Icon(Icons.search, color: Color(0xffa6a6a6)),
+            prefixIcon: Icon(Icons.search, color: isLight ? const Color(0xff8b95a3) : const Color(0xffa6a6a6)),
             hintText: 'Search people',
-            hintStyle: const TextStyle(color: Color(0xff8f8f8f)),
+            hintStyle: TextStyle(color: isLight ? const Color(0xff8b95a3) : const Color(0xff8f8f8f)),
             filled: true,
-            fillColor: const Color(0xff1a1a1b),
+            fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: const BorderSide(color: Color(0xff2a2a2a)),
+              borderSide: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: const BorderSide(color: Color(0xff2a2a2a)),
+              borderSide: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: const BorderSide(color: Colors.white),
+              borderSide: BorderSide(color: isLight ? Colors.black : Colors.white),
             ),
           ),
         ),
@@ -1641,11 +1856,11 @@ class _SearchViewState extends State<_SearchView> {
             if (_recentQueries.isNotEmpty) ...[
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Recent searches',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: isLight ? Colors.black : Colors.white,
                         fontWeight: FontWeight.w800,
                         fontSize: 16,
                       ),
@@ -1672,11 +1887,11 @@ class _SearchViewState extends State<_SearchView> {
                           _load(query);
                           setState(() {});
                         },
-                        backgroundColor: const Color(0xff1a1a1b),
-                        side: const BorderSide(color: Color(0xff2a2a2a)),
+                        backgroundColor: isLight ? Colors.white : const Color(0xff1a1a1b),
+                        side: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
                         label: Text(
                           query,
-                          style: const TextStyle(color: Colors.white),
+                          style: TextStyle(color: isLight ? Colors.black : Colors.white),
                         ),
                         deleteIcon: const Icon(
                           Icons.close,
@@ -1696,10 +1911,10 @@ class _SearchViewState extends State<_SearchView> {
               const SizedBox(height: 16),
             ],
             if (_suggestedUsers.isNotEmpty) ...[
-              const Text(
+              Text(
                 'Suggested for you',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: isLight ? Colors.black : Colors.white,
                   fontWeight: FontWeight.w800,
                   fontSize: 16,
                 ),
@@ -1710,10 +1925,10 @@ class _SearchViewState extends State<_SearchView> {
             ],
             if (_section == 0) ...[
               if (_currentFeaturedPosts.isNotEmpty) ...[
-                const Text(
+                Text(
                   'Featured',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: isLight ? Colors.black : Colors.white,
                     fontWeight: FontWeight.w800,
                     fontSize: 16,
                   ),
@@ -1727,10 +1942,10 @@ class _SearchViewState extends State<_SearchView> {
               ],
               if (_topUsers.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Top results',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: isLight ? Colors.black : Colors.white,
                     fontWeight: FontWeight.w800,
                     fontSize: 16,
                   ),
@@ -1741,10 +1956,10 @@ class _SearchViewState extends State<_SearchView> {
             ],
             if (_section == 2 && _cityPosts.isNotEmpty) ...[
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'Popular posts',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: isLight ? Colors.black : Colors.white,
                   fontWeight: FontWeight.w800,
                   fontSize: 16,
                 ),
@@ -1755,31 +1970,31 @@ class _SearchViewState extends State<_SearchView> {
           ],
         ],
         if (_loading)
-          const Padding(
-            padding: EdgeInsets.only(top: 30),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else
-          if (_section == 2)
-            if (_searchPosts(_controller.text.trim()).isEmpty)
-              const Padding(
+              Padding(
+                padding: EdgeInsets.only(top: 30),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else
+              if (_section == 2)
+                if (_searchPosts(_controller.text.trim()).isEmpty)
+              Padding(
                 padding: EdgeInsets.only(top: 36),
                 child: Center(
                   child: Text(
                     'No posts found in your city.',
-                    style: TextStyle(color: Color(0xffb3b3b3)),
+                    style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3)),
                   ),
                 ),
               )
             else
               ..._searchPosts(_controller.text.trim()).map(_buildPostTile)
           else if (_users.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 36),
               child: Center(
                 child: Text(
                   'No people found in your city.',
-                  style: TextStyle(color: Color(0xffb3b3b3)),
+                  style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3)),
                 ),
               ),
             )
@@ -1816,6 +2031,7 @@ class _SearchViewState extends State<_SearchView> {
   }
 
   Widget _buildPostTile(FeedPost post) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: InkWell(
@@ -1823,9 +2039,9 @@ class _SearchViewState extends State<_SearchView> {
         onTap: () => widget.onOpenUserProfile(post.author),
         child: Container(
           decoration: BoxDecoration(
-            color: const Color(0xff171718),
+            color: isLight ? Colors.white : const Color(0xff171718),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0xff262626)),
+            border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626)),
           ),
           padding: const EdgeInsets.all(14),
           child: Row(
@@ -1833,7 +2049,7 @@ class _SearchViewState extends State<_SearchView> {
             children: [
               CircleAvatar(
                 radius: 22,
-                backgroundColor: const Color(0xff2a2a2a),
+                backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
                 child: Text(initialFor(post.author)),
               ),
               const SizedBox(width: 12),
@@ -1846,16 +2062,16 @@ class _SearchViewState extends State<_SearchView> {
                         Expanded(
                           child: Text(
                             post.author,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: isLight ? Colors.black : Colors.white,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
                         Text(
                           '${post.likes} likes',
-                          style: const TextStyle(
-                            color: Color(0xff9c9c9c),
+                          style: TextStyle(
+                            color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c),
                             fontSize: 12,
                           ),
                         ),
@@ -1866,16 +2082,16 @@ class _SearchViewState extends State<_SearchView> {
                       post.text,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
                         height: 1.35,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       '@${post.city}',
-                      style: const TextStyle(
-                        color: Color(0xff9c9c9c),
+                      style: TextStyle(
+                        color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c),
                         fontSize: 12,
                       ),
                     ),
@@ -1950,18 +2166,85 @@ class _ShareChip extends StatelessWidget {
   }
 }
 
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.name, required this.radius});
-  final String name;
-  final double radius;
+class _FeedMedia extends StatelessWidget {
+  const _FeedMedia({required this.url});
+
+  final String url;
+
   @override
   Widget build(BuildContext context) {
+    if (url.startsWith('data:')) {
+      final comma = url.indexOf(',');
+      if (comma > -1) {
+        try {
+          return Image.memory(
+            base64Decode(url.substring(comma + 1)),
+            fit: BoxFit.cover,
+          );
+        } catch (_) {}
+      }
+    }
+    return Image.network(url, fit: BoxFit.cover);
+  }
+}
+
+class _PostAvatar extends StatelessWidget {
+  const _PostAvatar({
+    required this.username,
+    required this.avatarUrl,
+  });
+
+  final String username;
+  final String avatarUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _decodeDataUrl(avatarUrl);
     return CircleAvatar(
-      radius: radius,
       backgroundColor: const Color(0xff2a2a2a),
-      child: Text(
-        initialFor(name),
-        style: const TextStyle(color: Colors.white),
+      foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+      child: bytes == null
+          ? Text(
+              initialFor(username),
+              style: const TextStyle(color: Colors.white),
+            )
+          : null,
+    );
+  }
+}
+
+Uint8List? _decodeDataUrl(String value) {
+  if (!value.startsWith('data:')) return null;
+  final comma = value.indexOf(',');
+  if (comma < 0) return null;
+  try {
+    return base64Decode(value.substring(comma + 1));
+  } catch (_) {
+    return null;
+  }
+}
+
+class _ComposeAction extends StatelessWidget {
+  const _ComposeAction({required this.icon, required this.onTap});
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Material(
+        color: isLight ? Colors.white : const Color(0xff171717),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.all(11),
+            child: Icon(icon, color: isLight ? Colors.black : Colors.white, size: 19),
+          ),
+        ),
       ),
     );
   }

@@ -1,10 +1,52 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/api.dart';
 import '../core/models.dart';
+
+Uint8List? _dataUrlBytes(String value) {
+  if (!value.startsWith('data:')) return null;
+  final comma = value.indexOf(',');
+  if (comma < 0) return null;
+  try {
+    return base64Decode(value.substring(comma + 1));
+  } catch (_) {
+    return null;
+  }
+}
+
+Widget _avatar({
+  required String username,
+  required String avatarUrl,
+  required bool isLight,
+  double radius = 22,
+}) {
+  final bytes = _dataUrlBytes(avatarUrl);
+  return CircleAvatar(
+    radius: radius,
+    backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+    foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+    child: bytes == null
+        ? Text(initialFor(username))
+        : null,
+  );
+}
+
+String _avatarUrlFor(
+  List<UserProfile> users,
+  String username,
+  String fallback,
+) {
+  for (final user in users) {
+    if (user.username == username && user.avatarUrl.isNotEmpty) {
+      return user.avatarUrl;
+    }
+  }
+  return fallback;
+}
 
 class MessagesPage extends StatefulWidget {
   const MessagesPage({
@@ -128,6 +170,7 @@ class _MessagesPageState extends State<MessagesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     final filtered = _search.text.trim().isEmpty
         ? _conversations
         : _conversations
@@ -139,13 +182,16 @@ class _MessagesPageState extends State<MessagesPage> {
             .toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xff0f0f10),
+      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff0f0f10),
       appBar: AppBar(
-        backgroundColor: const Color(0xff0f0f10),
+        backgroundColor: isLight ? Colors.white : const Color(0xff0f0f10),
         titleSpacing: 16,
-        title: const Text(
+        title: Text(
           'Messages',
-          style: TextStyle(fontWeight: FontWeight.w800),
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: isLight ? Colors.black : Colors.white,
+          ),
         ),
         actions: [
           IconButton(
@@ -163,26 +209,28 @@ class _MessagesPageState extends State<MessagesPage> {
             TextField(
               controller: _search,
               onChanged: (_) => setState(() {}),
-              style: const TextStyle(color: Colors.white),
-              cursorColor: Colors.white,
+              style: TextStyle(color: isLight ? Colors.black : Colors.white),
+              cursorColor: isLight ? Colors.black : Colors.white,
               decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.search, color: Color(0xffa6a6a6)),
+                prefixIcon: Icon(Icons.search, color: isLight ? const Color(0xff8b95a3) : const Color(0xffa6a6a6)),
                 hintText: 'Search',
-                hintStyle: const TextStyle(color: Color(0xffa6a6a6)),
+                hintStyle: TextStyle(color: isLight ? const Color(0xff8b95a3) : const Color(0xffa6a6a6)),
                 filled: true,
-                fillColor: const Color(0xff1a1a1b),
+                fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
-                  borderSide: BorderSide.none,
+                  borderSide: BorderSide(
+                    color: isLight ? const Color(0xffd9dee6) : Colors.transparent,
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 18),
             if (widget.suggestedUsers.isNotEmpty && _search.text.trim().isEmpty) ...[
-              const Text(
+              Text(
                 'Suggested',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: isLight ? Colors.black : Colors.white,
                   fontWeight: FontWeight.w800,
                   fontSize: 16,
                 ),
@@ -213,23 +261,23 @@ class _MessagesPageState extends State<MessagesPage> {
             else if (filtered.isEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 38),
-                child: Column(
-                  children: [
+                    child: Column(
+                      children: [
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: const Color(0xff171718),
+                        color: isLight ? Colors.white : const Color(0xff171718),
                         borderRadius: BorderRadius.circular(22),
-                        border: Border.all(color: const Color(0xff262626)),
+                        border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626)),
                       ),
-                      child: const Column(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             'No conversations yet',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: isLight ? Colors.black : Colors.white,
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
                             ),
@@ -237,7 +285,7 @@ class _MessagesPageState extends State<MessagesPage> {
                           SizedBox(height: 6),
                           Text(
                             'Start a chat with someone you follow.',
-                            style: TextStyle(color: Color(0xff9c9c9c)),
+                            style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c)),
                           ),
                         ],
                       ),
@@ -254,17 +302,22 @@ class _MessagesPageState extends State<MessagesPage> {
                     onTap: () => _openConversation(item),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xff171718),
+                        color: isLight ? Colors.white : const Color(0xff171718),
                         borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: const Color(0xff232324)),
+                        border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff232324)),
                       ),
                       padding: const EdgeInsets.all(14),
                       child: Row(
                         children: [
-                          CircleAvatar(
+                          _avatar(
+                            username: item.otherUser,
+                            avatarUrl: _avatarUrlFor(
+                              widget.suggestedUsers,
+                              item.otherUser,
+                              '',
+                            ),
+                            isLight: isLight,
                             radius: 22,
-                            backgroundColor: const Color(0xff2a2a2a),
-                            child: Text(initialFor(item.otherUser)),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -359,6 +412,7 @@ class _StartChatSheetState extends State<_StartChatSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -430,38 +484,40 @@ class _StartChatSheetState extends State<_StartChatSheet> {
                             ),
                       itemBuilder: (context, index) {
                         if (index == 0) {
-                          return const Padding(
+                          return Padding(
                             padding: EdgeInsets.only(bottom: 8),
                             child: Text(
                               'People you follow',
                               style: TextStyle(
-                                color: Colors.white,
+                                color: isLight ? Colors.black : Colors.white,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                           );
                         }
-                        final user = widget.suggestedUsers[index - 1];
-                        return ListTile(
+                final user = widget.suggestedUsers[index - 1];
+                return ListTile(
                           contentPadding: EdgeInsets.zero,
-                          leading: CircleAvatar(
-                            backgroundColor: const Color(0xff2a2a2a),
-                            child: Text(initialFor(user.username)),
+                          leading: _avatar(
+                            username: user.username,
+                            avatarUrl: user.avatarUrl,
+                            isLight: isLight,
+                            radius: 18,
                           ),
                           title: Text(
                             user.fullName.isNotEmpty
                                 ? user.fullName
                                 : user.username,
-                            style: const TextStyle(color: Colors.white),
+                            style: TextStyle(color: isLight ? Colors.black : Colors.white),
                           ),
                           subtitle: Text(
                             '@${user.username}',
-                            style: const TextStyle(color: Color(0xffa6a6a6)),
+                            style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffa6a6a6)),
                           ),
-                          trailing: const Icon(
+                          trailing: Icon(
                             Icons.arrow_forward_ios,
                             size: 14,
-                            color: Color(0xffa6a6a6),
+                            color: isLight ? const Color(0xff616161) : const Color(0xffa6a6a6),
                           ),
                           onTap: () => Navigator.of(context).pop(user.username),
                         );
@@ -473,14 +529,19 @@ class _StartChatSheetState extends State<_StartChatSheet> {
               width: double.infinity,
               child: FilledButton(
                 onPressed: _submit,
-                child: const Text('Start chat'),
+                child: Text(
+                  'Start chat',
+                  style: TextStyle(
+                    color: isLight ? Colors.white : Colors.black,
+                  ),
+                ),
               ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 10),
               Text(
                 _error!,
-                style: const TextStyle(color: Color(0xfff66c6c)),
+                style: TextStyle(color: isLight ? const Color(0xffc94b4b) : const Color(0xfff66c6c)),
               ),
             ],
           ],
@@ -508,16 +569,16 @@ class _SuggestedChatChip extends StatelessWidget {
         width: 86,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xff171718),
+          color: Theme.of(context).brightness == Brightness.light ? Colors.white : const Color(0xff171718),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xff262626)),
+          border: Border.all(color: Theme.of(context).brightness == Brightness.light ? const Color(0xffd9dee6) : const Color(0xff262626)),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: const Color(0xff2a2a2a),
+              backgroundColor: Theme.of(context).brightness == Brightness.light ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
               child: Text(initialFor(user.username)),
             ),
             const SizedBox(height: 8),
@@ -525,8 +586,8 @@ class _SuggestedChatChip extends StatelessWidget {
               user.username,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.light ? Colors.black : Colors.white,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
@@ -626,16 +687,18 @@ class _ConversationPageState extends State<ConversationPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return Scaffold(
-      backgroundColor: const Color(0xff121212),
+      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
       appBar: AppBar(
-        backgroundColor: const Color(0xff121212),
+        backgroundColor: isLight ? Colors.white : const Color(0xff121212),
         title: Row(
           children: [
-            CircleAvatar(
+            _avatar(
+              username: widget.otherUsername,
+              avatarUrl: '',
+              isLight: isLight,
               radius: 16,
-              backgroundColor: const Color(0xff2a2a2a),
-              child: Text(initialFor(widget.otherUsername)),
             ),
             const SizedBox(width: 10),
             Column(
@@ -645,16 +708,17 @@ class _ConversationPageState extends State<ConversationPage> {
                   widget.otherFullName.isNotEmpty
                       ? widget.otherFullName
                       : widget.otherUsername,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
+                    color: isLight ? Colors.black : Colors.white,
                   ),
                 ),
                 Text(
                   '@${widget.otherUsername}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Color(0xff9c9c9c),
+                    color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c),
                   ),
                 ),
               ],
@@ -687,16 +751,16 @@ class _ConversationPageState extends State<ConversationPage> {
                           ),
                           decoration: BoxDecoration(
                             color: mine
-                                ? const Color(0xff2b2b2b)
-                                : const Color(0xff1a1a1a),
+                                ? (isLight ? const Color(0xffe5e7eb) : const Color(0xff2b2b2b))
+                                : (isLight ? Colors.white : const Color(0xff1a1a1a)),
                             borderRadius: BorderRadius.circular(18),
                             border: Border.all(
-                              color: const Color(0xff2a2a2a),
+                              color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
                             ),
                           ),
                           child: Text(
                             message.text,
-                            style: const TextStyle(color: Colors.white),
+                            style: TextStyle(color: isLight ? Colors.black : Colors.white),
                           ),
                         ),
                       );
@@ -712,16 +776,18 @@ class _ConversationPageState extends State<ConversationPage> {
                   Expanded(
                     child: TextField(
                       controller: _composer,
-                      style: const TextStyle(color: Colors.white),
-                      cursorColor: Colors.white,
+                      style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                      cursorColor: isLight ? Colors.black : Colors.white,
                       decoration: InputDecoration(
                         hintText: 'Message...',
-                        hintStyle: const TextStyle(color: Color(0xff9c9c9c)),
+                        hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c)),
                         filled: true,
-                        fillColor: const Color(0xff1b1b1b),
+                        fillColor: isLight ? Colors.white : const Color(0xff1b1b1b),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(22),
-                          borderSide: BorderSide.none,
+                          borderSide: BorderSide(
+                            color: isLight ? const Color(0xffd9dee6) : Colors.transparent,
+                          ),
                         ),
                       ),
                     ),
@@ -729,12 +795,12 @@ class _ConversationPageState extends State<ConversationPage> {
                   const SizedBox(width: 10),
                   CircleAvatar(
                     radius: 22,
-                    backgroundColor: Colors.white,
+                    backgroundColor: isLight ? Colors.black : Colors.white,
                     child: IconButton(
                       onPressed: _send,
                       icon: const Icon(
                         Icons.send,
-                        color: Colors.black,
+                        color: Colors.white,
                         size: 18,
                       ),
                     ),

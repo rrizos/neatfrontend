@@ -19,6 +19,7 @@ class UserProfile {
     required this.fullName,
     required this.bio,
     required this.city,
+    required this.avatarUrl,
     required this.followers,
     required this.following,
     required this.isFollowing,
@@ -29,6 +30,7 @@ class UserProfile {
   final String fullName;
   final String bio;
   final String city;
+  final String avatarUrl;
   final int followers;
   final int following;
   final bool isFollowing;
@@ -41,6 +43,7 @@ class UserProfile {
       fullName: json['fullName']?.toString() ?? '',
       bio: json['bio']?.toString() ?? '',
       city: json['city']?.toString() ?? '',
+      avatarUrl: json['avatarUrl']?.toString() ?? '',
       followers: parseInt(json['followers']),
       following: parseInt(json['following']),
       isFollowing: json['isFollowing'] == true,
@@ -52,8 +55,10 @@ class FeedPost {
   FeedPost({
     required this.id,
     required this.author,
+    required this.avatarUrl,
     required this.city,
     required this.text,
+    required this.imageUrl,
     required this.likes,
     required this.comments,
     required this.minutesAgo,
@@ -62,29 +67,29 @@ class FeedPost {
 
   final int id;
   final String author;
+  final String avatarUrl;
   final String city;
   final String text;
+  final String imageUrl;
   int likes;
-  final List<String> comments;
+  final List<FeedComment> comments;
   final int minutesAgo;
   final bool following;
   bool liked = false;
 
   factory FeedPost.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
-    final comments = (json['comments'] as List<dynamic>? ?? const []).map((e) {
-      if (e is Map<String, dynamic>) {
-        final author = e['author']?.toString() ?? 'user';
-        final text = e['text']?.toString() ?? '';
-        return '$author: $text';
-      }
-      return e.toString();
-    }).toList();
+    final comments = (json['comments'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(FeedComment.fromJson)
+        .toList();
     final post = FeedPost(
       id: parseInt(json['id']),
       author: json['author']?.toString() ?? 'Anonymous',
+      avatarUrl: json['avatarUrl']?.toString() ?? '',
       city: json['city']?.toString() ?? '',
       text: json['text']?.toString() ?? '',
+      imageUrl: json['imageUrl']?.toString() ?? '',
       likes: parseInt(json['likes']),
       comments: comments,
       minutesAgo: parseInt(json['minutesAgo']),
@@ -92,6 +97,26 @@ class FeedPost {
     );
     post.liked = json['liked'] == true;
     return post;
+  }
+}
+
+class FeedComment {
+  const FeedComment({
+    required this.author,
+    required this.text,
+    required this.avatarUrl,
+  });
+
+  final String author;
+  final String text;
+  final String avatarUrl;
+
+  factory FeedComment.fromJson(Map<String, dynamic> json) {
+    return FeedComment(
+      author: json['author']?.toString() ?? 'user',
+      text: json['text']?.toString() ?? '',
+      avatarUrl: json['avatarUrl']?.toString() ?? '',
+    );
   }
 }
 

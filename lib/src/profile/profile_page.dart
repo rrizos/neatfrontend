@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
 import '../core/models.dart';
@@ -18,6 +20,8 @@ class ProfilePage extends StatefulWidget {
     required this.onPostTap,
     required this.onLogout,
     required this.onSessionUpdated,
+    required this.themeMode,
+    required this.onThemeModeChanged,
   });
   final String username;
   final UserProfile currentUser;
@@ -27,6 +31,8 @@ class ProfilePage extends StatefulWidget {
   final ValueChanged<FeedPost> onPostTap;
   final Future<void> Function() onLogout;
   final ValueChanged<AuthSession> onSessionUpdated;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -35,6 +41,7 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   UserProfile? _profile;
   bool _loading = true;
+  final ImagePicker _imagePicker = ImagePicker();
 
   @override
   void initState() {
@@ -135,10 +142,42 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _openEditProfile() async {
+    final profile = _profile;
+    if (profile == null) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: false,
+      backgroundColor: widget.themeMode == ThemeMode.light
+          ? const Color(0xfff3f4f6)
+          : const Color(0xff111111),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => _EditProfileSheet(
+        token: widget.token,
+        profile: profile,
+        imagePicker: _imagePicker,
+        onSaved: (updated) {
+          if (!mounted) return;
+          setState(() => _profile = updated);
+          widget.onSessionUpdated(
+            AuthSession(token: widget.token, user: updated),
+          );
+        },
+        themeMode: widget.themeMode,
+        onThemeModeChanged: widget.onThemeModeChanged,
+      ),
+    );
+  }
+
   Future<void> _openUserList({
     required String title,
     required Uri endpoint,
   }) async {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     final res = await http.get(endpoint, headers: authGetHeaders(widget.token));
     if (res.statusCode != 200) return;
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -150,7 +189,7 @@ class _ProfilePageState extends State<ProfilePage> {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: const Color(0xff121212),
+      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
       builder: (context) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -161,19 +200,19 @@ class _ProfilePageState extends State<ProfilePage> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
-                      color: Colors.white,
+                      color: isLight ? Colors.black : Colors.white,
                     ),
                   ),
                   const SizedBox(height: 12),
                   if (users.isEmpty)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.all(16),
                       child: Text(
                         'No users yet.',
-                        style: TextStyle(color: Color(0xffb7b7b7)),
+                        style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7)),
                       ),
                     )
                   else
@@ -181,8 +220,8 @@ class _ProfilePageState extends State<ProfilePage> {
                       child: ListView.separated(
                         shrinkWrap: true,
                         itemCount: users.length,
-                        separatorBuilder: (_, _) =>
-                            const Divider(height: 1, color: Color(0xff262626)),
+                            separatorBuilder: (_, _) =>
+                            Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626)),
                         itemBuilder: (context, index) {
                           final user = users[index];
                           final canToggle =
@@ -190,21 +229,21 @@ class _ProfilePageState extends State<ProfilePage> {
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: CircleAvatar(
-                              backgroundColor: const Color(0xff2a2a2a),
+                              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
                               child: Text(
                                 initialFor(user.username),
-                                style: const TextStyle(color: Colors.white),
+                                style: TextStyle(color: isLight ? Colors.black : Colors.white),
                               ),
                             ),
                             title: Text(
                               user.username,
-                              style: const TextStyle(color: Colors.white),
+                              style: TextStyle(color: isLight ? Colors.black : Colors.white),
                             ),
                             subtitle: Text(
                               user.isFollowing
                                   ? 'Following you'
                                   : 'Not following yet',
-                              style: const TextStyle(color: Color(0xffb7b7b7)),
+                              style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7)),
                             ),
                             trailing: canToggle
                                 ? TextButton(
@@ -267,6 +306,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     final profile = _profile;
     if (_loading || profile == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -275,24 +315,33 @@ class _ProfilePageState extends State<ProfilePage> {
         .where((p) => p.author == profile.username)
         .toList();
     return Scaffold(
-      backgroundColor: const Color(0xff121212),
+      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
       appBar: AppBar(
-        backgroundColor: const Color(0xff121212),
+        backgroundColor: isLight ? Colors.white : const Color(0xff121212),
         titleSpacing: 12,
         title: Row(
           children: [
             CircleAvatar(
               radius: 14,
-              backgroundColor: const Color(0xff2a2a2a),
-              child: Text(
-                initialFor(profile.username),
-                style: const TextStyle(fontSize: 12),
-              ),
+              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+              foregroundImage:
+                  _dataUrlBytes(profile.avatarUrl) != null
+                      ? MemoryImage(_dataUrlBytes(profile.avatarUrl)!)
+                      : null,
+              child: _dataUrlBytes(profile.avatarUrl) == null
+                  ? Text(
+                      initialFor(profile.username),
+                      style: const TextStyle(fontSize: 12),
+                    )
+                  : null,
             ),
             const SizedBox(width: 10),
             Text(
               profile.username,
-              style: const TextStyle(fontWeight: FontWeight.w800),
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: isLight ? Colors.black : Colors.white,
+              ),
             ),
           ],
         ),
@@ -300,7 +349,6 @@ class _ProfilePageState extends State<ProfilePage> {
           IconButton(
             onPressed: () async {
               await widget.onLogout();
-              if (context.mounted) Navigator.of(context).pop();
             },
             icon: const Icon(Icons.logout),
           ),
@@ -314,11 +362,16 @@ class _ProfilePageState extends State<ProfilePage> {
               children: [
                 CircleAvatar(
                   radius: 40,
-                  backgroundColor: const Color(0xff2a2a2a),
-                  child: Text(
-                    initialFor(profile.username),
-                    style: const TextStyle(color: Colors.white),
-                  ),
+                  backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+                  foregroundImage: _dataUrlBytes(profile.avatarUrl) != null
+                      ? MemoryImage(_dataUrlBytes(profile.avatarUrl)!)
+                      : null,
+                  child: _dataUrlBytes(profile.avatarUrl) == null
+                      ? Text(
+                          initialFor(profile.username),
+                          style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                        )
+                      : null,
                 ),
                 const SizedBox(width: 24),
                 Expanded(
@@ -354,24 +407,26 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                 Text(
                   profile.fullName.isEmpty
                       ? profile.username
                       : profile.fullName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
-                    color: Colors.white,
+                    color: isLight ? Colors.black : Colors.white,
                   ),
                 ),
                 if (profile.bio.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
                     profile.bio,
-                    style: const TextStyle(color: Color(0xffb3b3b3)),
+                    style: TextStyle(
+                      color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
+                    ),
                   ),
                 ],
               ],
@@ -381,7 +436,7 @@ class _ProfilePageState extends State<ProfilePage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: profile.username == widget.currentUser.username
                 ? OutlinedButton(
-                    onPressed: () {},
+                    onPressed: _openEditProfile,
                     child: const Text('Edit profile'),
                   )
                 : Row(
@@ -412,7 +467,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     ],
                   ),
           ),
-          const Divider(height: 1, color: Color(0xff242424)),
+          Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
           if (userPosts.isEmpty)
             const Padding(
               padding: EdgeInsets.all(32),
@@ -429,25 +484,40 @@ class _ProfilePageState extends State<ProfilePage> {
               physics: const NeverScrollableScrollPhysics(),
               itemCount: userPosts.length,
               separatorBuilder: (_, _) =>
-                  const Divider(height: 1, color: Color(0xff242424)),
+                  Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
               itemBuilder: (context, index) {
                 final post = userPosts[index];
                 return InkWell(
                   onTap: () => widget.onPostTap(post),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                         Row(
                           children: [
                             CircleAvatar(
                               radius: 18,
                               backgroundColor: const Color(0xff2a2a2a),
-                              child: Text(
-                                initialFor(post.author),
-                                style: const TextStyle(color: Colors.white),
-                              ),
+                              foregroundImage:
+                                  post.author == profile.username &&
+                                          _dataUrlBytes(profile.avatarUrl) !=
+                                              null
+                                      ? MemoryImage(
+                                          _dataUrlBytes(profile.avatarUrl)!,
+                                        )
+                                      : null,
+                              child:
+                                  post.author == profile.username &&
+                                          _dataUrlBytes(profile.avatarUrl) !=
+                                              null
+                                      ? null
+                                      : Text(
+                                          initialFor(post.author),
+                                          style: TextStyle(
+                                            color: isLight ? Colors.black : Colors.white,
+                                          ),
+                                        ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -456,8 +526,8 @@ class _ProfilePageState extends State<ProfilePage> {
                                 children: [
                                   Text(
                                     post.author,
-                                    style: const TextStyle(
-                                      color: Colors.white,
+                                    style: TextStyle(
+                                      color: isLight ? Colors.black : Colors.white,
                                       fontWeight: FontWeight.w700,
                                       fontSize: 15,
                                     ),
@@ -501,37 +571,90 @@ class _ProfilePageState extends State<ProfilePage> {
                           const SizedBox(height: 12),
                           Text(
                             post.text,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 15.5,
-                              height: 1.4,
+                              style: TextStyle(
+                                color: isLight ? Colors.black : Colors.white,
+                                fontSize: 15.5,
+                                height: 1.4,
+                              ),
+                          ),
+                        ],
+                        if (post.comments.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          ...post.comments.take(2).map(
+                                (comment) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _CommentAvatar(
+                                        username: comment.author,
+                                        avatarUrl: comment.avatarUrl,
+                                        radius: 13,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              comment.author,
+                                              style: TextStyle(
+                                                color: isLight ? Colors.black : Colors.white,
+                                                fontSize: 13.5,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              comment.text,
+                                              style: TextStyle(
+                                                color: isLight ? const Color(0xff444444) : Colors.white,
+                                                fontSize: 13.5,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                        ],
+                        if (post.imageUrl.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(18),
+                            child: AspectRatio(
+                              aspectRatio: 1.08,
+                              child: _AvatarPreview(url: post.imageUrl),
                             ),
                           ),
                         ],
                         const SizedBox(height: 12),
                         Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.favorite_border,
-                              color: Colors.white,
+                              color: isLight ? Colors.black : Colors.white,
                               size: 20,
                             ),
                             const SizedBox(width: 18),
-                            const Icon(
+                            Icon(
                               Icons.mode_comment_outlined,
-                              color: Colors.white,
+                              color: isLight ? Colors.black : Colors.white,
                               size: 20,
                             ),
                             const SizedBox(width: 18),
-                            const Icon(
+                            Icon(
                               Icons.send_outlined,
-                              color: Colors.white,
+                              color: isLight ? Colors.black : Colors.white,
                               size: 20,
                             ),
                             const Spacer(),
-                            const Icon(
+                            Icon(
                               Icons.bookmark_border,
-                              color: Colors.white,
+                              color: isLight ? Colors.black : Colors.white,
                               size: 20,
                             ),
                           ],
@@ -539,8 +662,8 @@ class _ProfilePageState extends State<ProfilePage> {
                         const SizedBox(height: 8),
                         Text(
                           '${post.likes} likes',
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: isLight ? Colors.black : Colors.white,
                             fontWeight: FontWeight.w700,
                             fontSize: 13.5,
                           ),
@@ -554,6 +677,51 @@ class _ProfilePageState extends State<ProfilePage> {
         ],
       ),
     );
+  }
+}
+
+class _CommentAvatar extends StatelessWidget {
+  const _CommentAvatar({
+    required this.username,
+    required this.avatarUrl,
+    required this.radius,
+  });
+
+  final String username;
+  final String avatarUrl;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _dataUrlBytes(avatarUrl);
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: Theme.of(context).brightness == Brightness.light
+          ? const Color(0xffe6e9ef)
+          : const Color(0xff2a2a2a),
+      foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+      child: bytes == null
+          ? Text(
+              initialFor(username),
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.light
+                    ? Colors.black
+                    : Colors.white,
+              ),
+            )
+          : null,
+    );
+  }
+}
+
+Uint8List? _dataUrlBytes(String value) {
+  if (!value.startsWith('data:')) return null;
+  final comma = value.indexOf(',');
+  if (comma < 0) return null;
+  try {
+    return base64Decode(value.substring(comma + 1));
+  } catch (_) {
+    return null;
   }
 }
 
@@ -572,15 +740,330 @@ class _Metric extends StatelessWidget {
       children: [
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.w800,
             fontSize: 16,
-            color: Colors.white,
+            color: Theme.of(context).brightness == Brightness.light
+                ? Colors.black
+                : Colors.white,
           ),
         ),
-        Text(label, style: const TextStyle(color: Color(0xffb3b3b3))),
+        Text(
+          label,
+          style: TextStyle(
+            color: Theme.of(context).brightness == Brightness.light
+                ? const Color(0xff616161)
+                : const Color(0xffb3b3b3),
+          ),
+        ),
       ],
     );
     return onTap == null ? child : InkWell(onTap: onTap, child: child);
+  }
+}
+
+class _EditorField extends StatelessWidget {
+  const _EditorField({
+    required this.controller,
+    required this.label,
+    this.maxLines = 1,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      maxLines: maxLines,
+      style: TextStyle(
+        color: Theme.of(context).brightness == Brightness.light
+            ? Colors.black
+            : Colors.white,
+      ),
+      cursorColor: Theme.of(context).brightness == Brightness.light
+          ? Colors.black
+          : Colors.white,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(
+          color: Theme.of(context).brightness == Brightness.light
+              ? const Color(0xff6b7280)
+              : const Color(0xff9c9c9c),
+        ),
+        filled: true,
+        fillColor: Theme.of(context).brightness == Brightness.light
+            ? Colors.white
+            : const Color(0xff171717),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide(
+            color: Theme.of(context).brightness == Brightness.light
+                ? const Color(0xffd9dee6)
+                : const Color(0xff2a2a2a),
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide(
+            color: Theme.of(context).brightness == Brightness.light
+                ? Colors.black
+                : Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AvatarPreview extends StatelessWidget {
+  const _AvatarPreview({required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    if (url.startsWith('data:')) {
+      final comma = url.indexOf(',');
+      if (comma > -1) {
+        try {
+          return Image.memory(
+            base64Decode(url.substring(comma + 1)),
+            fit: BoxFit.cover,
+          );
+        } catch (_) {}
+      }
+    }
+    return Image.network(url, fit: BoxFit.cover);
+  }
+}
+
+class _EditProfileSheet extends StatefulWidget {
+  const _EditProfileSheet({
+    required this.token,
+    required this.profile,
+    required this.imagePicker,
+    required this.onSaved,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+  });
+
+  final String token;
+  final UserProfile profile;
+  final ImagePicker imagePicker;
+  final ValueChanged<UserProfile> onSaved;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
+
+  @override
+  State<_EditProfileSheet> createState() => _EditProfileSheetState();
+}
+
+class _EditProfileSheetState extends State<_EditProfileSheet> {
+  late final TextEditingController _usernameController;
+  late final TextEditingController _nameController;
+  late final TextEditingController _bioController;
+  late final TextEditingController _cityController;
+  String _avatarUrl = '';
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _usernameController = TextEditingController(text: widget.profile.username);
+    _nameController = TextEditingController(text: widget.profile.fullName);
+    _bioController = TextEditingController(text: widget.profile.bio);
+    _cityController = TextEditingController(text: widget.profile.city);
+    _avatarUrl = widget.profile.avatarUrl;
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _nameController.dispose();
+    _bioController.dispose();
+    _cityController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickAvatar() async {
+    final picked = await widget.imagePicker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 88,
+      maxWidth: 1400,
+    );
+    if (picked == null || !mounted) return;
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    final mime = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+    setState(() {
+      _avatarUrl = 'data:image/$mime;base64,${base64Encode(bytes)}';
+    });
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      final res = await http.patch(
+        meEndpoint,
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({
+          'username': _usernameController.text.trim(),
+          'fullName': _nameController.text.trim(),
+          'bio': _bioController.text.trim(),
+          'city': _cityController.text.trim(),
+          'avatarUrl': _avatarUrl,
+        }),
+      );
+      if (!mounted) return;
+      if (res.statusCode != 200) {
+        setState(() => _saving = false);
+        return;
+      }
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final updated = UserProfile.fromJson(
+        decoded['user'] as Map<String, dynamic>,
+      );
+      widget.onSaved(updated);
+      if (mounted) Navigator.of(context).pop();
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final avatarBytes = _dataUrlBytes(_avatarUrl);
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 8,
+          bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                TextButton(
+                  onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const Spacer(),
+                Text(
+                  'Edit profile',
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.light
+                        ? Colors.black
+                        : Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: _saving ? null : _save,
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 44,
+                    backgroundColor: Theme.of(context).brightness == Brightness.light
+                        ? const Color(0xffe6e9ef)
+                        : const Color(0xff2a2a2a),
+                    foregroundImage:
+                        avatarBytes != null ? MemoryImage(avatarBytes) : null,
+                    child: avatarBytes == null
+                        ? Text(
+                            initialFor(widget.profile.username),
+                            style: TextStyle(
+                              color: Theme.of(context).brightness == Brightness.light
+                                  ? Colors.black
+                                  : Colors.white,
+                            ),
+                          )
+                        : null,
+                  ),
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: GestureDetector(
+                      onTap: _saving ? null : _pickAvatar,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.photo_camera_outlined,
+                          color: Colors.black,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            _EditorField(
+              controller: _usernameController,
+              label: 'Username',
+            ),
+            const SizedBox(height: 12),
+            _EditorField(
+              controller: _nameController,
+              label: 'Name',
+            ),
+            const SizedBox(height: 12),
+            _EditorField(
+              controller: _cityController,
+              label: 'City',
+            ),
+            const SizedBox(height: 12),
+            _EditorField(
+              controller: _bioController,
+              label: 'Bio',
+              maxLines: 4,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Text(
+                  'Light mode',
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.light
+                        ? Colors.black
+                        : Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Switch(
+                  value: widget.themeMode == ThemeMode.light,
+                  onChanged: (value) {
+                    widget.onThemeModeChanged(
+                      value ? ThemeMode.light : ThemeMode.dark,
+                    );
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

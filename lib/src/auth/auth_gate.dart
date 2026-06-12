@@ -10,7 +10,14 @@ import '../home/home_page.dart';
 import 'auth_screen.dart';
 
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
+  const AuthGate({
+    super.key,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+  });
+
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -75,16 +82,28 @@ class _AuthGateState extends State<AuthGate> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      final isLight = widget.themeMode == ThemeMode.light;
+      return MaterialApp(
+        themeMode: widget.themeMode,
+        home: Scaffold(
+          backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+          body: const Center(child: CircularProgressIndicator()),
+        ),
+      );
     }
     final session = _session;
     if (session == null) {
-      return AuthScreen(onAuthenticated: _save);
+      return AuthScreen(
+        onAuthenticated: _save,
+        themeMode: widget.themeMode,
+      );
     }
     return HomePage(
       session: session,
       onSessionChanged: (next) => setState(() => _session = next),
       onLogout: _logout,
+      themeMode: widget.themeMode,
+      onThemeModeChanged: widget.onThemeModeChanged,
     );
   }
 }

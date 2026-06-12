@@ -1,7 +1,7 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/api.dart';
@@ -29,6 +29,7 @@ class _EventsPageState extends State<EventsPage> {
   int _tab = 0;
   bool _loading = true;
   List<EventItem> _events = [];
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
@@ -63,11 +64,15 @@ class _EventsPageState extends State<EventsPage> {
   }
 
   Future<void> _createEvent() async {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xff0f0f10),
-      builder: (_) => const _CreateEventSheet(),
+      backgroundColor: isLight ? Colors.white : const Color(0xff111111),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => _CreateEventSheet(picker: _picker),
     );
     if (result == null) return;
     final res = await http.post(
@@ -102,10 +107,11 @@ class _EventsPageState extends State<EventsPage> {
   Future<void> _openComments(EventItem event) async {
     final comments = await _loadComments(event.id);
     if (!mounted) return;
+    final isLight = Theme.of(context).brightness == Brightness.light;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xff0f0f10),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0f0f10),
       builder: (_) => _EventCommentsSheet(
         event: event,
         token: widget.token,
@@ -141,6 +147,7 @@ class _EventsPageState extends State<EventsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     final visible = switch (_tab) {
       1 => _official,
       2 => _community,
@@ -148,24 +155,42 @@ class _EventsPageState extends State<EventsPage> {
     };
 
     return Scaffold(
-      backgroundColor: const Color(0xff0f0f10),
+      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff0f0f10),
       appBar: AppBar(
-        backgroundColor: const Color(0xff0f0f10),
-        title: const Text(
-          'Events',
-          style: TextStyle(fontWeight: FontWeight.w800),
+        backgroundColor: isLight ? Colors.white : const Color(0xff0f0f10),
+        title: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: isLight ? Colors.white : const Color(0xff171717),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626)),
+              ),
+              child: Icon(Icons.event_outlined, color: isLight ? Colors.black : Colors.white, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Events',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: isLight ? Colors.black : Colors.white,
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(
             onPressed: _createEvent,
-            icon: const Icon(Icons.add_circle_outline_rounded),
+            icon: const Icon(Icons.add_rounded),
           ),
         ],
       ),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
             child: Row(
               children: [
                 _TabPill(
@@ -188,7 +213,7 @@ class _EventsPageState extends State<EventsPage> {
               ],
             ),
           ),
-          const Divider(height: 1, color: Color(0x1fffffff)),
+          Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0x1fffffff)),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -196,16 +221,23 @@ class _EventsPageState extends State<EventsPage> {
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
                     children: [
                       if (_tab == 0 && _popular.isNotEmpty) ...[
-                        const Text(
-                          'POPULAR TODAY 🔥',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                          ),
+                        Row(
+                          children: [
+                            Text(
+                              'POPULAR TODAY',
+                              style: TextStyle(
+                                color: isLight ? Colors.black : Colors.white,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Text('🔥', style: TextStyle(fontSize: 16)),
+                          ],
                         ),
                         const SizedBox(height: 10),
                         SizedBox(
-                          height: 290,
+                          height: 300,
                           child: PageView.builder(
                             controller: PageController(viewportFraction: 0.92),
                             itemCount: _popular.length > 3 ? 3 : _popular.length,
@@ -227,12 +259,12 @@ class _EventsPageState extends State<EventsPage> {
                         const SizedBox(height: 14),
                       ],
                       if (visible.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 44),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 44),
                           child: Center(
                             child: Text(
                               'No events yet.',
-                              style: TextStyle(color: Color(0xff9c9c9c)),
+                              style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c)),
                             ),
                           ),
                         )
@@ -349,17 +381,18 @@ class _EventCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     final official = event.eventType == 'official';
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xff171718),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xff262626)),
-        boxShadow: const [
+        color: isLight ? Colors.white : const Color(0xff151516),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626)),
+        boxShadow: [
           BoxShadow(
-            color: Colors.black54,
+            color: isLight ? const Color(0x14000000) : Colors.black54,
             blurRadius: 18,
-            offset: Offset(0, 8),
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -367,46 +400,49 @@ class _EventCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (official && event.imageUrl.isNotEmpty)
-            Stack(
-              children: [
-                Image.network(
-                  event.imageUrl,
-                  height: 170,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.8),
-                          Colors.transparent,
-                        ],
+          if (event.imageUrl.isNotEmpty)
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+              child: Stack(
+                children: [
+                  SizedBox(
+                    height: official ? 170 : 120,
+                    width: double.infinity,
+                    child: _EventMedia(url: event.imageUrl),
+                  ),
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.58),
+                            Colors.transparent,
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Positioned(
-                  left: 14,
-                  right: 14,
-                  bottom: 14,
-                  child: Text(
-                    event.title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
+                  if (official)
+                    Positioned(
+                      left: 14,
+                      right: 14,
+                      bottom: 14,
+                      child: Text(
+                        event.title,
+                          style: TextStyle(
+                          color: isLight ? Colors.black : Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -415,8 +451,8 @@ class _EventCard extends StatelessWidget {
                     event.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: isLight ? Colors.black : Colors.white,
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
                     ),
@@ -440,8 +476,8 @@ class _EventCard extends StatelessWidget {
                   const SizedBox(height: 10),
                   Text(
                     event.description.isEmpty ? event.title : event.description,
-                    style: const TextStyle(
-                      color: Colors.white,
+                      style: TextStyle(
+                      color: isLight ? Colors.black : Colors.white,
                       height: 1.4,
                       fontSize: 15,
                     ),
@@ -469,8 +505,8 @@ class _EventCard extends StatelessWidget {
                               event.organizer.isEmpty
                                   ? 'Community'
                                   : event.organizer,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: isLight ? Colors.black : Colors.white,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -496,12 +532,12 @@ class _EventCard extends StatelessWidget {
                     ),
                   ),
                 ],
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Text(
                       '${event.attendees} people attending',
-                      style: const TextStyle(color: Color(0xffb3b3b3)),
+                      style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3)),
                     ),
                     const Spacer(),
                     if (event.creator == currentUsername)
@@ -532,27 +568,48 @@ class _EventCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Row(
                   children: [
                     if (official && event.hasTickets)
-                      TextButton(
-                        onPressed: event.ticketsUrl.isEmpty
-                            ? null
-                            : () async {
-                                final uri = Uri.tryParse(event.ticketsUrl);
-                                if (uri == null) return;
-                                await launchUrl(
-                                  uri,
-                                  mode: LaunchMode.externalApplication,
-                                );
-                              },
-                        child: const Text('Buy Tickets'),
+                      Expanded(
+                        child: TextButton(
+                          onPressed: event.ticketsUrl.isEmpty
+                              ? null
+                              : () async {
+                                  final uri = Uri.tryParse(event.ticketsUrl);
+                                  if (uri == null) return;
+                                  await launchUrl(
+                                    uri,
+                                    mode: LaunchMode.externalApplication,
+                                  );
+                                },
+                          style: TextButton.styleFrom(
+                          backgroundColor: isLight ? const Color(0xffeef1f5) : const Color(0xff1d1d1d),
+                          foregroundColor: isLight ? Colors.black : Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              side: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                            ),
+                          ),
+                          child: const Text('Buy Tickets'),
+                        ),
                       ),
-                    if (official && event.hasTickets) const SizedBox(width: 8),
-                    OutlinedButton(
-                      onPressed: onAttend,
-                      child: const Text('Attend'),
+                    if (official && event.hasTickets) const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: onAttend,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: isLight ? Colors.black : Colors.white,
+                          foregroundColor: isLight ? Colors.white : Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text('Attend'),
+                      ),
                     ),
                   ],
                 ),
@@ -578,6 +635,7 @@ class _TabPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return Expanded(
       child: InkWell(
         onTap: onTap,
@@ -586,7 +644,7 @@ class _TabPill extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                color: Colors.white,
+                color: isLight ? Colors.black : Colors.white,
                 fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
               ),
             ),
@@ -595,7 +653,7 @@ class _TabPill extends StatelessWidget {
               duration: const Duration(milliseconds: 180),
               height: 2,
               width: selected ? 44 : 0,
-              color: Colors.white,
+              color: isLight ? Colors.black : Colors.white,
             ),
           ],
         ),
@@ -605,7 +663,9 @@ class _TabPill extends StatelessWidget {
 }
 
 class _CreateEventSheet extends StatefulWidget {
-  const _CreateEventSheet();
+  const _CreateEventSheet({required this.picker});
+
+  final ImagePicker picker;
 
   @override
   State<_CreateEventSheet> createState() => _CreateEventSheetState();
@@ -616,6 +676,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   final _desc = TextEditingController();
   bool _official = false;
   bool _tickets = false;
+  String _imageUrl = '';
 
   @override
   void dispose() {
@@ -624,8 +685,23 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     super.dispose();
   }
 
+  Future<void> _pickImage() async {
+    final picked = await widget.picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 88,
+      maxWidth: 1600,
+    );
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    final mime = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+    setState(() {
+      _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
@@ -636,58 +712,94 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Create event',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const Spacer(),
+                Text(
+                  'Create event',
+                  style: TextStyle(
+                    color: isLight ? Colors.black : Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () {
+                    if (_title.text.trim().isEmpty) return;
+                    Navigator.of(context).pop({
+                      'title': _title.text.trim(),
+                      'description': _desc.text.trim(),
+                      'eventType': _official ? 'official' : 'community',
+                      'hasTickets': _tickets,
+                      if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
+                    });
+                  },
+                  child: const Text('Publish'),
+                ),
+              ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             TextField(
               controller: _title,
-              style: const TextStyle(color: Colors.white),
-              decoration: _dec('Title'),
+              style: TextStyle(color: isLight ? Colors.black : Colors.white),
+              decoration: _dec('Title', isLight),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _desc,
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: isLight ? Colors.black : Colors.white),
               maxLines: 4,
-              decoration: _dec('Description'),
+              decoration: _dec('Description', isLight),
             ),
             const SizedBox(height: 10),
-            SwitchListTile(
-              value: _official,
-              onChanged: (v) => setState(() => _official = v),
-              title: const Text(
-                'Official event',
-                style: TextStyle(color: Colors.white),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: _CompactToggle(
+                    label: 'Official event',
+                    value: _official,
+                    onChanged: (v) => setState(() => _official = v),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _CompactToggle(
+                    label: 'Has tickets',
+                    value: _tickets,
+                    onChanged: (v) => setState(() => _tickets = v),
+                  ),
+                ),
+              ],
             ),
-            SwitchListTile(
-              value: _tickets,
-              onChanged: (v) => setState(() => _tickets = v),
-              title: const Text(
-                'Has tickets',
-                style: TextStyle(color: Colors.white),
+            const SizedBox(height: 12),
+            if (_imageUrl.isNotEmpty)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: AspectRatio(
+                  aspectRatio: 1.25,
+                  child: _EventMedia(url: _imageUrl),
+                ),
               ),
-            ),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () {
-                  Navigator.of(context).pop({
-                    'title': _title.text.trim(),
-                    'description': _desc.text.trim(),
-                    'eventType': _official ? 'official' : 'community',
-                    'hasTickets': _tickets,
-                  });
-                },
-                child: const Text('Publish'),
-              ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _ComposerAction(
+                  icon: Icons.image_outlined,
+                  onTap: _pickImage,
+                ),
+                const Spacer(),
+                Text(
+                  'Photos make events feel real',
+                  style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f), fontSize: 12),
+                ),
+              ],
             ),
           ],
         ),
@@ -695,16 +807,115 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     );
   }
 
-  InputDecoration _dec(String hint) => InputDecoration(
+  InputDecoration _dec(String hint, bool isLight) => InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(color: Color(0xff8f8f8f)),
+        hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
         filled: true,
-        fillColor: const Color(0xff1a1a1b),
+        fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
+          borderSide: BorderSide(
+            color: isLight ? const Color(0xffd9dee6) : Colors.transparent,
+          ),
         ),
       );
+}
+
+class _CompactToggle extends StatelessWidget {
+  const _CompactToggle({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => onChanged(!value),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: value ? Colors.white : const Color(0xff1a1a1b),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: value ? Colors.white : const Color(0xff2a2a2a),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              value ? Icons.check_circle : Icons.circle_outlined,
+              size: 16,
+              color: value ? Colors.black : Colors.white,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: value ? Colors.black : Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerAction extends StatelessWidget {
+  const _ComposerAction({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xff171717),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(11),
+          child: Icon(icon, color: Colors.white, size: 19),
+        ),
+      ),
+    );
+  }
+}
+
+class _EventMedia extends StatelessWidget {
+  const _EventMedia({required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    if (url.startsWith('data:')) {
+      final comma = url.indexOf(',');
+      if (comma > -1) {
+        try {
+          return Image.memory(
+            base64Decode(url.substring(comma + 1)),
+            fit: BoxFit.cover,
+          );
+        } catch (_) {}
+      }
+    }
+    return Image.network(url, fit: BoxFit.cover);
+  }
 }
 
 class _EventCommentsSheet extends StatefulWidget {
@@ -762,6 +973,7 @@ class _EventCommentsSheetState extends State<_EventCommentsSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
@@ -775,11 +987,11 @@ class _EventCommentsSheetState extends State<_EventCommentsSheet> {
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Comments',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: isLight ? Colors.black : Colors.white,
                       fontWeight: FontWeight.w800,
                       fontSize: 18,
                     ),
@@ -787,18 +999,18 @@ class _EventCommentsSheetState extends State<_EventCommentsSheet> {
                 ),
                 IconButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close, color: Colors.white),
+                  icon: Icon(Icons.close, color: isLight ? Colors.black : Colors.white),
                 ),
               ],
             ),
             const Divider(height: 1, color: Color(0x1fffffff)),
             const SizedBox(height: 12),
             if (_comments.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 30),
                 child: Text(
                   'No comments yet.',
-                  style: TextStyle(color: Color(0xff9c9c9c)),
+                  style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c)),
                 ),
               )
             else
@@ -807,25 +1019,25 @@ class _EventCommentsSheetState extends State<_EventCommentsSheet> {
                   shrinkWrap: true,
                   itemCount: _comments.length,
                   separatorBuilder: (_, _) =>
-                      const Divider(height: 1, color: Color(0xff232323)),
+                      Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff232323)),
                   itemBuilder: (_, index) {
                     final comment = _comments[index];
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: CircleAvatar(
-                        backgroundColor: const Color(0xff2a2a2a),
+                        backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
                         child: Text(initialFor(comment.author)),
                       ),
                       title: Text(
                         comment.author,
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: isLight ? Colors.black : Colors.white,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                       subtitle: Text(
                         comment.text,
-                        style: const TextStyle(color: Color(0xffb3b3b3)),
+                        style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3)),
                       ),
                     );
                   },
@@ -837,16 +1049,18 @@ class _EventCommentsSheetState extends State<_EventCommentsSheet> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    style: const TextStyle(color: Colors.white),
-                    cursorColor: Colors.white,
+                      style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                      cursorColor: isLight ? Colors.black : Colors.white,
                     decoration: InputDecoration(
                       hintText: 'Add a comment...',
-                      hintStyle: const TextStyle(color: Color(0xff8f8f8f)),
+                      hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
                       filled: true,
-                      fillColor: const Color(0xff1a1a1b),
+                      fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(18),
-                        borderSide: BorderSide.none,
+                        borderSide: BorderSide(
+                          color: isLight ? const Color(0xffd9dee6) : Colors.transparent,
+                        ),
                       ),
                     ),
                   ),
