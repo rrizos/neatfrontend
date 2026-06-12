@@ -21,6 +21,7 @@ Uri postsEndpoint({bool fresh = false, String? city}) {
 Uri postLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/like/');
 Uri postCommentsEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/posts/$id/comments/');
+Uri postDeleteEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/delete/');
 Uri get signupEndpoint => Uri.parse('$apiBaseUrl/api/auth/signup/');
 Uri get loginEndpoint => Uri.parse('$apiBaseUrl/api/auth/login/');
 Uri get logoutEndpoint => Uri.parse('$apiBaseUrl/api/auth/logout/');
@@ -43,6 +44,18 @@ Uri searchUsersEndpoint([String query = '']) {
 Uri get notificationsEndpoint =>
     Uri.parse('$apiBaseUrl/api/auth/notifications/');
 Uri get citiesEndpoint => Uri.parse('$apiBaseUrl/api/posts/cities/');
+Uri eventsEndpoint({String? city, String? type}) {
+  final uri = Uri.parse('$apiBaseUrl/api/events/');
+  final params = <String, String>{};
+  if (city != null && city.isNotEmpty) params['city'] = city;
+  if (type != null && type.isNotEmpty) params['type'] = type;
+  if (params.isEmpty) return uri;
+  return uri.replace(queryParameters: params);
+}
+Uri eventAttendEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/$id/attend/');
+Uri eventDeleteEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/$id/delete/');
 Uri get inboxEndpoint => Uri.parse('$apiBaseUrl/api/messages/inbox/');
 Uri get startConversationEndpoint =>
     Uri.parse('$apiBaseUrl/api/messages/start/');

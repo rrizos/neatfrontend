@@ -125,6 +125,16 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Future<void> _deletePost(FeedPost post) async {
+    final res = await http.delete(
+      postDeleteEndpoint(post.id),
+      headers: authGetHeaders(widget.token),
+    );
+    if (res.statusCode == 200) {
+      await _load();
+    }
+  }
+
   Future<void> _openUserList({
     required String title,
     required Uri endpoint,
@@ -463,10 +473,27 @@ class _ProfilePageState extends State<ProfilePage> {
                                 ],
                               ),
                             ),
-                            const Icon(
-                              Icons.more_horiz,
-                              color: Colors.white,
-                              size: 20,
+                            PopupMenuButton<String>(
+                              icon: const Icon(
+                                Icons.more_horiz,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                              onSelected: (value) async {
+                                if (value == 'delete') {
+                                  await _deletePost(post);
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                if (post.author == widget.currentUser.username)
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text(
+                                      'Delete post',
+                                      style: TextStyle(color: Color(0xfff66c6c)),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ),

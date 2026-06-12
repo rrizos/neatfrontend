@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api.dart';
 import '../core/models.dart';
+import '../events/events_page.dart';
 import '../map/city_map_view.dart';
 import '../messages/messages_page.dart';
 import '../profile/profile_page.dart';
@@ -220,6 +221,16 @@ class _HomePageState extends State<HomePage> {
       body: jsonEncode({'text': text}),
     );
     await _load();
+  }
+
+  Future<void> _deletePost(FeedPost post) async {
+    final res = await http.delete(
+      postDeleteEndpoint(post.id),
+      headers: authGetHeaders(widget.session.token),
+    );
+    if (res.statusCode == 200) {
+      await _load();
+    }
   }
 
   void _openProfile(String username) {
@@ -826,6 +837,19 @@ class _HomePageState extends State<HomePage> {
                                           onTap: () =>
                                               _openProfile(post.author),
                                         ),
+                                        if (post.author == widget.session.user.username)
+                                          ListTile(
+                                            contentPadding: EdgeInsets.zero,
+                                            leading: const Icon(
+                                              Icons.delete_outline,
+                                              color: Color(0xfff66c6c),
+                                            ),
+                                            title: const Text('Delete post'),
+                                            onTap: () async {
+                                              Navigator.of(context).pop();
+                                              await _deletePost(post);
+                                            },
+                                          ),
                                         const ListTile(
                                           contentPadding: EdgeInsets.zero,
                                           leading: Icon(
@@ -862,7 +886,12 @@ class _HomePageState extends State<HomePage> {
                       onOpenUserProfile: _openProfile,
                       onCitySelected: _openCityFeed,
                     )
-                  : const _ActivityView(),
+                  : EventsPage(
+                      token: widget.session.token,
+                      city: widget.session.user.city,
+                      currentUser: widget.session.user,
+                      onOpenUserProfile: _openProfile,
+                    ),
             ),
           ],
         ),
@@ -916,9 +945,9 @@ class _HomePageState extends State<HomePage> {
                 label: 'Map',
               ),
               BottomNavigationBarItem(
-                icon: Icon(Icons.favorite_border_rounded),
-                activeIcon: Icon(Icons.favorite_rounded),
-                label: 'Activity',
+                icon: Icon(Icons.event_note_outlined),
+                activeIcon: Icon(Icons.event_note_rounded),
+                label: 'Events',
               ),
             ],
           ),
