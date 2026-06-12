@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../core/api.dart';
 import '../core/models.dart';
+import '../messages/messages_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
@@ -90,6 +91,38 @@ class _ProfilePageState extends State<ProfilePage> {
         });
       }
     }
+  }
+
+  Future<void> _startDirectMessage() async {
+    final profile = _profile;
+    if (profile == null || profile.username == widget.currentUser.username) return;
+    final res = await http.post(
+      startConversationEndpoint,
+      headers: authJsonHeaders(widget.token),
+      body: jsonEncode({'username': profile.username}),
+    );
+    if (res.statusCode == 401) {
+      await widget.onLogout();
+      return;
+    }
+    if (res.statusCode != 200 && res.statusCode != 201) return;
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    final conversation = ConversationSummary.fromJson(
+      decoded['conversation'] as Map<String, dynamic>,
+    );
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ConversationPage(
+          token: widget.token,
+          currentUsername: widget.currentUser.username,
+          conversationId: conversation.id,
+          otherUsername: conversation.otherUser,
+          otherFullName: conversation.otherFullName,
+          onLogout: widget.onLogout,
+        ),
+      ),
+    );
   }
 
   Future<void> _openUserList({
@@ -234,8 +267,25 @@ class _ProfilePageState extends State<ProfilePage> {
     return Scaffold(
       backgroundColor: const Color(0xff121212),
       appBar: AppBar(
-        title: Text(profile.username),
         backgroundColor: const Color(0xff121212),
+        titleSpacing: 12,
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 14,
+              backgroundColor: const Color(0xff2a2a2a),
+              child: Text(
+                initialFor(profile.username),
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              profile.username,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             onPressed: () async {
@@ -318,15 +368,38 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: profile.username == widget.currentUser.username
                 ? OutlinedButton(
                     onPressed: () {},
                     child: const Text('Edit profile'),
                   )
-                : FilledButton(
-                    onPressed: _toggleFollow,
-                    child: Text(profile.isFollowing ? 'Following' : 'Follow'),
+                : Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: _toggleFollow,
+                          child: Text(
+                            profile.isFollowing ? 'Following' : 'Follow',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        height: 42,
+                        width: 42,
+                        child: OutlinedButton(
+                          onPressed: _startDirectMessage,
+                          style: OutlinedButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Icon(Icons.send_outlined, size: 18),
+                        ),
+                      ),
+                    ],
                   ),
           ),
           const Divider(height: 1, color: Color(0xff242424)),

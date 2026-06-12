@@ -33,6 +33,13 @@ Uri followersEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/profiles/$username/followers/');
 Uri followingEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/profiles/$username/following/');
+Uri get suggestionsEndpoint => Uri.parse('$apiBaseUrl/api/auth/suggestions/');
+Uri searchUsersEndpoint([String query = '']) {
+  final uri = Uri.parse('$apiBaseUrl/api/auth/search/');
+  final q = query.trim();
+  if (q.isEmpty) return uri;
+  return uri.replace(queryParameters: {'q': q});
+}
 Uri get notificationsEndpoint =>
     Uri.parse('$apiBaseUrl/api/auth/notifications/');
 Uri get citiesEndpoint => Uri.parse('$apiBaseUrl/api/posts/cities/');

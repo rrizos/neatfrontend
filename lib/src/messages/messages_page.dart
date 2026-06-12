@@ -11,11 +11,13 @@ class MessagesPage extends StatefulWidget {
     super.key,
     required this.token,
     required this.currentUsername,
+    required this.suggestedUsers,
     required this.onLogout,
   });
 
   final String token;
   final String currentUsername;
+  final List<UserProfile> suggestedUsers;
   final Future<void> Function() onLogout;
 
   @override
@@ -77,21 +79,13 @@ class _MessagesPageState extends State<MessagesPage> {
     if (mounted) _load();
   }
 
-  Future<void> _startChat() async {
-    final controller = TextEditingController();
-    final username = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: const Color(0xff121212),
-      showDragHandle: true,
-      builder: (context) {
-        return _StartChatSheet(controller: controller);
-      },
-    );
-    if (username == null || username.isEmpty) return;
+  Future<void> _startChatFor(String username) async {
+    final cleaned = username.trim().replaceFirst(RegExp(r'^@'), '');
+    if (cleaned.isEmpty) return;
     final res = await http.post(
       startConversationEndpoint,
       headers: authJsonHeaders(widget.token),
-      body: jsonEncode({'username': username}),
+      body: jsonEncode({'username': cleaned}),
     );
     if (res.statusCode == 401) return widget.onLogout();
     if (res.statusCode != 200 && res.statusCode != 201) {
@@ -111,6 +105,27 @@ class _MessagesPageState extends State<MessagesPage> {
     await _openConversation(conversation);
   }
 
+  Future<void> _startChat() async {
+    final controller = TextEditingController();
+    final username = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xff0f0f10),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        return FractionallySizedBox(
+          heightFactor: 0.92,
+          child: _StartChatSheet(
+            controller: controller,
+            suggestedUsers: widget.suggestedUsers,
+          ),
+        );
+      },
+    );
+    if (username == null || username.isEmpty) return;
+    await _startChatFor(username);
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = _search.text.trim().isEmpty
@@ -124,9 +139,10 @@ class _MessagesPageState extends State<MessagesPage> {
             .toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xff121212),
+      backgroundColor: const Color(0xff0f0f10),
       appBar: AppBar(
-        backgroundColor: const Color(0xff121212),
+        backgroundColor: const Color(0xff0f0f10),
+        titleSpacing: 16,
         title: const Text(
           'Messages',
           style: TextStyle(fontWeight: FontWeight.w800),
@@ -134,7 +150,7 @@ class _MessagesPageState extends State<MessagesPage> {
         actions: [
           IconButton(
             onPressed: _startChat,
-            icon: const Icon(Icons.edit_square),
+            icon: const Icon(Icons.add_comment_outlined),
           ),
         ],
       ),
@@ -150,11 +166,11 @@ class _MessagesPageState extends State<MessagesPage> {
               style: const TextStyle(color: Colors.white),
               cursorColor: Colors.white,
               decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.search, color: Color(0xff9c9c9c)),
+                prefixIcon: const Icon(Icons.search, color: Color(0xffa6a6a6)),
                 hintText: 'Search',
-                hintStyle: const TextStyle(color: Color(0xff9c9c9c)),
+                hintStyle: const TextStyle(color: Color(0xffa6a6a6)),
                 filled: true,
-                fillColor: const Color(0xff1b1b1b),
+                fillColor: const Color(0xff1a1a1b),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
                   borderSide: BorderSide.none,
@@ -162,19 +178,71 @@ class _MessagesPageState extends State<MessagesPage> {
               ),
             ),
             const SizedBox(height: 18),
+            if (widget.suggestedUsers.isNotEmpty && _search.text.trim().isEmpty) ...[
+              const Text(
+                'Suggested',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 104,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: widget.suggestedUsers.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 10),
+                  itemBuilder: (context, index) {
+                    final user = widget.suggestedUsers[index];
+                    return _SuggestedChatChip(
+                      user: user,
+                      onTap: () => _startChatFor(user.username),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 18),
+            ],
             if (_loading)
               const Padding(
                 padding: EdgeInsets.only(top: 48),
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (filtered.isEmpty)
-              const Padding(
-                padding: EdgeInsets.only(top: 48),
-                child: Center(
-                  child: Text(
-                    'No messages yet.',
-                    style: TextStyle(color: Color(0xff9c9c9c)),
-                  ),
+              Padding(
+                padding: const EdgeInsets.only(top: 38),
+                child: Column(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: const Color(0xff171718),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: const Color(0xff262626)),
+                      ),
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'No conversations yet',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          SizedBox(height: 6),
+                          Text(
+                            'Start a chat with someone you follow.',
+                            style: TextStyle(color: Color(0xff9c9c9c)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               )
             else
@@ -186,9 +254,9 @@ class _MessagesPageState extends State<MessagesPage> {
                     onTap: () => _openConversation(item),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xff171717),
+                        color: const Color(0xff171718),
                         borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: const Color(0xff232323)),
+                        border: Border.all(color: const Color(0xff232324)),
                       ),
                       padding: const EdgeInsets.all(14),
                       child: Row(
@@ -266,8 +334,12 @@ class _MessagesPageState extends State<MessagesPage> {
 }
 
 class _StartChatSheet extends StatefulWidget {
-  const _StartChatSheet({required this.controller});
+  const _StartChatSheet({
+    required this.controller,
+    required this.suggestedUsers,
+  });
   final TextEditingController controller;
+  final List<UserProfile> suggestedUsers;
 
   @override
   State<_StartChatSheet> createState() => _StartChatSheetState();
@@ -291,34 +363,117 @@ class _StartChatSheetState extends State<_StartChatSheet> {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.max,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'New message',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
             const Text(
-              'New message',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
+              'Search people you follow or pick a suggestion.',
+              style: TextStyle(color: Color(0xffa6a6a6)),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: widget.controller,
               autofocus: true,
-              textInputAction: TextInputAction.done,
+              textInputAction: TextInputAction.search,
               onSubmitted: (_) => _submit(),
               style: const TextStyle(color: Colors.white),
               cursorColor: Colors.white,
               decoration: InputDecoration(
-                hintText: 'Username',
+                hintText: 'Search username',
                 hintStyle: const TextStyle(color: Color(0xff9c9c9c)),
                 filled: true,
-                fillColor: const Color(0xff1b1b1b),
+                fillColor: const Color(0xff1a1a1b),
+                prefixIcon: const Icon(Icons.search, color: Color(0xff9c9c9c)),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
                   borderSide: BorderSide.none,
                 ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: widget.suggestedUsers.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Follow people first to see quick suggestions here.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Color(0xff9c9c9c)),
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: widget.suggestedUsers.length + 1,
+                      separatorBuilder: (_, index) => index == 0
+                          ? const SizedBox(height: 6)
+                          : const Divider(
+                              height: 1,
+                              color: Color(0xff242424),
+                            ),
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return const Padding(
+                            padding: EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              'People you follow',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          );
+                        }
+                        final user = widget.suggestedUsers[index - 1];
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: CircleAvatar(
+                            backgroundColor: const Color(0xff2a2a2a),
+                            child: Text(initialFor(user.username)),
+                          ),
+                          title: Text(
+                            user.fullName.isNotEmpty
+                                ? user.fullName
+                                : user.username,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: Text(
+                            '@${user.username}',
+                            style: const TextStyle(color: Color(0xffa6a6a6)),
+                          ),
+                          trailing: const Icon(
+                            Icons.arrow_forward_ios,
+                            size: 14,
+                            color: Color(0xffa6a6a6),
+                          ),
+                          onTap: () => Navigator.of(context).pop(user.username),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _submit,
+                child: const Text('Start chat'),
               ),
             ),
             if (_error != null) ...[
@@ -328,12 +483,52 @@ class _StartChatSheetState extends State<_StartChatSheet> {
                 style: const TextStyle(color: Color(0xfff66c6c)),
               ),
             ],
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: _submit,
-                child: const Text('Start chat'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SuggestedChatChip extends StatelessWidget {
+  const _SuggestedChatChip({
+    required this.user,
+    required this.onTap,
+  });
+
+  final UserProfile user;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        width: 86,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xff171718),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xff262626)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: const Color(0xff2a2a2a),
+              child: Text(initialFor(user.username)),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              user.username,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
