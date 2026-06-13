@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -276,6 +277,17 @@ class _HomePageState extends State<HomePage> {
       body: jsonEncode({'text': text}),
     );
     await _load();
+  }
+
+  Future<void> _follow(String username) async {
+    final res = await http.post(
+      followEndpoint(username),
+      headers: authJsonHeaders(widget.session.token),
+    );
+    if (res.statusCode == 401) await widget.onLogout();
+    if ((res.statusCode == 200 || res.statusCode == 201) && mounted) {
+      await _loadFollowingAuthors();
+    }
   }
 
   Future<void> _deletePost(FeedPost post) async {
@@ -1000,15 +1012,6 @@ class _HomePageState extends State<HomePage> {
                                     title: post.author,
                                     child: Column(
                                       children: [
-                                        ListTile(
-                                          contentPadding: EdgeInsets.zero,
-                                          leading: const Icon(
-                                            Icons.person_add_alt_1,
-                                          ),
-                                          title: Text('Follow ${post.author}'),
-                                          onTap: () =>
-                                              _openProfile(post.author),
-                                        ),
                                         if (post.author == widget.session.user.username)
                                           ListTile(
                                             contentPadding: EdgeInsets.zero,
@@ -1038,6 +1041,9 @@ class _HomePageState extends State<HomePage> {
                                     ),
                                   ),
                                   onProfileTap: () => _openProfile(post.author),
+                                  onFollow: post.author != widget.session.user.username
+                                      ? () => _follow(post.author)
+                                      : null,
                                 );
                               },
                             ),
@@ -1206,8 +1212,7 @@ class _TopBar extends StatelessWidget {
             const SizedBox(width: 8),
             _TopBarPill(
               onTap: onMessagesTap,
-              child: Icon(
-                Icons.send_outlined,
+              child: _SharePlaneIcon(
                 color: themeMode == ThemeMode.light ? Colors.black : Colors.white,
                 size: 21,
               ),
@@ -1244,7 +1249,9 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
                   Text(
                     'For you',
                     style: TextStyle(
-                      color: isLight ? Colors.black : Colors.white,
+                      color: selectedTab == 0
+                          ? (isLight ? Colors.black : Colors.white)
+                          : (isLight ? const Color(0xff616161) : Colors.white38),
                       fontSize: 17,
                       fontWeight: selectedTab == 0 ? FontWeight.w800 : FontWeight.w500,
                     ),
@@ -1269,7 +1276,9 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
                   Text(
                     'Following',
                     style: TextStyle(
-                      color: isLight ? const Color(0xff616161) : Colors.white70,
+                      color: selectedTab == 1
+                          ? (isLight ? Colors.black : Colors.white)
+                          : (isLight ? const Color(0xff616161) : Colors.white38),
                       fontSize: 17,
                       fontWeight: selectedTab == 1 ? FontWeight.w800 : FontWeight.w500,
                     ),
@@ -1308,6 +1317,7 @@ class _FeedPostCard extends StatelessWidget {
     required this.onSave,
     required this.onMore,
     required this.onProfileTap,
+    this.onFollow,
   });
   final FeedPost post;
   final VoidCallback onLike;
@@ -1316,6 +1326,7 @@ class _FeedPostCard extends StatelessWidget {
   final VoidCallback onSave;
   final VoidCallback onMore;
   final VoidCallback onProfileTap;
+  final VoidCallback? onFollow;
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
@@ -1330,36 +1341,75 @@ class _FeedPostCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ListTile(
-              contentPadding: const EdgeInsets.fromLTRB(14, 4, 10, 0),
-              leading: InkWell(
-                onTap: onProfileTap,
-                child: _PostAvatar(
-                  username: post.author,
-                  avatarUrl: post.avatarUrl,
-                ),
-              ),
-              title: InkWell(
-                onTap: onProfileTap,
-                child: Text(
-                  post.author,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: isLight ? Colors.black : Colors.white,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 6, 4),
+              child: Row(
+                children: [
+                  InkWell(
+                    onTap: onProfileTap,
+                    child: _PostAvatar(
+                      username: post.author,
+                      avatarUrl: post.avatarUrl,
+                    ),
                   ),
-                ),
-              ),
-              subtitle: Text(
-                '${post.minutesAgo}m',
-                style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3)),
-              ),
-              trailing: IconButton(
-                onPressed: onMore,
-                icon: Icon(
-                  Icons.more_horiz_rounded,
-                  color: isLight ? Colors.black : Colors.white,
-                  size: 22,
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: InkWell(
+                      onTap: onProfileTap,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            post.author,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: isLight ? Colors.black : Colors.white,
+                            ),
+                          ),
+                          Text(
+                            '${post.minutesAgo}m',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (onFollow != null) ...[
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: onFollow,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        side: BorderSide(color: isLight ? Colors.black : Colors.white),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        'Follow',
+                        style: TextStyle(
+                          color: isLight ? Colors.black : Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                  IconButton(
+                    onPressed: onMore,
+                    icon: Icon(
+                      Icons.more_horiz_rounded,
+                      color: isLight ? Colors.black : Colors.white,
+                      size: 22,
+                    ),
+                  ),
+                ],
               ),
             ),
             Padding(
@@ -1395,23 +1445,21 @@ class _FeedPostCard extends StatelessWidget {
                           ? Icons.favorite_rounded
                           : Icons.favorite_border_rounded,
                       color: post.liked ? Colors.red : (isLight ? Colors.black : Colors.white),
-                      size: 24,
+                      size: 28,
                     ),
                   ),
                   IconButton(
                     onPressed: onComment,
-                    icon: Icon(
-                      Icons.mode_comment_outlined,
+                    icon: _CommentBubbleIcon(
                       color: isLight ? Colors.black : Colors.white,
-                      size: 23,
+                      size: 25,
                     ),
                   ),
                   IconButton(
                     onPressed: onShare,
-                    icon: Icon(
-                      Icons.send_outlined,
+                    icon: _SharePlaneIcon(
                       color: isLight ? Colors.black : Colors.white,
-                      size: 22,
+                      size: 27,
                     ),
                   ),
                   const Spacer(),
@@ -1420,7 +1468,7 @@ class _FeedPostCard extends StatelessWidget {
                     icon: Icon(
                       Icons.bookmark_border_rounded,
                       color: isLight ? Colors.black : Colors.white,
-                      size: 24,
+                      size: 28,
                     ),
                   ),
                 ],
@@ -2398,4 +2446,136 @@ String _timeAgo(DateTime created) {
   if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
   if (diff.inHours < 24) return '${diff.inHours}h ago';
   return '${diff.inDays}d ago';
+}
+
+// Instagram-style circular speech bubble icon drawn with CustomPaint.
+class _CommentBubbleIcon extends StatelessWidget {
+  const _CommentBubbleIcon({required this.color, required this.size});
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      // Flip horizontally so the tail ends up on the left side.
+      child: Transform.scale(
+        scaleX: -1,
+        child: CustomPaint(painter: _CommentBubblePainter(color)),
+      ),
+    );
+  }
+}
+
+class _CommentBubblePainter extends CustomPainter {
+  const _CommentBubblePainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final sw = size.width * 0.082;
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = sw
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final w = size.width;
+    final h = size.height;
+    final inset = sw / 2 + 0.5;
+
+    // Large circle shifted up slightly to leave room for the tail.
+    final cx = w / 2;
+    final cy = h * 0.43;
+    final r = math.min(cx, cy) - inset;
+
+    // Gap in the circle where the tail attaches (lower-left, ~132°–158°).
+    const startRad = 132.0 * math.pi / 180;
+    const endRad = 158.0 * math.pi / 180;
+
+    final gapStart = Offset(cx + r * math.cos(startRad), cy + r * math.sin(startRad));
+    final gapEnd   = Offset(cx + r * math.cos(endRad),   cy + r * math.sin(endRad));
+    final tailTip  = Offset(w * 0.10, h - inset);
+
+    // Path: gapStart → tailTip → gapEnd → long arc back to gapStart.
+    final path = Path()
+      ..moveTo(gapStart.dx, gapStart.dy)
+      ..lineTo(tailTip.dx, tailTip.dy)
+      ..lineTo(gapEnd.dx, gapEnd.dy)
+      ..arcTo(
+        Rect.fromCircle(center: Offset(cx, cy), radius: r),
+        endRad,
+        (2 * math.pi) - (endRad - startRad), // long way round
+        false,
+      )
+      ..close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_CommentBubblePainter old) => old.color != color;
+}
+
+// Instagram-style paper-plane share icon drawn with CustomPaint.
+class _SharePlaneIcon extends StatelessWidget {
+  const _SharePlaneIcon({required this.color, required this.size});
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      child: CustomPaint(painter: _SharePlanePainter(color)),
+    );
+  }
+}
+
+class _SharePlanePainter extends CustomPainter {
+  const _SharePlanePainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final sw = size.width * 0.083;
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = sw
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final w = size.width;
+    final pad = sw / 2 + 0.5;
+
+    // Scale the classic paper-plane shape from a 24×24 design grid.
+    final s = (w - 2 * pad) / 24.0;
+    Offset p(double x, double y) => Offset(pad + x * s, pad + y * s);
+
+    // Key points (matching the well-known Heroicons paper-airplane icon).
+    final rearMid   = p(6,    12);     // rear pinch point, vertical centre
+    final upperRear = p(3.27,  3.13); // top of the rear
+    final nose      = p(21.5, 12);    // nose — right, vertical centre
+    final lowerRear = p(3.27, 20.88); // bottom of the rear
+    final foldEnd   = p(13.5, 12);    // inner fold line end, same height as nose
+
+    // Outer body: rear-mid → upper-rear → nose → lower-rear → close back to rear-mid.
+    canvas.drawPath(
+      Path()
+        ..moveTo(rearMid.dx, rearMid.dy)
+        ..lineTo(upperRear.dx, upperRear.dy)
+        ..lineTo(nose.dx, nose.dy)
+        ..lineTo(lowerRear.dx, lowerRear.dy)
+        ..close(),
+      paint,
+    );
+
+    // Single horizontal fold line across the body — what makes it a paper plane.
+    canvas.drawLine(rearMid, foldEnd, paint);
+  }
+
+  @override
+  bool shouldRepaint(_SharePlanePainter old) => old.color != color;
 }

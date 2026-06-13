@@ -343,3 +343,4 @@ String cityInitialFor(String value) {
   if (trimmed.isEmpty) return '?';
   return trimmed.substring(0, 1).toUpperCase();
 }
+

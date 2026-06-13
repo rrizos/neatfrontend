@@ -196,7 +196,7 @@ class _MessagesPageState extends State<MessagesPage> {
         actions: [
           IconButton(
             onPressed: _startChat,
-            icon: const Icon(Icons.add_comment_outlined),
+            icon: const Icon(Icons.add_circle_outline, size: 28),
           ),
         ],
       ),
@@ -217,6 +217,7 @@ class _MessagesPageState extends State<MessagesPage> {
                 hintStyle: TextStyle(color: isLight ? const Color(0xff8b95a3) : const Color(0xffa6a6a6)),
                 filled: true,
                 fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
+                contentPadding: const EdgeInsets.symmetric(vertical: 8),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
                   borderSide: BorderSide(
@@ -235,7 +236,7 @@ class _MessagesPageState extends State<MessagesPage> {
                   fontSize: 16,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               SizedBox(
                 height: 104,
                 child: ListView.separated(
@@ -562,34 +563,36 @@ class _SuggestedChatChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return GestureDetector(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        width: 86,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-        decoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.light ? Colors.white : const Color(0xff171718),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Theme.of(context).brightness == Brightness.light ? const Color(0xffd9dee6) : const Color(0xff262626)),
-        ),
+      child: SizedBox(
+        width: 68,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             CircleAvatar(
-              radius: 18,
-              backgroundColor: Theme.of(context).brightness == Brightness.light ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-              child: Text(initialFor(user.username)),
+              radius: 28,
+              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+              child: Text(
+                initialFor(user.username),
+                style: TextStyle(
+                  color: isLight ? Colors.black : Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               user.username,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                color: Theme.of(context).brightness == Brightness.light ? Colors.black : Colors.white,
+                color: isLight ? Colors.black : Colors.white,
                 fontSize: 12,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -793,15 +796,17 @@ class _ConversationPageState extends State<ConversationPage> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: isLight ? Colors.black : Colors.white,
-                    child: IconButton(
-                      onPressed: _send,
-                      icon: const Icon(
-                        Icons.send,
-                        color: Colors.white,
-                        size: 18,
+                  GestureDetector(
+                    onTap: _send,
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: const BoxDecoration(
+                        color: Color(0xff2a2a2a),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: _SharePlaneIcon(color: Colors.white, size: 26),
                       ),
                     ),
                   ),
@@ -821,4 +826,56 @@ String _timeLabel(DateTime time) {
   if (diff.inHours < 1) return '${diff.inMinutes}m';
   if (diff.inDays < 1) return '${diff.inHours}h';
   return '${diff.inDays}d';
+}
+
+class _SharePlaneIcon extends StatelessWidget {
+  const _SharePlaneIcon({required this.color, required this.size});
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      child: CustomPaint(painter: _SharePlanePainter(color)),
+    );
+  }
+}
+
+class _SharePlanePainter extends CustomPainter {
+  const _SharePlanePainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final sw = size.width * 0.083;
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = sw
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final w = size.width;
+    final pad = sw / 2 + 0.5;
+    final s = (w - 2 * pad) / 24.0;
+    Offset p(double x, double y) => Offset(pad + x * s, pad + y * s);
+    final rearMid   = p(6,    12);
+    final upperRear = p(3.27,  3.13);
+    final nose      = p(21.5, 12);
+    final lowerRear = p(3.27, 20.88);
+    final foldEnd   = p(13.5, 12);
+    canvas.drawPath(
+      Path()
+        ..moveTo(rearMid.dx, rearMid.dy)
+        ..lineTo(upperRear.dx, upperRear.dy)
+        ..lineTo(nose.dx, nose.dy)
+        ..lineTo(lowerRear.dx, lowerRear.dy)
+        ..close(),
+      paint,
+    );
+    canvas.drawLine(rearMid, foldEnd, paint);
+  }
+
+  @override
+  bool shouldRepaint(_SharePlanePainter old) => old.color != color;
 }
