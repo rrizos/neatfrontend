@@ -33,11 +33,13 @@ class _EventsPageState extends State<EventsPage> {
   final ImagePicker _picker = ImagePicker();
   String _selectedCategory = 'All';
   final Map<int, String> _localCategories = {};
+  final Map<int, String> _localDates = {};
+  final Set<int> _localAttending = {};
 
   @override
   void initState() {
     super.initState();
-    _loadLocalCategories().then((_) => _load());
+    Future.wait([_loadLocalCategories(), _loadLocalDates(), _loadLocalAttending()]).then((_) => _load());
   }
 
   Future<void> _loadLocalCategories() async {
@@ -62,6 +64,46 @@ class _EventsPageState extends State<EventsPage> {
     );
   }
 
+  Future<void> _loadLocalDates() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('event_dates') ?? '{}';
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      _localDates.clear();
+      for (final entry in map.entries) {
+        final id = int.tryParse(entry.key);
+        if (id != null) _localDates[id] = entry.value.toString();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveLocalDate(int eventId, String date) async {
+    _localDates[eventId] = date;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'event_dates',
+      jsonEncode({for (final e in _localDates.entries) '${e.key}': e.value}),
+    );
+  }
+
+  Future<void> _loadLocalAttending() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('event_attending') ?? '[]';
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      _localAttending.clear();
+      for (final v in list) {
+        final id = int.tryParse(v.toString());
+        if (id != null) _localAttending.add(id);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveLocalAttending() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('event_attending', jsonEncode(_localAttending.toList()));
+  }
+
   Future<void> _load() async {
     try {
       final res = await http.get(
@@ -77,18 +119,18 @@ class _EventsPageState extends State<EventsPage> {
           .whereType<Map<String, dynamic>>()
           .map(EventItem.fromJson)
           .map((e) {
-            final local = _localCategories[e.id];
-            if (local != null && e.category.isEmpty) {
-              return EventItem(
-                id: e.id, city: e.city, eventType: e.eventType,
-                category: local, title: e.title, description: e.description,
-                location: e.location, imageUrl: e.imageUrl, creator: e.creator,
-                organizer: e.organizer, hasTickets: e.hasTickets,
-                ticketsUrl: e.ticketsUrl, attendees: e.attendees,
-                isAttending: e.isAttending,
-              );
-            }
-            return e;
+            final localCat = _localCategories[e.id];
+            final localDate = _localDates[e.id];
+            return EventItem(
+              id: e.id, city: e.city, eventType: e.eventType,
+              category: (localCat != null && e.category.isEmpty) ? localCat : e.category,
+              title: e.title, description: e.description,
+              location: e.location, imageUrl: e.imageUrl, creator: e.creator,
+              organizer: e.organizer, hasTickets: e.hasTickets,
+              ticketsUrl: e.ticketsUrl, attendees: e.attendees,
+              isAttending: _localAttending.contains(e.id),
+              date: (localDate != null && e.date.isEmpty) ? localDate : e.date,
+            );
           })
           .toList();
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
@@ -111,6 +153,9 @@ class _EventsPageState extends State<EventsPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+      ),
       builder: (_) => _CreateEventSheet(picker: _picker),
     );
     if (result == null) return;
@@ -121,12 +166,16 @@ class _EventsPageState extends State<EventsPage> {
     );
     if (res.statusCode == 201) {
       final category = result['category'] as String?;
-      if (category != null && category.isNotEmpty) {
+      final date = result['date'] as String?;
+      if (category != null && category.isNotEmpty || date != null && date.isNotEmpty) {
         try {
           final body = jsonDecode(res.body) as Map<String, dynamic>;
           final eventMap = (body['event'] ?? body) as Map<String, dynamic>?;
           final id = int.tryParse(eventMap?['id']?.toString() ?? '');
-          if (id != null) await _saveLocalCategory(id, category);
+          if (id != null) {
+            if (category != null && category.isNotEmpty) await _saveLocalCategory(id, category);
+            if (date != null && date.isNotEmpty) await _saveLocalDate(id, date);
+          }
         } catch (_) {}
       }
       await _load();
@@ -134,6 +183,13 @@ class _EventsPageState extends State<EventsPage> {
   }
 
   Future<void> _attend(EventItem event) async {
+    final nowAttending = !event.isAttending;
+    if (nowAttending) {
+      _localAttending.add(event.id);
+    } else {
+      _localAttending.remove(event.id);
+    }
+    await _saveLocalAttending();
     setState(() {
       _events = _events.map((e) {
         if (e.id != event.id) return e;
@@ -143,8 +199,9 @@ class _EventsPageState extends State<EventsPage> {
           location: e.location, imageUrl: e.imageUrl, creator: e.creator,
           organizer: e.organizer, hasTickets: e.hasTickets,
           ticketsUrl: e.ticketsUrl,
-          attendees: e.isAttending ? e.attendees - 1 : e.attendees + 1,
-          isAttending: !e.isAttending,
+          attendees: nowAttending ? e.attendees + 1 : e.attendees - 1,
+          isAttending: nowAttending,
+          date: e.date,
         );
       }).toList();
     });
@@ -152,7 +209,15 @@ class _EventsPageState extends State<EventsPage> {
       eventAttendEndpoint(event.id),
       headers: authJsonHeaders(widget.token),
     );
-    if (res.statusCode != 200) await _load();
+    if (res.statusCode != 200) {
+      if (nowAttending) {
+        _localAttending.remove(event.id);
+      } else {
+        _localAttending.add(event.id);
+      }
+      await _saveLocalAttending();
+      await _load();
+    }
   }
 
   Future<void> _deleteEvent(EventItem event) async {
@@ -163,6 +228,28 @@ class _EventsPageState extends State<EventsPage> {
     if (res.statusCode == 200) {
       await _load();
     }
+  }
+
+  void _showEventDetail(EventItem event) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: isLight ? Colors.white : const Color(0xff111111),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => _EventDetailSheet(
+        event: event,
+        currentUsername: widget.currentUser.username,
+        onAttend: () => _attend(event),
+        onDelete: () {
+          Navigator.of(context).pop();
+          _deleteEvent(event);
+        },
+      ),
+    );
   }
 
   List<EventItem> get _official =>
@@ -312,6 +399,7 @@ class _EventsPageState extends State<EventsPage> {
                                   currentUsername: widget.currentUser.username,
                                   onAttend: () => _attend(event),
                                   onDelete: () => _deleteEvent(event),
+                                  onTap: () => _showEventDetail(event),
                                 ),
                               ),
                             ),
@@ -323,6 +411,14 @@ class _EventsPageState extends State<EventsPage> {
       ),
     );
   }
+}
+
+String _formatEventDate(String date) {
+  final d = DateTime.tryParse(date);
+  if (d == null) return date;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  return '${weekdays[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}, ${d.year}';
 }
 
 const _kEventCategories = [
@@ -353,6 +449,7 @@ class EventItem {
     required this.ticketsUrl,
     required this.attendees,
     required this.isAttending,
+    required this.date,
   });
 
   final int id;
@@ -369,6 +466,7 @@ class EventItem {
   final String ticketsUrl;
   final int attendees;
   final bool isAttending;
+  final String date;
 
   factory EventItem.fromJson(Map<String, dynamic> json) {
     int p(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -387,6 +485,7 @@ class EventItem {
       ticketsUrl: json['ticketsUrl']?.toString() ?? '',
       attendees: p(json['attendees']),
       isAttending: json['isAttending'] == true,
+      date: json['date']?.toString() ?? '',
     );
   }
 }
@@ -397,18 +496,22 @@ class _EventCard extends StatelessWidget {
     required this.currentUsername,
     required this.onAttend,
     required this.onDelete,
+    required this.onTap,
   });
 
   final EventItem event;
   final String currentUsername;
   final VoidCallback onAttend;
   final VoidCallback onDelete;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final official = event.eventType == 'official';
-    return Container(
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
       decoration: BoxDecoration(
         color: isLight ? Colors.white : const Color(0xff151516),
         borderRadius: BorderRadius.circular(22),
@@ -501,10 +604,22 @@ class _EventCard extends StatelessWidget {
                       fontSize: 12,
                     ),
                   ),
+                  if (event.date.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _formatEventDate(event.date),
+                      style: const TextStyle(
+                        color: Color(0xff8f8f8f),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   Text(
                     event.description.isEmpty ? event.title : event.description,
-                      style: TextStyle(
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
                       color: isLight ? Colors.black : Colors.white,
                       height: 1.4,
                       fontSize: 15,
@@ -550,6 +665,16 @@ class _EventCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (event.date.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _formatEventDate(event.date),
+                      style: const TextStyle(
+                        color: Color(0xff8f8f8f),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                   if (event.imageUrl.isEmpty) ...[
                     const SizedBox(height: 8),
                     Text(
@@ -567,6 +692,8 @@ class _EventCard extends StatelessWidget {
                     const SizedBox(height: 10),
                     Text(
                       event.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: isLight ? Colors.black : Colors.white,
                         height: 1.35,
@@ -668,11 +795,13 @@ class _EventCard extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 }
 
 class _TabPill extends StatelessWidget {
+
   const _TabPill({
     required this.label,
     required this.selected,
@@ -729,6 +858,8 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   String _category = _kEventCategories[1];
   String _imageUrl = '';
   bool _showPhotoError = false;
+  DateTime? _date;
+  bool _showDateError = false;
 
   @override
   void dispose() {
@@ -756,7 +887,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
           16,
           0,
@@ -785,7 +916,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 const Spacer(),
                 TextButton(
                   onPressed: () {
-                    if (_title.text.trim().isEmpty) return;
+                    if (_title.text.trim().isEmpty || _desc.text.trim().isEmpty) return;
+                    if (_date == null) {
+                      setState(() => _showDateError = true);
+                      return;
+                    }
                     if (_official && _imageUrl.isEmpty) {
                       setState(() => _showPhotoError = true);
                       return;
@@ -795,6 +930,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       'description': _desc.text.trim(),
                       'eventType': _official ? 'official' : 'community',
                       'hasTickets': _tickets,
+                      'date': _date!.toIso8601String().substring(0, 10),
                       if (_official) 'category': _category,
                       if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
                     });
@@ -814,6 +950,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               controller: _desc,
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
               maxLines: 4,
+              maxLength: 500,
               decoration: _dec('Description', isLight),
             ),
             const SizedBox(height: 10),
@@ -890,6 +1027,52 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               ),
             ],
             const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _date ?? DateTime.now(),
+                  firstDate: DateTime.now(),
+                  lastDate: DateTime.now().add(const Duration(days: 365 * 3)),
+                );
+                if (picked != null) setState(() { _date = picked; _showDateError = false; });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: isLight ? Colors.white : const Color(0xff1a1a1b),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _showDateError
+                        ? const Color(0xfff66c6c)
+                        : (isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.calendar_today_outlined, size: 16,
+                        color: isLight ? Colors.black : Colors.white),
+                    const SizedBox(width: 10),
+                    Text(
+                      _date == null
+                          ? 'Choose date'
+                          : _formatEventDate(_date!.toIso8601String().substring(0, 10)),
+                      style: TextStyle(
+                        color: _date == null
+                            ? (isLight ? const Color(0xff616161) : const Color(0xff8f8f8f))
+                            : (isLight ? Colors.black : Colors.white),
+                      ),
+                    ),
+                    if (_showDateError) ...[
+                      const Spacer(),
+                      const Text('Required',
+                          style: TextStyle(color: Color(0xfff66c6c), fontSize: 12, fontWeight: FontWeight.w600)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
             if (_imageUrl.isNotEmpty)
               ClipRRect(
                 borderRadius: BorderRadius.circular(18),
@@ -1040,5 +1223,246 @@ class _EventMedia extends StatelessWidget {
       }
     }
     return Image.network(url, fit: BoxFit.cover);
+  }
+}
+
+class _EventDetailSheet extends StatefulWidget {
+  const _EventDetailSheet({
+    required this.event,
+    required this.currentUsername,
+    required this.onAttend,
+    required this.onDelete,
+  });
+
+  final EventItem event;
+  final String currentUsername;
+  final VoidCallback onAttend;
+  final VoidCallback onDelete;
+
+  @override
+  State<_EventDetailSheet> createState() => _EventDetailSheetState();
+}
+
+class _EventDetailSheetState extends State<_EventDetailSheet> {
+  late bool _isAttending = widget.event.isAttending;
+  late int _attendees = widget.event.attendees;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final event = widget.event;
+    final official = event.eventType == 'official';
+
+    return Column(
+      children: [
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: 12),
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+            color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (event.imageUrl.isNotEmpty)
+                  Stack(
+                    children: [
+                      SizedBox(
+                        height: 240,
+                        width: double.infinity,
+                        child: _EventMedia(url: event.imageUrl),
+                      ),
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.65),
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 20, right: 20, bottom: 18,
+                        child: Text(
+                          event.title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            shadows: [Shadow(blurRadius: 4, color: Colors.black45)],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (event.imageUrl.isEmpty) ...[
+                        Text(
+                          event.title,
+                          style: TextStyle(
+                            color: isLight ? Colors.black : Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      if (event.date.isNotEmpty) ...[
+                        _DetailRow(icon: Icons.calendar_today_outlined, text: _formatEventDate(event.date)),
+                        const SizedBox(height: 8),
+                      ],
+                      if (event.location.isNotEmpty || event.city.isNotEmpty) ...[
+                        _DetailRow(
+                          icon: Icons.location_on_outlined,
+                          text: event.location.isNotEmpty ? event.location : event.city,
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      _DetailRow(
+                        icon: official ? Icons.verified_outlined : Icons.people_outline,
+                        text: '${event.organizer.isEmpty ? (official ? event.city : 'Community') : event.organizer} • ${official ? 'Official' : 'Community'}',
+                      ),
+                      if (official && event.category.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        _DetailRow(icon: Icons.category_outlined, text: event.category),
+                      ],
+                      const SizedBox(height: 16),
+                      Text(
+                        '$_attendees people attending',
+                        style: TextStyle(
+                          color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
+                          fontSize: 13,
+                        ),
+                      ),
+                      if (event.description.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          event.description,
+                          style: TextStyle(
+                            color: isLight ? Colors.black : Colors.white,
+                            height: 1.5,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          if (official && event.hasTickets) ...[
+                            Expanded(
+                              child: TextButton(
+                                onPressed: event.ticketsUrl.isEmpty
+                                    ? null
+                                    : () async {
+                                        final uri = Uri.tryParse(event.ticketsUrl);
+                                        if (uri == null) return;
+                                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                      },
+                                style: TextButton.styleFrom(
+                                  backgroundColor: isLight ? const Color(0xffeef1f5) : const Color(0xff1d1d1d),
+                                  foregroundColor: isLight ? Colors.black : Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    side: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                                  ),
+                                ),
+                                child: const Text('Buy Tickets'),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                          ],
+                          Expanded(
+                            child: _isAttending
+                                ? OutlinedButton(
+                                    onPressed: () {
+                                      setState(() { _isAttending = false; _attendees--; });
+                                      widget.onAttend();
+                                    },
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: isLight ? Colors.black : Colors.white,
+                                      side: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    ),
+                                    child: const Text("Don't Attend"),
+                                  )
+                                : FilledButton(
+                                    onPressed: () {
+                                      setState(() { _isAttending = true; _attendees++; });
+                                      widget.onAttend();
+                                    },
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: isLight ? Colors.black : Colors.white,
+                                      foregroundColor: isLight ? Colors.white : Colors.black,
+                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    ),
+                                    child: const Text('Attend'),
+                                  ),
+                          ),
+                        ],
+                      ),
+                      if (event.creator == widget.currentUsername) ...[
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: TextButton(
+                            onPressed: widget.onDelete,
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xfff66c6c),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: const Text('Delete event'),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 14, color: const Color(0xff8f8f8f)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(color: Color(0xff8f8f8f), fontSize: 12),
+          ),
+        ),
+      ],
+    );
   }
 }
