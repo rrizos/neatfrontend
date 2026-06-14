@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../core/api.dart';
 import '../core/icons.dart';
 import '../core/models.dart';
+import '../core/share_sheet.dart';
 import '../messages/messages_page.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -152,9 +153,57 @@ class _ProfilePageState extends State<ProfilePage> {
           otherUsername: conversation.otherUser,
           otherFullName: conversation.otherFullName,
           onLogout: widget.onLogout,
+          onOpenPost: widget.onOpenProfileAtPost != null
+              ? (author, postId) {
+                  Navigator.pop(context);
+                  widget.onOpenProfileAtPost!(author, postId);
+                }
+              : null,
         ),
       ),
     );
+  }
+
+  Future<void> _like(FeedPost post) async {
+    final previousLiked = post.liked;
+    final previousLikes = post.likes;
+    setState(() {
+      post.liked = !post.liked;
+      post.likes += post.liked ? 1 : -1;
+    });
+    final res = await http.post(
+      postLikeEndpoint(post.id),
+      headers: authJsonHeaders(widget.token),
+      body: jsonEncode({'liked': post.liked}),
+    );
+    if (res.statusCode == 401) {
+      await widget.onLogout();
+      return;
+    }
+    if (res.statusCode != 200 && mounted) {
+      setState(() {
+        post.liked = previousLiked;
+        post.likes = previousLikes;
+      });
+    }
+  }
+
+  Future<void> _save(FeedPost post) async {
+    final prev = post.saved;
+    setState(() => post.saved = !post.saved);
+    final res = await http.post(
+      postSaveEndpoint(post.id),
+      headers: authJsonHeaders(widget.token),
+      body: jsonEncode({'saved': post.saved}),
+    );
+    if (res.statusCode == 401) {
+      setState(() => post.saved = prev);
+      await widget.onLogout();
+      return;
+    }
+    if (res.statusCode != 200 && mounted) {
+      setState(() => post.saved = prev);
+    }
   }
 
   Future<void> _deletePost(FeedPost post) async {
@@ -564,27 +613,45 @@ class _ProfilePageState extends State<ProfilePage> {
                         const SizedBox(height: 12),
                         Row(
                           children: [
-                            Icon(
-                              Icons.favorite_border,
-                              color: isLight ? Colors.black : Colors.white,
-                              size: 20,
+                            GestureDetector(
+                              onTap: () => _like(post),
+                              child: Icon(
+                                post.liked ? Icons.favorite_rounded : Icons.favorite_border,
+                                color: post.liked ? Colors.red : (isLight ? Colors.black : Colors.white),
+                                size: 20,
+                              ),
                             ),
                             const SizedBox(width: 18),
-                            CommentBubbleIcon(
-                              color: isLight ? Colors.black : Colors.white,
-                              size: 20,
+                            GestureDetector(
+                              onTap: () => widget.onPostTap(post),
+                              child: CommentBubbleIcon(
+                                color: isLight ? Colors.black : Colors.white,
+                                size: 20,
+                              ),
                             ),
                             const SizedBox(width: 18),
-                            Icon(
-                              Icons.send_outlined,
-                              color: isLight ? Colors.black : Colors.white,
-                              size: 20,
+                            GestureDetector(
+                              onTap: () => showShareSheet(
+                                context: context,
+                                post: post,
+                                token: widget.token,
+                                currentUser: widget.currentUser,
+                                onLogout: widget.onLogout,
+                              ),
+                              child: Icon(
+                                Icons.send_outlined,
+                                color: isLight ? Colors.black : Colors.white,
+                                size: 20,
+                              ),
                             ),
                             const Spacer(),
-                            Icon(
-                              Icons.bookmark_border,
-                              color: isLight ? Colors.black : Colors.white,
-                              size: 20,
+                            GestureDetector(
+                              onTap: () => _save(post),
+                              child: Icon(
+                                post.saved ? Icons.bookmark_rounded : Icons.bookmark_border,
+                                color: post.saved ? const Color(0xffFFB800) : (isLight ? Colors.black : Colors.white),
+                                size: 20,
+                              ),
                             ),
                           ],
                         ),

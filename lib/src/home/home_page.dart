@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api.dart';
 import '../core/icons.dart';
 import '../core/models.dart';
+import '../core/share_sheet.dart';
 import '../events/events_page.dart';
 import '../map/city_map_view.dart';
 import '../messages/messages_page.dart';
@@ -44,6 +45,7 @@ class _HomePageState extends State<HomePage> {
   final List<UserProfile> _followingProfiles = [];
   int _nav = 0;
   int _selectedTab = 0;
+  final Set<int> _visitedTabs = <int>{0};
   bool _loading = true;
   String? _activeCity;
   String _composeImageUrl = '';
@@ -1125,147 +1127,163 @@ class _HomePageState extends State<HomePage> {
                     currentUsername: widget.session.user.username,
                     suggestedUsers: _followingProfiles,
                     onLogout: widget.onLogout,
+                    onOpenPost: (author, postId) {
+                      Navigator.popUntil(context, (route) => route.isFirst);
+                      _openProfileAtPost(author, postId);
+                    },
                   ),
                 ),
               ),
             ),
             const Divider(height: 1, color: Color(0xff232323)),
             Expanded(
-              child: _showInlineProfile
-                  ? ProfilePage(
-                      key: ValueKey(_inlineProfileUsername),
-                      username: _inlineProfileUsername,
-                      currentUser: widget.session.user,
-                      token: widget.session.token,
-                      posts: _posts,
-                      onOpenUserProfile: _openProfile,
-                      onOpenProfileAtPost: _openProfileAtPost,
-                      onLogout: widget.onLogout,
-                      onSessionUpdated: widget.onSessionChanged,
-                      onPostTap: _openComments,
-                      initialPostId: _inlinePostId,
-                      themeMode: widget.themeMode,
-                      onThemeModeChanged: widget.onThemeModeChanged,
-                    )
-                  : _nav == 0
-                  ? RefreshIndicator(
-                      onRefresh: _load,
-                      child: CustomScrollView(
-                        slivers: [
-                          const SliverToBoxAdapter(child: SizedBox.shrink()),
-                          SliverPersistentHeader(
-                            pinned: true,
-                            delegate: _TabsHeader(
-                              selectedTab: _selectedTab,
-                              onTabChanged: (value) {
-                                setState(() => _selectedTab = value);
-                              },
-                            ),
-                          ),
-                          if (filtered.isEmpty)
-                            const SliverFillRemaining(
-                              hasScrollBody: false,
-                              child: Center(
-                                child: Text(
-                                  'No posts yet.',
-                                  style: TextStyle(color: Color(0xffe8e8e8)),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Tabs — hidden (but kept alive) while profile is visible
+                  Offstage(
+                    offstage: _showInlineProfile,
+                    child: IndexedStack(
+                      index: _nav,
+                      children: [
+                        // 0: Feed — always mounted so scroll state survives tab switches
+                        RefreshIndicator(
+                          onRefresh: _load,
+                          child: CustomScrollView(
+                            key: PageStorageKey<String>('feed_$_selectedTab'),
+                            slivers: [
+                              const SliverToBoxAdapter(child: SizedBox.shrink()),
+                              SliverPersistentHeader(
+                                pinned: true,
+                                delegate: _TabsHeader(
+                                  selectedTab: _selectedTab,
+                                  onTabChanged: (value) {
+                                    setState(() => _selectedTab = value);
+                                  },
                                 ),
                               ),
-                            )
-                          else
-                            SliverList.builder(
-                              itemCount: filtered.length,
-                              itemBuilder: (context, index) {
-                                final post = filtered[index];
-                                return _FeedPostCard(
-                                  post: post,
-                                  onLike: () => _like(post),
-                                  onComment: () => _openComments(post),
-                                  onShare: () => _openSheet(
-                                    title: 'Share',
-                                    child: Wrap(
-                                      spacing: 12,
-                                      runSpacing: 12,
-                                      children: const [
-                                        _ShareChip(
-                                          icon: Icons.send,
-                                          label: 'DM',
-                                        ),
-                                        _ShareChip(
-                                          icon: Icons.link,
-                                          label: 'Copy link',
-                                        ),
-                                        _ShareChip(
-                                          icon: Icons.group_add,
-                                          label: 'Group',
-                                        ),
-                                      ],
+                              if (filtered.isEmpty)
+                                const SliverFillRemaining(
+                                  hasScrollBody: false,
+                                  child: Center(
+                                    child: Text(
+                                      'No posts yet.',
+                                      style: TextStyle(color: Color(0xffe8e8e8)),
                                     ),
                                   ),
-                                  onSave: () => _save(post),
-                                  onMore: () => _openSheet(
-                                    title: post.author,
-                                    child: Column(
-                                      children: [
-                                        if (post.author == widget.session.user.username)
-                                          ListTile(
-                                            contentPadding: EdgeInsets.zero,
-                                            leading: const Icon(
-                                              Icons.delete_outline,
-                                              color: Color(0xfff66c6c),
+                                )
+                              else
+                                SliverList.builder(
+                                  itemCount: filtered.length,
+                                  itemBuilder: (context, index) {
+                                    final post = filtered[index];
+                                    return _FeedPostCard(
+                                      post: post,
+                                      onLike: () => _like(post),
+                                      onComment: () => _openComments(post),
+                                      onShare: () => showShareSheet(
+                                        context: context,
+                                        post: post,
+                                        token: widget.session.token,
+                                        currentUser: widget.session.user,
+                                        onLogout: widget.onLogout,
+                                      ),
+                                      onSave: () => _save(post),
+                                      onMore: () => _openSheet(
+                                        title: post.author,
+                                        child: Column(
+                                          children: [
+                                            if (post.author == widget.session.user.username)
+                                              ListTile(
+                                                contentPadding: EdgeInsets.zero,
+                                                leading: const Icon(
+                                                  Icons.delete_outline,
+                                                  color: Color(0xfff66c6c),
+                                                ),
+                                                title: const Text('Delete post'),
+                                                onTap: () async {
+                                                  Navigator.of(context).pop();
+                                                  await _deletePost(post);
+                                                },
+                                              ),
+                                            const ListTile(
+                                              contentPadding: EdgeInsets.zero,
+                                              leading: Icon(
+                                                Icons.visibility_off_outlined,
+                                              ),
+                                              title: Text('Hide post'),
                                             ),
-                                            title: const Text('Delete post'),
-                                            onTap: () async {
-                                              Navigator.of(context).pop();
-                                              await _deletePost(post);
-                                            },
-                                          ),
-                                        const ListTile(
-                                          contentPadding: EdgeInsets.zero,
-                                          leading: Icon(
-                                            Icons.visibility_off_outlined,
-                                          ),
-                                          title: Text('Hide post'),
+                                            const ListTile(
+                                              contentPadding: EdgeInsets.zero,
+                                              leading: Icon(Icons.flag_outlined),
+                                              title: Text('Report post'),
+                                            ),
+                                          ],
                                         ),
-                                        const ListTile(
-                                          contentPadding: EdgeInsets.zero,
-                                          leading: Icon(Icons.flag_outlined),
-                                          title: Text('Report post'),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  onProfileTap: () => _openProfile(post.author),
-                                  onFollow: post.author != widget.session.user.username
-                                      ? () => _follow(post.author)
-                                      : null,
-                                  isFollowing: _followingAuthors.contains(post.author),
-                                );
-                              },
-                            ),
-                        ],
-                      ),
-                    )
-                  : _nav == 1
-                  ? _SearchView(
-                      token: widget.session.token,
-                      currentUser: widget.session.user,
-                      onOpenUserProfile: _openProfile,
-                    )
-                  : _nav == 2
-                  ? const _ActivityView()
-                  : _nav == 3
-                  ? CityMapView(
-                      token: widget.session.token,
-                      onOpenUserProfile: _openProfile,
-                      onCitySelected: _openCityFeed,
-                    )
-                  : EventsPage(
-                      token: widget.session.token,
-                      city: widget.session.user.city,
-                      currentUser: widget.session.user,
-                      onOpenUserProfile: _openProfile,
+                                      ),
+                                      onProfileTap: () => _openProfile(post.author),
+                                      onFollow: post.author != widget.session.user.username
+                                          ? () => _follow(post.author)
+                                          : null,
+                                      isFollowing: _followingAuthors.contains(post.author),
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
+                        // 1: Search — mounted lazily on first visit
+                        _visitedTabs.contains(1)
+                            ? _SearchView(
+                                token: widget.session.token,
+                                currentUser: widget.session.user,
+                                onOpenUserProfile: _openProfile,
+                              )
+                            : const SizedBox.shrink(),
+                        // 2: Create (intercepted by bottom nav, never shown)
+                        const SizedBox.shrink(),
+                        // 3: Map — mounted lazily on first visit
+                        _visitedTabs.contains(3)
+                            ? CityMapView(
+                                token: widget.session.token,
+                                onOpenUserProfile: _openProfile,
+                                onCitySelected: _openCityFeed,
+                              )
+                            : const SizedBox.shrink(),
+                        // 4: Events — mounted lazily on first visit
+                        _visitedTabs.contains(4)
+                            ? EventsPage(
+                                token: widget.session.token,
+                                city: widget.session.user.city,
+                                currentUser: widget.session.user,
+                                onOpenUserProfile: _openProfile,
+                              )
+                            : const SizedBox.shrink(),
+                      ],
                     ),
+                  ),
+                  // Profile — kept alive to preserve scroll, hidden when not shown
+                  if (_inlineProfileUsername.isNotEmpty)
+                    Offstage(
+                      offstage: !_showInlineProfile,
+                      child: ProfilePage(
+                        key: ValueKey('$_inlineProfileUsername:${_inlinePostId ?? ""}'),
+                        username: _inlineProfileUsername,
+                        currentUser: widget.session.user,
+                        token: widget.session.token,
+                        posts: _posts,
+                        onOpenUserProfile: _openProfile,
+                        onOpenProfileAtPost: _openProfileAtPost,
+                        onLogout: widget.onLogout,
+                        onSessionUpdated: widget.onSessionChanged,
+                        onPostTap: _openComments,
+                        initialPostId: _inlinePostId,
+                        themeMode: widget.themeMode,
+                        onThemeModeChanged: widget.onThemeModeChanged,
+                      ),
+                    ),
+                ],
+              ),
             ),
           ],
         ),
@@ -1302,6 +1320,7 @@ class _HomePageState extends State<HomePage> {
               }
               setState(() {
                 _nav = i;
+                _visitedTabs.add(i);
                 _showInlineProfile = false;
               });
             },
@@ -2388,35 +2407,6 @@ class _SearchSegment extends StatelessWidget {
       backgroundColor: const Color(0xff1a1a1b),
       side: const BorderSide(color: Color(0xff2a2a2a)),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-    );
-  }
-}
-
-class _ActivityView extends StatelessWidget {
-  const _ActivityView();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Text(
-        'No activity yet.',
-        style: TextStyle(color: Color(0xffb3b3b3)),
-      ),
-    );
-  }
-}
-
-class _ShareChip extends StatelessWidget {
-  const _ShareChip({required this.icon, required this.label});
-  final IconData icon;
-  final String label;
-  @override
-  Widget build(BuildContext context) {
-    return Chip(
-      avatar: Icon(icon, size: 18, color: Colors.white),
-      label: Text(label, style: const TextStyle(color: Colors.white)),
-      backgroundColor: const Color(0xff1e1e1e),
-      side: const BorderSide(color: Color(0xff2a2a2a)),
     );
   }
 }

@@ -55,12 +55,14 @@ class MessagesPage extends StatefulWidget {
     required this.currentUsername,
     required this.suggestedUsers,
     required this.onLogout,
+    this.onOpenPost,
   });
 
   final String token;
   final String currentUsername;
   final List<UserProfile> suggestedUsers;
   final Future<void> Function() onLogout;
+  final void Function(String author, int postId)? onOpenPost;
 
   @override
   State<MessagesPage> createState() => _MessagesPageState();
@@ -115,6 +117,7 @@ class _MessagesPageState extends State<MessagesPage> {
           otherUsername: summary.otherUser,
           otherFullName: summary.otherFullName,
           onLogout: widget.onLogout,
+          onOpenPost: widget.onOpenPost,
         ),
       ),
     );
@@ -351,7 +354,7 @@ class _MessagesPageState extends State<MessagesPage> {
                                 Text(
                                   item.lastMessage.isEmpty
                                       ? 'Tap to start chatting'
-                                      : '${item.lastSender.isEmpty ? '' : '${item.lastSender}: '} ${item.lastMessage}',
+                                      : '${item.lastSender.isEmpty ? '' : '${item.lastSender}: '}${item.lastMessage.startsWith('__neat_post__:') ? 'Shared a post' : item.lastMessage}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
@@ -621,6 +624,7 @@ class ConversationPage extends StatefulWidget {
     required this.otherUsername,
     required this.otherFullName,
     required this.onLogout,
+    this.onOpenPost,
   });
 
   final String token;
@@ -629,6 +633,7 @@ class ConversationPage extends StatefulWidget {
   final String otherUsername;
   final String otherFullName;
   final Future<void> Function() onLogout;
+  final void Function(String author, int postId)? onOpenPost;
 
   @override
   State<ConversationPage> createState() => _ConversationPageState();
@@ -636,6 +641,7 @@ class ConversationPage extends StatefulWidget {
 
 class _ConversationPageState extends State<ConversationPage> {
   final _composer = TextEditingController();
+  final _scroll = ScrollController();
   List<MessageItem> _messages = [];
   bool _loading = true;
 
@@ -648,7 +654,20 @@ class _ConversationPageState extends State<ConversationPage> {
   @override
   void dispose() {
     _composer.dispose();
+    _scroll.dispose();
     super.dispose();
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   Future<void> _load() async {
@@ -669,6 +688,7 @@ class _ConversationPageState extends State<ConversationPage> {
         _messages = messages;
         _loading = false;
       });
+      _scrollToBottom();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -735,11 +755,36 @@ class _ConversationPageState extends State<ConversationPage> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : ListView.builder(
+                    controller: _scroll,
                     padding: const EdgeInsets.all(16),
                     itemCount: _messages.length,
                     itemBuilder: (context, index) {
                       final message = _messages[index];
                       final mine = message.sender == widget.currentUsername;
+                      final postData = _parseSharedPost(message.text);
+                      if (postData != null) {
+                        return Align(
+                          alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: MediaQuery.sizeOf(context).width * 0.76,
+                              ),
+                              child: _SharedPostCard(
+                                data: postData,
+                                isLight: isLight,
+                                onTap: widget.onOpenPost != null
+                                    ? () => widget.onOpenPost!(
+                                        postData['author']?.toString() ?? '',
+                                        (postData['id'] as num?)?.toInt() ?? 0,
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          ),
+                        );
+                      }
                       return Align(
                         alignment:
                             mine ? Alignment.centerRight : Alignment.centerLeft,
@@ -815,6 +860,138 @@ class _ConversationPageState extends State<ConversationPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+const _kPostPrefix = '__neat_post__:';
+
+Map<String, dynamic>? _parseSharedPost(String text) {
+  if (!text.startsWith(_kPostPrefix)) return null;
+  try {
+    final data = jsonDecode(text.substring(_kPostPrefix.length));
+    return data is Map<String, dynamic> ? data : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+class _SharedPostCard extends StatelessWidget {
+  const _SharedPostCard({
+    required this.data,
+    required this.isLight,
+    required this.onTap,
+  });
+
+  final Map<String, dynamic> data;
+  final bool isLight;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final author = data['author']?.toString() ?? '';
+    final text = data['text']?.toString() ?? '';
+    final imageUrl = data['imageUrl']?.toString() ?? '';
+    final likes = (data['likes'] as num?)?.toInt() ?? 0;
+    final cardBg = isLight ? Colors.white : const Color(0xff1c1c1e);
+    final borderColor = isLight ? const Color(0xffd9dee6) : const Color(0xff333333);
+    final textColor = isLight ? Colors.black : Colors.white;
+    final subtitleColor = isLight ? const Color(0xff616161) : const Color(0xff9c9c9c);
+
+    final imageBytes = imageUrl.isNotEmpty ? _dataUrlBytes(imageUrl) : null;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: borderColor),
+        ),
+        clipBehavior: Clip.hardEdge,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (imageUrl.isNotEmpty) ...[
+              AspectRatio(
+                aspectRatio: 1.6,
+                child: imageBytes != null
+                    ? Image.memory(imageBytes, fit: BoxFit.cover)
+                    : Image.network(imageUrl, fit: BoxFit.cover),
+              ),
+            ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 12,
+                        backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+                        child: Text(
+                          initialFor(author),
+                          style: TextStyle(fontSize: 10, color: textColor, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '@$author',
+                        style: TextStyle(
+                          color: textColor,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (text.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      text.length > 100 ? '${text.substring(0, 100)}…' : text,
+                      style: TextStyle(
+                        color: subtitleColor,
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      if (likes > 0) ...[
+                        Icon(Icons.favorite_rounded, size: 12, color: Colors.red),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$likes',
+                          style: TextStyle(color: subtitleColor, fontSize: 12),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      if (onTap != null) ...[
+                        Text(
+                          'View post',
+                          style: const TextStyle(
+                            color: Color(0xff3897f0),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        const Icon(Icons.arrow_forward_rounded, size: 12, color: Color(0xff3897f0)),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
