@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api.dart';
+import '../core/icons.dart';
 import '../core/models.dart';
 import '../events/events_page.dart';
 import '../map/city_map_view.dart';
@@ -49,6 +49,7 @@ class _HomePageState extends State<HomePage> {
   String _composeImageUrl = '';
   bool _showInlineProfile = false;
   String _inlineProfileUsername = '';
+  int? _inlinePostId;
 
   @override
   void initState() {
@@ -279,13 +280,39 @@ class _HomePageState extends State<HomePage> {
     await _load();
   }
 
+  Future<void> _save(FeedPost post) async {
+    final prev = post.saved;
+    setState(() => post.saved = !post.saved);
+    final res = await http.post(
+      postSaveEndpoint(post.id),
+      headers: authJsonHeaders(widget.session.token),
+      body: jsonEncode({'saved': post.saved}),
+    );
+    if (res.statusCode == 401) {
+      setState(() => post.saved = prev);
+      await widget.onLogout();
+      return;
+    }
+    if (res.statusCode != 200 && mounted) {
+      setState(() => post.saved = prev);
+    }
+  }
+
   Future<void> _follow(String username) async {
+    setState(() => _followingAuthors.add(username));
     final res = await http.post(
       followEndpoint(username),
       headers: authJsonHeaders(widget.session.token),
+      body: jsonEncode({'follow': true}),
     );
-    if (res.statusCode == 401) await widget.onLogout();
-    if ((res.statusCode == 200 || res.statusCode == 201) && mounted) {
+    if (res.statusCode == 401) {
+      setState(() => _followingAuthors.remove(username));
+      await widget.onLogout();
+      return;
+    }
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      if (mounted) setState(() => _followingAuthors.remove(username));
+    } else if (mounted) {
       await _loadFollowingAuthors();
     }
   }
@@ -303,6 +330,16 @@ class _HomePageState extends State<HomePage> {
   void _openProfile(String username) {
     setState(() {
       _inlineProfileUsername = username;
+      _inlinePostId = null;
+      _showInlineProfile = true;
+      _nav = 0;
+    });
+  }
+
+  void _openProfileAtPost(String username, int postId) {
+    setState(() {
+      _inlineProfileUsername = username;
+      _inlinePostId = postId;
       _showInlineProfile = true;
       _nav = 0;
     });
@@ -322,6 +359,7 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _nav = 0;
         _showInlineProfile = false;
+        _inlinePostId = null;
       });
       return;
     }
@@ -329,6 +367,7 @@ class _HomePageState extends State<HomePage> {
       _activeCity = null;
       _nav = 0;
       _showInlineProfile = false;
+      _inlinePostId = null;
       _loading = true;
     });
     await _load();
@@ -517,142 +556,295 @@ class _HomePageState extends State<HomePage> {
   void _openComments(FeedPost post) {
     final controller = TextEditingController();
     final isLight = widget.themeMode == ThemeMode.light;
+    // Local like state — optimistic, keyed by comment id
+    final likedMap = <int, bool>{for (final c in post.comments) c.id: c.liked};
+    final likesMap = <int, int>{for (final c in post.comments) c.id: c.likes};
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff141414),
-      builder: (_) {
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.viewInsetsOf(context).bottom,
-              left: 16,
-              right: 16,
-            ),
-            child: SizedBox(
-              height: MediaQuery.sizeOf(context).height * 0.7,
-              child: Column(
-                children: [
-                  Text(
-                    'Comments',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: isLight ? Colors.black : Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: post.comments.isEmpty
-                        ? Center(
-                            child: Text(
-                              'No comments yet.',
-                              style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7)),
-                            ),
-                          )
-                        : ListView.separated(
-                            itemCount: post.comments.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (context, index) {
-                              final comment = post.comments[index];
-                              return Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _PostAvatar(
-                                    username: comment.author,
-                                    avatarUrl: comment.avatarUrl,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          comment.author,
-                                          style: TextStyle(
-                                            color: isLight ? Colors.black : Colors.white,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          comment.text,
-                                          style: TextStyle(
-                                            color: isLight ? Colors.black : Colors.white,
-                                            fontSize: 14,
-                                            height: 1.35,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                  ),
-                  Row(
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final userCity = widget.session.user.city.trim().toLowerCase();
+            final postCity = post.city.trim().toLowerCase();
+            final canLike = postCity.isEmpty || userCity.isEmpty || postCity == userCity;
+
+            Future<void> toggleLike(FeedComment comment) async {
+              if (!canLike) return;
+              final wasLiked = likedMap[comment.id] ?? comment.liked;
+              final newLikes = (likesMap[comment.id] ?? comment.likes) + (wasLiked ? -1 : 1);
+              setModalState(() {
+                likedMap[comment.id] = !wasLiked;
+                likesMap[comment.id] = newLikes;
+              });
+              try {
+                await http.post(
+                  commentLikeEndpoint(comment.id),
+                  headers: authJsonHeaders(widget.session.token),
+                  body: jsonEncode({'liked': !wasLiked}),
+                );
+                // Persist to the FeedComment so reopening the modal keeps the state
+                comment.liked = !wasLiked;
+                comment.likes = newLikes;
+              } catch (_) {
+                setModalState(() {
+                  likedMap[comment.id] = wasLiked;
+                  likesMap[comment.id] = (likesMap[comment.id] ?? comment.likes) + (wasLiked ? 1 : -1);
+                });
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(sheetCtx).bottom,
+              ),
+              child: SafeArea(
+                child: SizedBox(
+                  height: MediaQuery.sizeOf(context).height * 0.75,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: controller,
-                          style: TextStyle(
-                            color: isLight ? Colors.black : Colors.white,
-                          ),
-                          cursorColor: isLight ? Colors.black : Colors.white,
-                          decoration: InputDecoration(
-                            hintText: 'Add a comment...',
-                            hintStyle: TextStyle(
-                              color: isLight ? const Color(0xff616161) : const Color(0xff9a9a9a),
-                            ),
-                            filled: true,
-                            fillColor: isLight
-                                ? const Color(0xffeef1f5)
-                                : const Color(0xff1e1e1e),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide(
-                                color: isLight
-                                    ? const Color(0xffd9dee6)
-                                    : const Color(0xff2a2a2a),
-                              ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide(
-                                color: isLight
-                                    ? const Color(0xffd9dee6)
-                                    : const Color(0xff2a2a2a),
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide(
-                                color: isLight ? Colors.black : Colors.white,
-                              ),
+                      // Title
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
+                          child: Text(
+                            'Comments',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: isLight ? Colors.black : Colors.white,
                             ),
                           ),
                         ),
                       ),
-                      TextButton(
-                        onPressed: () async {
-                          final text = controller.text.trim();
-                          if (text.isEmpty) return;
-                          await _comment(post, text);
-                          if (mounted) Navigator.of(context).pop();
-                        },
-                        child: const Text('Post'),
+                      Divider(
+                        height: 1,
+                        color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+                      ),
+                      // Comments list
+                      Expanded(
+                        child: post.comments.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'No comments yet.\nBe the first!',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: isLight
+                                        ? const Color(0xff8b95a3)
+                                        : const Color(0xffb3b3b3),
+                                    height: 1.6,
+                                  ),
+                                ),
+                              )
+                            : ListView.builder(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                itemCount: post.comments.length,
+                                itemBuilder: (context, index) {
+                                  final comment = post.comments[index];
+                                  final bytes = _decodeDataUrl(comment.avatarUrl);
+                                  final isLiked = likedMap[comment.id] ?? comment.liked;
+                                  final likeCount = likesMap[comment.id] ?? comment.likes;
+                                  return Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 18,
+                                          backgroundColor: isLight
+                                              ? const Color(0xffe6e9ef)
+                                              : const Color(0xff2a2a2a),
+                                          foregroundImage: bytes != null
+                                              ? MemoryImage(bytes)
+                                              : null,
+                                          child: bytes == null
+                                              ? Text(
+                                                  initialFor(comment.author),
+                                                  style: TextStyle(
+                                                    color: isLight
+                                                        ? Colors.black
+                                                        : Colors.white,
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                )
+                                              : null,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: RichText(
+                                            text: TextSpan(
+                                              children: [
+                                                TextSpan(
+                                                  text: '${comment.author} ',
+                                                  style: TextStyle(
+                                                    color: isLight
+                                                        ? Colors.black
+                                                        : Colors.white,
+                                                    fontWeight: FontWeight.w700,
+                                                    fontSize: 15,
+                                                    height: 1.5,
+                                                  ),
+                                                ),
+                                                TextSpan(
+                                                  text: comment.text,
+                                                  style: TextStyle(
+                                                    color: isLight
+                                                        ? Colors.black
+                                                        : Colors.white,
+                                                    fontWeight: FontWeight.w400,
+                                                    fontSize: 15,
+                                                    height: 1.5,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        GestureDetector(
+                                          onTap: canLike ? () => toggleLike(comment) : null,
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                isLiked
+                                                    ? Icons.favorite_rounded
+                                                    : Icons.favorite_border_rounded,
+                                                size: 18,
+                                                color: !canLike
+                                                    ? (isLight
+                                                        ? const Color(0xffd0d0d0)
+                                                        : const Color(0xff3a3a3a))
+                                                    : isLiked
+                                                        ? const Color(0xfff66c6c)
+                                                        : (isLight
+                                                            ? const Color(0xffa0a0a0)
+                                                            : const Color(0xff6a6a6a)),
+                                              ),
+                                              if (likeCount > 0)
+                                                Text(
+                                                  '$likeCount',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: isLight
+                                                        ? const Color(0xff8b95a3)
+                                                        : const Color(0xff7a7a7a),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                      Divider(
+                        height: 1,
+                        color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+                      ),
+                      // Input row
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                        child: Row(
+                          children: [
+                            Builder(builder: (_) {
+                              final userBytes = _decodeDataUrl(widget.session.user.avatarUrl);
+                              return CircleAvatar(
+                                radius: 16,
+                                backgroundColor: isLight
+                                    ? const Color(0xffe6e9ef)
+                                    : const Color(0xff2a2a2a),
+                                foregroundImage: userBytes != null ? MemoryImage(userBytes) : null,
+                                child: userBytes == null
+                                    ? Text(
+                                        initialFor(widget.session.user.username),
+                                        style: TextStyle(
+                                          color: isLight ? Colors.black : Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      )
+                                    : null,
+                              );
+                            }),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: ValueListenableBuilder<TextEditingValue>(
+                                valueListenable: controller,
+                                builder: (context, value, _) {
+                                  return TextField(
+                                    controller: controller,
+                                    style: TextStyle(
+                                      color: isLight ? Colors.black : Colors.white,
+                                      fontSize: 14,
+                                    ),
+                                    cursorColor: isLight ? Colors.black : Colors.white,
+                                    decoration: InputDecoration(
+                                      hintText: 'Add a comment...',
+                                      hintStyle: TextStyle(
+                                        color: isLight
+                                            ? const Color(0xff8b95a3)
+                                            : const Color(0xff9a9a9a),
+                                        fontSize: 14,
+                                      ),
+                                      contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 10,
+                                      ),
+                                      filled: true,
+                                      fillColor: isLight
+                                          ? const Color(0xfff0f2f5)
+                                          : const Color(0xff1e1e1e),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(24),
+                                        borderSide: BorderSide.none,
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(24),
+                                        borderSide: BorderSide.none,
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(24),
+                                        borderSide: BorderSide.none,
+                                      ),
+                                      suffixIcon: value.text.trim().isNotEmpty
+                                          ? IconButton(
+                                              onPressed: () async {
+                                                final text = controller.text.trim();
+                                                if (text.isEmpty) return;
+                                                controller.clear();
+                                                final nav = Navigator.of(ctx);
+                                                await _comment(post, text);
+                                                if (mounted) nav.pop();
+                                              },
+                                              icon: const Icon(
+                                                Icons.send_rounded,
+                                                color: Color(0xff4f8cff),
+                                                size: 20,
+                                              ),
+                                            )
+                                          : null,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -941,14 +1133,17 @@ class _HomePageState extends State<HomePage> {
             Expanded(
               child: _showInlineProfile
                   ? ProfilePage(
+                      key: ValueKey(_inlineProfileUsername),
                       username: _inlineProfileUsername,
                       currentUser: widget.session.user,
                       token: widget.session.token,
                       posts: _posts,
                       onOpenUserProfile: _openProfile,
+                      onOpenProfileAtPost: _openProfileAtPost,
                       onLogout: widget.onLogout,
                       onSessionUpdated: widget.onSessionChanged,
                       onPostTap: _openComments,
+                      initialPostId: _inlinePostId,
                       themeMode: widget.themeMode,
                       onThemeModeChanged: widget.onThemeModeChanged,
                     )
@@ -1007,7 +1202,7 @@ class _HomePageState extends State<HomePage> {
                                       ],
                                     ),
                                   ),
-                                  onSave: () {},
+                                  onSave: () => _save(post),
                                   onMore: () => _openSheet(
                                     title: post.author,
                                     child: Column(
@@ -1044,6 +1239,7 @@ class _HomePageState extends State<HomePage> {
                                   onFollow: post.author != widget.session.user.username
                                       ? () => _follow(post.author)
                                       : null,
+                                  isFollowing: _followingAuthors.contains(post.author),
                                 );
                               },
                             ),
@@ -1104,7 +1300,10 @@ class _HomePageState extends State<HomePage> {
                 _goHome();
                 return;
               }
-              setState(() => _nav = i);
+              setState(() {
+                _nav = i;
+                _showInlineProfile = false;
+              });
             },
             items: const [
               BottomNavigationBarItem(
@@ -1318,6 +1517,7 @@ class _FeedPostCard extends StatelessWidget {
     required this.onMore,
     required this.onProfileTap,
     this.onFollow,
+    this.isFollowing = false,
   });
   final FeedPost post;
   final VoidCallback onLike;
@@ -1327,6 +1527,7 @@ class _FeedPostCard extends StatelessWidget {
   final VoidCallback onMore;
   final VoidCallback onProfileTap;
   final VoidCallback? onFollow;
+  final bool isFollowing;
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
@@ -1381,20 +1582,26 @@ class _FeedPostCard extends StatelessWidget {
                   if (onFollow != null) ...[
                     const SizedBox(width: 8),
                     OutlinedButton(
-                      onPressed: onFollow,
+                      onPressed: isFollowing ? null : onFollow,
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        side: BorderSide(color: isLight ? Colors.black : Colors.white),
+                        side: BorderSide(
+                          color: isFollowing
+                              ? (isLight ? const Color(0xffb0b0b0) : const Color(0xff555555))
+                              : (isLight ? Colors.black : Colors.white),
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                       child: Text(
-                        'Follow',
+                        isFollowing ? 'Following' : 'Follow',
                         style: TextStyle(
-                          color: isLight ? Colors.black : Colors.white,
+                          color: isFollowing
+                              ? (isLight ? const Color(0xffb0b0b0) : const Color(0xff555555))
+                              : (isLight ? Colors.black : Colors.white),
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1450,7 +1657,7 @@ class _FeedPostCard extends StatelessWidget {
                   ),
                   IconButton(
                     onPressed: onComment,
-                    icon: _CommentBubbleIcon(
+                    icon: CommentBubbleIcon(
                       color: isLight ? Colors.black : Colors.white,
                       size: 25,
                     ),
@@ -1466,8 +1673,12 @@ class _FeedPostCard extends StatelessWidget {
                   IconButton(
                     onPressed: onSave,
                     icon: Icon(
-                      Icons.bookmark_border_rounded,
-                      color: isLight ? Colors.black : Colors.white,
+                      post.saved
+                          ? Icons.bookmark_rounded
+                          : Icons.bookmark_border_rounded,
+                      color: post.saved
+                          ? const Color(0xffFFB800)
+                          : (isLight ? Colors.black : Colors.white),
                       size: 28,
                     ),
                   ),
@@ -2442,76 +2653,6 @@ String _timeAgo(DateTime created) {
   if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
   if (diff.inHours < 24) return '${diff.inHours}h ago';
   return '${diff.inDays}d ago';
-}
-
-// Instagram-style circular speech bubble icon drawn with CustomPaint.
-class _CommentBubbleIcon extends StatelessWidget {
-  const _CommentBubbleIcon({required this.color, required this.size});
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox.square(
-      dimension: size,
-      // Flip horizontally so the tail ends up on the left side.
-      child: Transform.scale(
-        scaleX: -1,
-        child: CustomPaint(painter: _CommentBubblePainter(color)),
-      ),
-    );
-  }
-}
-
-class _CommentBubblePainter extends CustomPainter {
-  const _CommentBubblePainter(this.color);
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final sw = size.width * 0.082;
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = sw
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final w = size.width;
-    final h = size.height;
-    final inset = sw / 2 + 0.5;
-
-    // Large circle shifted up slightly to leave room for the tail.
-    final cx = w / 2;
-    final cy = h * 0.43;
-    final r = math.min(cx, cy) - inset;
-
-    // Gap in the circle where the tail attaches (lower-left, ~132°–158°).
-    const startRad = 132.0 * math.pi / 180;
-    const endRad = 158.0 * math.pi / 180;
-
-    final gapStart = Offset(cx + r * math.cos(startRad), cy + r * math.sin(startRad));
-    final gapEnd   = Offset(cx + r * math.cos(endRad),   cy + r * math.sin(endRad));
-    final tailTip  = Offset(w * 0.10, h - inset);
-
-    // Path: gapStart → tailTip → gapEnd → long arc back to gapStart.
-    final path = Path()
-      ..moveTo(gapStart.dx, gapStart.dy)
-      ..lineTo(tailTip.dx, tailTip.dy)
-      ..lineTo(gapEnd.dx, gapEnd.dy)
-      ..arcTo(
-        Rect.fromCircle(center: Offset(cx, cy), radius: r),
-        endRad,
-        (2 * math.pi) - (endRad - startRad), // long way round
-        false,
-      )
-      ..close();
-
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(_CommentBubblePainter old) => old.color != color;
 }
 
 // Instagram-style paper-plane share icon drawn with CustomPaint.

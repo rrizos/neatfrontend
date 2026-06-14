@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
+import '../core/icons.dart';
 import '../core/models.dart';
 import '../messages/messages_page.dart';
 
@@ -22,17 +23,21 @@ class ProfilePage extends StatefulWidget {
     required this.onSessionUpdated,
     required this.themeMode,
     required this.onThemeModeChanged,
+    this.initialPostId,
+    this.onOpenProfileAtPost,
   });
   final String username;
   final UserProfile currentUser;
   final String token;
   final List<FeedPost> posts;
   final ValueChanged<String> onOpenUserProfile;
+  final void Function(String username, int postId)? onOpenProfileAtPost;
   final ValueChanged<FeedPost> onPostTap;
   final Future<void> Function() onLogout;
   final ValueChanged<AuthSession> onSessionUpdated;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
+  final int? initialPostId;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -42,11 +47,19 @@ class _ProfilePageState extends State<ProfilePage> {
   UserProfile? _profile;
   bool _loading = true;
   final ImagePicker _imagePicker = ImagePicker();
+  final ScrollController _scrollController = ScrollController();
+  final Map<int, GlobalKey> _postKeys = {};
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -67,6 +80,18 @@ class _ProfilePageState extends State<ProfilePage> {
         );
         _loading = false;
       });
+      if (widget.initialPostId != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final key = _postKeys[widget.initialPostId!];
+          if (key?.currentContext != null) {
+            Scrollable.ensureVisible(
+              key!.currentContext!,
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeInOut,
+            );
+          }
+        });
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -142,6 +167,44 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _openSavedPosts() async {
+    final res = await http.get(
+      savedPostsEndpoint,
+      headers: authGetHeaders(widget.token),
+    );
+    if (res.statusCode == 401) {
+      await widget.onLogout();
+      return;
+    }
+    if (!mounted) return;
+    final List<FeedPost> posts;
+    if (res.statusCode == 200) {
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      posts = (decoded['posts'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(FeedPost.fromJson)
+          .toList();
+    } else {
+      posts = const [];
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _SavedPostsPage(
+          posts: posts,
+          themeMode: widget.themeMode,
+          onOpenPost: (author, postId) {
+            if (widget.onOpenProfileAtPost != null) {
+              widget.onOpenProfileAtPost!(author, postId);
+            } else {
+              widget.onOpenUserProfile(author);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _openEditProfile() async {
     final profile = _profile;
     if (profile == null) return;
@@ -177,7 +240,6 @@ class _ProfilePageState extends State<ProfilePage> {
     required String title,
     required Uri endpoint,
   }) async {
-    final isLight = Theme.of(context).brightness == Brightness.light;
     final res = await http.get(endpoint, headers: authGetHeaders(widget.token));
     if (res.statusCode != 200) return;
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -186,119 +248,17 @@ class _ProfilePageState extends State<ProfilePage> {
         .map(UserProfile.fromJson)
         .toList();
     if (!mounted) return;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: StatefulBuilder(
-            builder: (context, setSheetState) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: isLight ? Colors.black : Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (users.isEmpty)
-                    Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text(
-                        'No users yet.',
-                        style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7)),
-                      ),
-                    )
-                  else
-                    Flexible(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: users.length,
-                            separatorBuilder: (_, _) =>
-                            Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626)),
-                        itemBuilder: (context, index) {
-                          final user = users[index];
-                          final canToggle =
-                              user.username != widget.currentUser.username;
-                          return ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: CircleAvatar(
-                              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                              child: Text(
-                                initialFor(user.username),
-                                style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                              ),
-                            ),
-                            title: Text(
-                              user.username,
-                              style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                            ),
-                            subtitle: Text(
-                              user.isFollowing
-                                  ? 'Following you'
-                                  : 'Not following yet',
-                              style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7)),
-                            ),
-                            trailing: canToggle
-                                ? TextButton(
-                                    onPressed: () async {
-                                      final res = await http.post(
-                                        followEndpoint(user.username),
-                                        headers: authJsonHeaders(widget.token),
-                                        body: jsonEncode({
-                                          'follow': !user.isFollowing,
-                                        }),
-                                      );
-                                      if (res.statusCode != 200) return;
-                                      if (!mounted) return;
-                                      final decoded =
-                                          jsonDecode(res.body)
-                                              as Map<String, dynamic>;
-                                      final updatedUser = UserProfile.fromJson(
-                                        decoded['user'] as Map<String, dynamic>,
-                                      );
-                                      setSheetState(() {
-                                        users[index] = updatedUser;
-                                      });
-                                      setState(() {
-                                        _profile = UserProfile.fromJson(
-                                          decoded['user']
-                                              as Map<String, dynamic>,
-                                        );
-                                      });
-                                      widget.onSessionUpdated(
-                                        AuthSession(
-                                          token: widget.token,
-                                          user: UserProfile.fromJson(
-                                            decoded['viewer']
-                                                as Map<String, dynamic>,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                    child: Text(
-                                      user.isFollowing ? 'Unfollow' : 'Follow',
-                                    ),
-                                  )
-                                : null,
-                            onTap: () {
-                              Navigator.of(context).pop();
-                              widget.onOpenUserProfile(user.username);
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _UserListPage(
+          title: title,
+          users: users,
+          currentUser: widget.currentUser,
+          token: widget.token,
+          themeMode: widget.themeMode,
+          onOpenUserProfile: widget.onOpenUserProfile,
+          onSessionUpdated: widget.onSessionUpdated,
+          onProfileRefresh: _load,
         ),
       ),
     );
@@ -346,15 +306,26 @@ class _ProfilePageState extends State<ProfilePage> {
           ],
         ),
         actions: [
-          IconButton(
-            onPressed: () async {
-              await widget.onLogout();
-            },
-            icon: const Icon(Icons.logout),
-          ),
+          if (profile.username == widget.currentUser.username) ...[
+            IconButton(
+              onPressed: _openSavedPosts,
+              icon: Icon(
+                Icons.bookmark_border_rounded,
+                color: isLight ? Colors.black : Colors.white,
+              ),
+            ),
+            IconButton(
+              onPressed: () async => widget.onLogout(),
+              icon: Icon(
+                Icons.logout,
+                color: isLight ? Colors.black : Colors.white,
+              ),
+            ),
+          ],
         ],
       ),
       body: ListView(
+        controller: _scrollController,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -487,7 +458,9 @@ class _ProfilePageState extends State<ProfilePage> {
                   Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
               itemBuilder: (context, index) {
                 final post = userPosts[index];
+                final postKey = _postKeys.putIfAbsent(post.id, () => GlobalKey());
                 return InkWell(
+                  key: postKey,
                   onTap: () => widget.onPostTap(post),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
@@ -578,49 +551,6 @@ class _ProfilePageState extends State<ProfilePage> {
                               ),
                           ),
                         ],
-                        if (post.comments.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          ...post.comments.take(2).map(
-                                (comment) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      _CommentAvatar(
-                                        username: comment.author,
-                                        avatarUrl: comment.avatarUrl,
-                                        radius: 13,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              comment.author,
-                                              style: TextStyle(
-                                                color: isLight ? Colors.black : Colors.white,
-                                                fontSize: 13.5,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              comment.text,
-                                              style: TextStyle(
-                                                color: isLight ? const Color(0xff444444) : Colors.white,
-                                                fontSize: 13.5,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                        ],
                         if (post.imageUrl.isNotEmpty) ...[
                           const SizedBox(height: 12),
                           ClipRRect(
@@ -640,8 +570,7 @@ class _ProfilePageState extends State<ProfilePage> {
                               size: 20,
                             ),
                             const SizedBox(width: 18),
-                            Icon(
-                              Icons.mode_comment_outlined,
+                            CommentBubbleIcon(
                               color: isLight ? Colors.black : Colors.white,
                               size: 20,
                             ),
@@ -680,39 +609,6 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
-class _CommentAvatar extends StatelessWidget {
-  const _CommentAvatar({
-    required this.username,
-    required this.avatarUrl,
-    required this.radius,
-  });
-
-  final String username;
-  final String avatarUrl;
-  final double radius;
-
-  @override
-  Widget build(BuildContext context) {
-    final bytes = _dataUrlBytes(avatarUrl);
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: Theme.of(context).brightness == Brightness.light
-          ? const Color(0xffe6e9ef)
-          : const Color(0xff2a2a2a),
-      foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-      child: bytes == null
-          ? Text(
-              initialFor(username),
-              style: TextStyle(
-                color: Theme.of(context).brightness == Brightness.light
-                    ? Colors.black
-                    : Colors.white,
-              ),
-            )
-          : null,
-    );
-  }
-}
 
 Uint8List? _dataUrlBytes(String value) {
   if (!value.startsWith('data:')) return null;
@@ -1063,6 +959,454 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SavedPostsPage extends StatefulWidget {
+  const _SavedPostsPage({
+    required this.posts,
+    required this.themeMode,
+    required this.onOpenPost,
+  });
+
+  final List<FeedPost> posts;
+  final ThemeMode themeMode;
+  final void Function(String author, int postId) onOpenPost;
+
+  @override
+  State<_SavedPostsPage> createState() => _SavedPostsPageState();
+}
+
+class _SavedPostsPageState extends State<_SavedPostsPage> {
+  final _search = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  List<FeedPost> get _filtered {
+    if (_query.isEmpty) return widget.posts;
+    final q = _query.toLowerCase();
+    return widget.posts
+        .where((p) =>
+            p.author.toLowerCase().contains(q) ||
+            p.text.toLowerCase().contains(q))
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = widget.themeMode == ThemeMode.light;
+    return Scaffold(
+      backgroundColor:
+          isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+      appBar: AppBar(
+        backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+        iconTheme: IconThemeData(color: isLight ? Colors.black : Colors.white),
+        title: Text(
+          'Saved',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: isLight ? Colors.black : Colors.white,
+          ),
+        ),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+            child: TextField(
+              controller: _search,
+              onChanged: (v) => setState(() => _query = v.trim()),
+              style:
+                  TextStyle(color: isLight ? Colors.black : Colors.white),
+              cursorColor: isLight ? Colors.black : Colors.white,
+              decoration: InputDecoration(
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: isLight
+                      ? const Color(0xff8b95a3)
+                      : const Color(0xffa6a6a6),
+                ),
+                hintText: 'Search saved posts',
+                hintStyle: TextStyle(
+                  color: isLight
+                      ? const Color(0xff8b95a3)
+                      : const Color(0xff8f8f8f),
+                ),
+                filled: true,
+                fillColor:
+                    isLight ? Colors.white : const Color(0xff1a1a1b),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(
+                    color: isLight
+                        ? const Color(0xffd9dee6)
+                        : const Color(0xff2a2a2a),
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(
+                    color: isLight
+                        ? const Color(0xffd9dee6)
+                        : const Color(0xff2a2a2a),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide:
+                      BorderSide(color: isLight ? Colors.black : Colors.white),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: _filtered.isEmpty
+                ? Center(
+                    child: Text(
+                      _query.isEmpty ? 'No saved posts yet.' : 'No results.',
+                      style: TextStyle(
+                        color: isLight
+                            ? const Color(0xff616161)
+                            : const Color(0xffb7b7b7),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: _filtered.length,
+                    separatorBuilder: (_, _) => Divider(
+                      height: 1,
+                      color: isLight
+                          ? const Color(0xffd9dee6)
+                          : const Color(0xff242424),
+                    ),
+                    itemBuilder: (context, index) {
+                      final post = _filtered[index];
+                      return InkWell(
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          widget.onOpenPost(post.author, post.id);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                radius: 18,
+                                backgroundColor: isLight
+                                    ? const Color(0xffe6e9ef)
+                                    : const Color(0xff2a2a2a),
+                                child: Text(
+                                  initialFor(post.author),
+                                  style: TextStyle(
+                                    color:
+                                        isLight ? Colors.black : Colors.white,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      post.author,
+                                      style: TextStyle(
+                                        color: isLight
+                                            ? Colors.black
+                                            : Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      post.text,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: isLight
+                                            ? const Color(0xff444444)
+                                            : const Color(0xffb3b3b3),
+                                        fontSize: 13.5,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (post.imageUrl.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 10),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: SizedBox(
+                                      width: 52,
+                                      height: 52,
+                                      child: _AvatarPreview(url: post.imageUrl),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UserListPage extends StatefulWidget {
+  const _UserListPage({
+    required this.title,
+    required this.users,
+    required this.currentUser,
+    required this.token,
+    required this.themeMode,
+    required this.onOpenUserProfile,
+    required this.onSessionUpdated,
+    required this.onProfileRefresh,
+  });
+
+  final String title;
+  final List<UserProfile> users;
+  final UserProfile currentUser;
+  final String token;
+  final ThemeMode themeMode;
+  final ValueChanged<String> onOpenUserProfile;
+  final ValueChanged<AuthSession> onSessionUpdated;
+  final Future<void> Function() onProfileRefresh;
+
+  @override
+  State<_UserListPage> createState() => _UserListPageState();
+}
+
+class _UserListPageState extends State<_UserListPage> {
+  late final List<UserProfile> _users;
+  final _search = TextEditingController();
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _users = List.of(widget.users);
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  List<UserProfile> get _filtered {
+    if (_query.isEmpty) return _users;
+    final q = _query.toLowerCase();
+    return _users
+        .where((u) =>
+            u.username.toLowerCase().contains(q) ||
+            u.fullName.toLowerCase().contains(q))
+        .toList();
+  }
+
+  Future<void> _toggleFollow(int index, UserProfile user) async {
+    final res = await http.post(
+      followEndpoint(user.username),
+      headers: authJsonHeaders(widget.token),
+      body: jsonEncode({'follow': !user.isFollowing}),
+    );
+    if (res.statusCode != 200) return;
+    if (!mounted) return;
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    setState(() {
+      _users[index] = UserProfile.fromJson(
+        decoded['user'] as Map<String, dynamic>,
+      );
+    });
+    widget.onSessionUpdated(
+      AuthSession(
+        token: widget.token,
+        user: UserProfile.fromJson(
+          decoded['viewer'] as Map<String, dynamic>,
+        ),
+      ),
+    );
+    await widget.onProfileRefresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = widget.themeMode == ThemeMode.light;
+    final filtered = _filtered;
+    return Scaffold(
+      backgroundColor:
+          isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+      appBar: AppBar(
+        backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+        iconTheme: IconThemeData(color: isLight ? Colors.black : Colors.white),
+        title: Text(
+          widget.title,
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: isLight ? Colors.black : Colors.white,
+          ),
+        ),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+            child: TextField(
+              controller: _search,
+              onChanged: (v) => setState(() => _query = v.trim()),
+              style:
+                  TextStyle(color: isLight ? Colors.black : Colors.white),
+              cursorColor: isLight ? Colors.black : Colors.white,
+              decoration: InputDecoration(
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: isLight
+                      ? const Color(0xff8b95a3)
+                      : const Color(0xffa6a6a6),
+                ),
+                hintText: 'Search',
+                hintStyle: TextStyle(
+                  color: isLight
+                      ? const Color(0xff8b95a3)
+                      : const Color(0xff8f8f8f),
+                ),
+                filled: true,
+                fillColor:
+                    isLight ? Colors.white : const Color(0xff1a1a1b),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(
+                    color: isLight
+                        ? const Color(0xffd9dee6)
+                        : const Color(0xff2a2a2a),
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(
+                    color: isLight
+                        ? const Color(0xffd9dee6)
+                        : const Color(0xff2a2a2a),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide:
+                      BorderSide(color: isLight ? Colors.black : Colors.white),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(
+                    child: Text(
+                      _query.isEmpty ? 'No users yet.' : 'No results.',
+                      style: TextStyle(
+                        color: isLight
+                            ? const Color(0xff616161)
+                            : const Color(0xffb7b7b7),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => Divider(
+                      height: 1,
+                      color: isLight
+                          ? const Color(0xffd9dee6)
+                          : const Color(0xff262626),
+                    ),
+                    itemBuilder: (context, index) {
+                      final user = filtered[index];
+                      final globalIndex = _users.indexOf(user);
+                      final canToggle =
+                          user.username != widget.currentUser.username;
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 4),
+                        leading: CircleAvatar(
+                          backgroundColor: isLight
+                              ? const Color(0xffe6e9ef)
+                              : const Color(0xff2a2a2a),
+                          child: Text(
+                            initialFor(user.username),
+                            style: TextStyle(
+                                color:
+                                    isLight ? Colors.black : Colors.white),
+                          ),
+                        ),
+                        title: Text(
+                          user.username,
+                          style: TextStyle(
+                            color: isLight ? Colors.black : Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: user.fullName.isNotEmpty
+                            ? Text(
+                                user.fullName,
+                                style: TextStyle(
+                                  color: isLight
+                                      ? const Color(0xff616161)
+                                      : const Color(0xffb7b7b7),
+                                ),
+                              )
+                            : null,
+                        trailing: canToggle
+                            ? OutlinedButton(
+                                onPressed: () =>
+                                    _toggleFollow(globalIndex, user),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16),
+                                  side: BorderSide(
+                                    color: isLight
+                                        ? Colors.black
+                                        : Colors.white,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: Text(
+                                  user.isFollowing ? 'Following' : 'Follow',
+                                  style: TextStyle(
+                                    color:
+                                        isLight ? Colors.black : Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              )
+                            : null,
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          widget.onOpenUserProfile(user.username);
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }

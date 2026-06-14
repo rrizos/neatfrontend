@@ -76,6 +76,7 @@ class FeedPost {
   final int minutesAgo;
   final bool following;
   bool liked = false;
+  bool saved = false;
 
   factory FeedPost.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -96,26 +97,37 @@ class FeedPost {
       following: json['following'] != false,
     );
     post.liked = json['liked'] == true;
+    post.saved = json['saved'] == true;
     return post;
   }
 }
 
 class FeedComment {
-  const FeedComment({
+  FeedComment({
+    required this.id,
     required this.author,
     required this.text,
     required this.avatarUrl,
+    required this.likes,
+    required this.liked,
   });
 
+  final int id;
   final String author;
   final String text;
   final String avatarUrl;
+  int likes;
+  bool liked;
 
   factory FeedComment.fromJson(Map<String, dynamic> json) {
+    int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
     return FeedComment(
+      id: parseInt(json['id']),
       author: json['author']?.toString() ?? 'user',
       text: json['text']?.toString() ?? '',
       avatarUrl: json['avatarUrl']?.toString() ?? '',
+      likes: parseInt(json['likes']),
+      liked: json['liked'] == true,
     );
   }
 }
