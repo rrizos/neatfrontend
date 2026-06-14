@@ -1535,15 +1535,11 @@ class _TopBarAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bytes = _decodeDataUrl(url);
     final isLight = Theme.of(context).brightness == Brightness.light;
-    return CircleAvatar(
-      radius: 11,
-      backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-      foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-      child: bytes == null
-          ? Icon(Icons.person_outline_rounded, color: isLight ? Colors.black : Colors.white, size: 18)
-          : null,
+    return Icon(
+      Icons.person_outline_rounded,
+      color: isLight ? Colors.black : Colors.white,
+      size: 22,
     );
   }
 }

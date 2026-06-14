@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/api.dart';
@@ -26,15 +27,39 @@ class EventsPage extends StatefulWidget {
 }
 
 class _EventsPageState extends State<EventsPage> {
-  int _tab = 0;
+  int _tab = 0; // 0 = Official, 1 = Community
   bool _loading = true;
   List<EventItem> _events = [];
   final ImagePicker _picker = ImagePicker();
+  String _selectedCategory = 'All';
+  final Map<int, String> _localCategories = {};
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadLocalCategories().then((_) => _load());
+  }
+
+  Future<void> _loadLocalCategories() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('event_categories') ?? '{}';
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      _localCategories.clear();
+      for (final entry in map.entries) {
+        final id = int.tryParse(entry.key);
+        if (id != null) _localCategories[id] = entry.value.toString();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveLocalCategory(int eventId, String category) async {
+    _localCategories[eventId] = category;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'event_categories',
+      jsonEncode({for (final e in _localCategories.entries) '${e.key}': e.value}),
+    );
   }
 
   Future<void> _load() async {
@@ -51,6 +76,20 @@ class _EventsPageState extends State<EventsPage> {
       final events = (decoded['events'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(EventItem.fromJson)
+          .map((e) {
+            final local = _localCategories[e.id];
+            if (local != null && e.category.isEmpty) {
+              return EventItem(
+                id: e.id, city: e.city, eventType: e.eventType,
+                category: local, title: e.title, description: e.description,
+                location: e.location, imageUrl: e.imageUrl, creator: e.creator,
+                organizer: e.organizer, hasTickets: e.hasTickets,
+                ticketsUrl: e.ticketsUrl, attendees: e.attendees,
+                isAttending: e.isAttending,
+              );
+            }
+            return e;
+          })
           .toList();
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
       if (!mounted) return;
@@ -81,17 +120,39 @@ class _EventsPageState extends State<EventsPage> {
       body: jsonEncode(result),
     );
     if (res.statusCode == 201) {
+      final category = result['category'] as String?;
+      if (category != null && category.isNotEmpty) {
+        try {
+          final body = jsonDecode(res.body) as Map<String, dynamic>;
+          final eventMap = (body['event'] ?? body) as Map<String, dynamic>?;
+          final id = int.tryParse(eventMap?['id']?.toString() ?? '');
+          if (id != null) await _saveLocalCategory(id, category);
+        } catch (_) {}
+      }
       await _load();
     }
   }
 
   Future<void> _attend(EventItem event) async {
+    setState(() {
+      _events = _events.map((e) {
+        if (e.id != event.id) return e;
+        return EventItem(
+          id: e.id, city: e.city, eventType: e.eventType,
+          category: e.category, title: e.title, description: e.description,
+          location: e.location, imageUrl: e.imageUrl, creator: e.creator,
+          organizer: e.organizer, hasTickets: e.hasTickets,
+          ticketsUrl: e.ticketsUrl,
+          attendees: e.isAttending ? e.attendees - 1 : e.attendees + 1,
+          isAttending: !e.isAttending,
+        );
+      }).toList();
+    });
     final res = await http.post(
       eventAttendEndpoint(event.id),
       headers: authJsonHeaders(widget.token),
     );
-    if (res.statusCode != 200) return;
-    await _load();
+    if (res.statusCode != 200) await _load();
   }
 
   Future<void> _deleteEvent(EventItem event) async {
@@ -104,55 +165,18 @@ class _EventsPageState extends State<EventsPage> {
     }
   }
 
-  Future<void> _openComments(EventItem event) async {
-    final comments = await _loadComments(event.id);
-    if (!mounted) return;
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff0f0f10),
-      builder: (_) => _EventCommentsSheet(
-        event: event,
-        token: widget.token,
-        comments: comments,
-        onChanged: _load,
-      ),
-    );
-  }
-
-  Future<List<EventCommentItem>> _loadComments(int eventId) async {
-    try {
-      final res = await http.get(
-        Uri.parse('${eventsEndpoint().toString()}$eventId/comments/'),
-        headers: authGetHeaders(widget.token),
-      );
-      if (res.statusCode != 200) return const [];
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      return (decoded['comments'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(EventCommentItem.fromJson)
-          .toList();
-    } catch (_) {
-      return const [];
-    }
-  }
-
   List<EventItem> get _official =>
       _events.where((e) => e.eventType == 'official').toList();
   List<EventItem> get _community =>
       _events.where((e) => e.eventType == 'community').toList();
-  List<EventItem> get _popular =>
-      [..._events]..sort((a, b) => b.attendees.compareTo(a.attendees));
+  List<EventItem> get _filteredOfficial => _selectedCategory == 'All'
+      ? _official
+      : _official.where((e) => e.category == _selectedCategory).toList();
 
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final visible = switch (_tab) {
-      1 => _official,
-      2 => _community,
-      _ => _events,
-    };
+    final visible = _tab == 0 ? _filteredOfficial : _community;
 
     return Scaffold(
       backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff0f0f10),
@@ -194,95 +218,106 @@ class _EventsPageState extends State<EventsPage> {
             child: Row(
               children: [
                 _TabPill(
-                  label: 'All',
-                  selected: _tab == 0,
-                  onTap: () => setState(() => _tab = 0),
-                ),
-                const SizedBox(width: 8),
-                _TabPill(
                   label: 'Official',
-                  selected: _tab == 1,
-                  onTap: () => setState(() => _tab = 1),
+                  selected: _tab == 0,
+                  onTap: () => setState(() {
+                    _tab = 0;
+                    _selectedCategory = 'All';
+                  }),
                 ),
                 const SizedBox(width: 8),
                 _TabPill(
                   label: 'Community',
-                  selected: _tab == 2,
-                  onTap: () => setState(() => _tab = 2),
+                  selected: _tab == 1,
+                  onTap: () => setState(() {
+                    _tab = 1;
+                    _selectedCategory = 'All';
+                  }),
                 ),
               ],
             ),
           ),
           Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0x1fffffff)),
+          if (!_loading && _tab == 0) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 0, 0),
+              child: SizedBox(
+                height: 38,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: EdgeInsets.zero,
+                  itemCount: _kEventCategories.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final cat = _kEventCategories[index];
+                    final sel = cat == _selectedCategory;
+                    return GestureDetector(
+                      onTap: () => setState(() => _selectedCategory = cat),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: sel
+                              ? (isLight ? Colors.black : Colors.white)
+                              : (isLight ? Colors.white : const Color(0xff1e1e1e)),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: sel
+                                ? Colors.transparent
+                                : (isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                          ),
+                        ),
+                        child: Text(
+                          cat,
+                          style: TextStyle(
+                            color: sel
+                                ? (isLight ? Colors.white : Colors.black)
+                                : (isLight ? Colors.black : Colors.white),
+                            fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : ListView(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
-                    children: [
-                      if (_tab == 0 && _popular.isNotEmpty) ...[
-                        Row(
-                          children: [
-                            Text(
-                              'POPULAR TODAY',
-                              style: TextStyle(
-                                color: isLight ? Colors.black : Colors.white,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.2,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            const Text('🔥', style: TextStyle(fontSize: 16)),
-                          ],
+                : visible.isEmpty
+                    ? Center(
+                        child: Text(
+                          'No events yet.',
+                          style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c)),
                         ),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          height: 300,
-                          child: PageView.builder(
-                            controller: PageController(viewportFraction: 0.92),
-                            itemCount: _popular.length > 3 ? 3 : _popular.length,
-                            itemBuilder: (context, index) {
-                              final event = _popular[index];
-                              return Padding(
-                                padding: const EdgeInsets.only(right: 10),
+                      )
+                    : ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.fromLTRB(14, 12, 0, 24),
+                        itemCount: visible.length,
+                        itemBuilder: (context, index) {
+                          final event = visible[index];
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 14),
+                            child: SizedBox(
+                              width: MediaQuery.sizeOf(context).width - 80,
+                              child: Align(
+                                alignment: Alignment.topCenter,
                                 child: _EventCard(
                                   event: event,
                                   currentUsername: widget.currentUser.username,
                                   onAttend: () => _attend(event),
-                                  onComments: () => _openComments(event),
                                   onDelete: () => _deleteEvent(event),
                                 ),
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                      ],
-                      if (visible.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 44),
-                          child: Center(
-                            child: Text(
-                              'No events yet.',
-                              style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c)),
+                              ),
                             ),
-                          ),
-                        )
-                      else
-                        ...visible.map(
-                          (event) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _EventCard(
-                              event: event,
-                              currentUsername: widget.currentUser.username,
-                              onAttend: () => _attend(event),
-                              onComments: () => _openComments(event),
-                              onDelete: () => _deleteEvent(event),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
+                          );
+                        },
+                      ),
           ),
         ],
       ),
@@ -290,11 +325,24 @@ class _EventsPageState extends State<EventsPage> {
   }
 }
 
+const _kEventCategories = [
+  'All',
+  'Music Concert',
+  'Live Concert',
+  'Sports',
+  'Art & Culture',
+  'Food & Drinks',
+  'Tech',
+  'Comedy',
+  'Networking',
+];
+
 class EventItem {
   const EventItem({
     required this.id,
     required this.city,
     required this.eventType,
+    required this.category,
     required this.title,
     required this.description,
     required this.location,
@@ -304,11 +352,13 @@ class EventItem {
     required this.hasTickets,
     required this.ticketsUrl,
     required this.attendees,
+    required this.isAttending,
   });
 
   final int id;
   final String city;
   final String eventType;
+  final String category;
   final String title;
   final String description;
   final String location;
@@ -318,6 +368,7 @@ class EventItem {
   final bool hasTickets;
   final String ticketsUrl;
   final int attendees;
+  final bool isAttending;
 
   factory EventItem.fromJson(Map<String, dynamic> json) {
     int p(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -325,6 +376,7 @@ class EventItem {
       id: p(json['id']),
       city: json['city']?.toString() ?? '',
       eventType: json['eventType']?.toString() ?? 'community',
+      category: json['category']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
       description: json['description']?.toString() ?? '',
       location: json['location']?.toString() ?? '',
@@ -334,32 +386,7 @@ class EventItem {
       hasTickets: json['hasTickets'] == true,
       ticketsUrl: json['ticketsUrl']?.toString() ?? '',
       attendees: p(json['attendees']),
-    );
-  }
-}
-
-class EventCommentItem {
-  const EventCommentItem({
-    required this.id,
-    required this.author,
-    required this.text,
-    required this.created,
-  });
-
-  final int id;
-  final String author;
-  final String text;
-  final DateTime created;
-
-  factory EventCommentItem.fromJson(Map<String, dynamic> json) {
-    int p(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
-    return EventCommentItem(
-      id: p(json['id']),
-      author: json['author']?.toString() ?? '',
-      text: json['text']?.toString() ?? '',
-      created:
-          DateTime.tryParse(json['created']?.toString() ?? '') ??
-          DateTime.now(),
+      isAttending: json['isAttending'] == true,
     );
   }
 }
@@ -369,14 +396,12 @@ class _EventCard extends StatelessWidget {
     required this.event,
     required this.currentUsername,
     required this.onAttend,
-    required this.onComments,
     required this.onDelete,
   });
 
   final EventItem event;
   final String currentUsername;
   final VoidCallback onAttend;
-  final VoidCallback onComments;
   final VoidCallback onDelete;
 
   @override
@@ -399,6 +424,7 @@ class _EventCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           if (event.imageUrl.isNotEmpty)
             ClipRRect(
@@ -406,7 +432,7 @@ class _EventCard extends StatelessWidget {
               child: Stack(
                 children: [
                   SizedBox(
-                    height: official ? 170 : 120,
+                    height: 170,
                     width: double.infinity,
                     child: _EventMedia(url: event.imageUrl),
                   ),
@@ -424,20 +450,20 @@ class _EventCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (official)
-                    Positioned(
-                      left: 14,
-                      right: 14,
-                      bottom: 14,
-                      child: Text(
-                        event.title,
-                          style: TextStyle(
-                          color: isLight ? Colors.black : Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                        ),
+                  Positioned(
+                    left: 14,
+                    right: 14,
+                    bottom: 14,
+                    child: Text(
+                      event.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        shadows: [Shadow(blurRadius: 4, color: Colors.black45)],
                       ),
                     ),
+                  ),
                 ],
               ),
             ),
@@ -447,17 +473,19 @@ class _EventCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (official) ...[
-                  Text(
-                    event.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isLight ? Colors.black : Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
+                  if (event.imageUrl.isEmpty) ...[
+                    Text(
+                      event.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
+                    const SizedBox(height: 6),
+                  ],
                   Text(
                     event.location.isEmpty ? event.city : event.location,
                     style: const TextStyle(
@@ -522,15 +550,30 @@ class _EventCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  Text(
-                    event.description.isEmpty ? event.title : event.description,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      height: 1.35,
-                      fontSize: 15,
+                  if (event.imageUrl.isEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      event.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
+                  ],
+                  if (event.description.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      event.description,
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
+                        height: 1.35,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 12),
                 Row(
@@ -559,16 +602,8 @@ class _EventCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                    IconButton(
-                      onPressed: onComments,
-                      icon: const Icon(
-                        Icons.mode_comment_outlined,
-                        color: Colors.white,
-                      ),
-                    ),
                   ],
                 ),
-                const SizedBox(height: 2),
                 Row(
                   children: [
                     if (official && event.hasTickets)
@@ -598,18 +633,33 @@ class _EventCard extends StatelessWidget {
                       ),
                     if (official && event.hasTickets) const SizedBox(width: 10),
                     Expanded(
-                      child: FilledButton(
-                        onPressed: onAttend,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: isLight ? Colors.black : Colors.white,
-                          foregroundColor: isLight ? Colors.white : Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: const Text('Attend'),
-                      ),
+                      child: event.isAttending
+                          ? OutlinedButton(
+                              onPressed: onAttend,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: isLight ? Colors.black : Colors.white,
+                                side: BorderSide(
+                                  color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text("Don't Attend"),
+                            )
+                          : FilledButton(
+                              onPressed: onAttend,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: isLight ? Colors.black : Colors.white,
+                                foregroundColor: isLight ? Colors.white : Colors.black,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text('Attend'),
+                            ),
                     ),
                   ],
                 ),
@@ -676,7 +726,9 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   final _desc = TextEditingController();
   bool _official = false;
   bool _tickets = false;
+  String _category = _kEventCategories[1];
   String _imageUrl = '';
+  bool _showPhotoError = false;
 
   @override
   void dispose() {
@@ -696,6 +748,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     final mime = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
     setState(() {
       _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}';
+      _showPhotoError = false;
     });
   }
 
@@ -733,11 +786,16 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 TextButton(
                   onPressed: () {
                     if (_title.text.trim().isEmpty) return;
+                    if (_official && _imageUrl.isEmpty) {
+                      setState(() => _showPhotoError = true);
+                      return;
+                    }
                     Navigator.of(context).pop({
                       'title': _title.text.trim(),
                       'description': _desc.text.trim(),
                       'eventType': _official ? 'official' : 'community',
                       'hasTickets': _tickets,
+                      if (_official) 'category': _category,
                       if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
                     });
                   },
@@ -778,6 +836,59 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 ),
               ],
             ),
+            if (_official) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Category',
+                style: TextStyle(
+                  color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 38,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: EdgeInsets.zero,
+                  itemCount: _kEventCategories.length - 1,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final cat = _kEventCategories[index + 1];
+                    final sel = cat == _category;
+                    return GestureDetector(
+                      onTap: () => setState(() => _category = cat),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: sel
+                              ? (isLight ? Colors.black : Colors.white)
+                              : (isLight ? Colors.white : const Color(0xff1e1e1e)),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: sel
+                                ? Colors.transparent
+                                : (isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                          ),
+                        ),
+                        child: Text(
+                          cat,
+                          style: TextStyle(
+                            color: sel
+                                ? (isLight ? Colors.white : Colors.black)
+                                : (isLight ? Colors.black : Colors.white),
+                            fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             if (_imageUrl.isNotEmpty)
               ClipRRect(
@@ -788,6 +899,20 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 ),
               ),
             const SizedBox(height: 10),
+            if (_showPhotoError)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline_rounded, size: 15, color: Color(0xfff66c6c)),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Photo is required for official events',
+                      style: TextStyle(color: Color(0xfff66c6c), fontSize: 12.5, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
             Row(
               children: [
                 _ComposerAction(
@@ -915,166 +1040,5 @@ class _EventMedia extends StatelessWidget {
       }
     }
     return Image.network(url, fit: BoxFit.cover);
-  }
-}
-
-class _EventCommentsSheet extends StatefulWidget {
-  const _EventCommentsSheet({
-    required this.event,
-    required this.comments,
-    required this.token,
-    required this.onChanged,
-  });
-
-  final EventItem event;
-  final List<EventCommentItem> comments;
-  final String token;
-  final Future<void> Function() onChanged;
-
-  @override
-  State<_EventCommentsSheet> createState() => _EventCommentsSheetState();
-}
-
-class _EventCommentsSheetState extends State<_EventCommentsSheet> {
-  final _controller = TextEditingController();
-  late List<EventCommentItem> _comments;
-
-  @override
-  void initState() {
-    super.initState();
-    _comments = widget.comments;
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _send() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    final res = await http.post(
-      Uri.parse('${eventsEndpoint().toString()}${widget.event.id}/comments/'),
-      headers: authJsonHeaders(widget.token),
-      body: jsonEncode({'text': text}),
-    );
-    if (res.statusCode != 201) return;
-    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-    final comment =
-        EventCommentItem.fromJson(decoded['comment'] as Map<String, dynamic>);
-    if (!mounted) return;
-    setState(() {
-      _comments = [..._comments, comment];
-      _controller.clear();
-    });
-    await widget.onChanged();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          14,
-          0,
-          14,
-          MediaQuery.viewInsetsOf(context).bottom + 14,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Comments',
-                    style: TextStyle(
-                      color: isLight ? Colors.black : Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 18,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: Icon(Icons.close, color: isLight ? Colors.black : Colors.white),
-                ),
-              ],
-            ),
-            const Divider(height: 1, color: Color(0x1fffffff)),
-            const SizedBox(height: 12),
-            if (_comments.isEmpty)
-              Padding(
-                padding: EdgeInsets.symmetric(vertical: 30),
-                child: Text(
-                  'No comments yet.',
-                  style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c)),
-                ),
-              )
-            else
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: _comments.length,
-                  separatorBuilder: (_, _) =>
-                      Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff232323)),
-                  itemBuilder: (_, index) {
-                    final comment = _comments[index];
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: CircleAvatar(
-                        backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                        child: Text(initialFor(comment.author)),
-                      ),
-                      title: Text(
-                        comment.author,
-                        style: TextStyle(
-                          color: isLight ? Colors.black : Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      subtitle: Text(
-                        comment.text,
-                        style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3)),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                      style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                      cursorColor: isLight ? Colors.black : Colors.white,
-                    decoration: InputDecoration(
-                      hintText: 'Add a comment...',
-                      hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
-                      filled: true,
-                      fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        borderSide: BorderSide(
-                          color: isLight ? const Color(0xffd9dee6) : Colors.transparent,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                FilledButton(
-                  onPressed: _send,
-                  child: const Text('Send'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
