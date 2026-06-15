@@ -1394,7 +1394,7 @@ class _TopBar extends StatelessWidget {
                 _TopBarPill(
                   onTap: onNotificationsTap,
                   child: Icon(
-                    Icons.notifications_none_rounded,
+                    Icons.favorite_border_rounded,
                     color: themeMode == ThemeMode.light ? Colors.black : Colors.white,
                     size: 22,
                   ),
@@ -1447,68 +1447,90 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
   final int selectedTab;
   final ValueChanged<int> onTabChanged;
   @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return _TabsHeaderContent(selectedTab: selectedTab, onTabChanged: onTabChanged);
+  }
+  @override
+  double get maxExtent => 52;
+  @override
+  double get minExtent => 52;
+  @override
+  bool shouldRebuild(covariant _TabsHeader old) => old.selectedTab != selectedTab;
+}
+
+class _TabsHeaderContent extends StatelessWidget {
+  const _TabsHeaderContent({required this.selectedTab, required this.onTabChanged});
+  final int selectedTab;
+  final ValueChanged<int> onTabChanged;
+
+  @override
+  Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
+    const indicatorW = 40.0;
+    final tabW = MediaQuery.sizeOf(context).width / 2;
+    final targetLeft = selectedTab * tabW + (tabW - indicatorW) / 2;
     return Container(
       color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-      child: Row(
+      child: Stack(
         children: [
-          Expanded(
-            child: InkWell(
-              onTap: () => onTabChanged(0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'For you',
-                    style: TextStyle(
-                      color: selectedTab == 0
-                          ? (isLight ? Colors.black : Colors.white)
-                          : (isLight ? const Color(0xff616161) : Colors.white38),
-                      fontSize: 17,
-                      fontWeight: selectedTab == 0 ? FontWeight.w800 : FontWeight.w500,
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () => onTabChanged(0),
+                  child: SizedBox(
+                    height: 52,
+                    child: Center(
+                      child: Text(
+                        'For you',
+                        style: TextStyle(
+                          color: selectedTab == 0
+                              ? (isLight ? Colors.black : Colors.white)
+                              : (isLight ? const Color(0xff616161) : Colors.white38),
+                          fontSize: 17,
+                          fontWeight: selectedTab == 0 ? FontWeight.w800 : FontWeight.w500,
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    height: 2,
-                    width: selectedTab == 0 ? 72 : 0,
-                    color: isLight ? Colors.black : Colors.white,
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
-          Expanded(
-            child: InkWell(
-              onTap: () => onTabChanged(1),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Following',
-                    style: TextStyle(
-                      color: selectedTab == 1
-                          ? (isLight ? Colors.black : Colors.white)
-                          : (isLight ? const Color(0xff616161) : Colors.white38),
-                      fontSize: 17,
-                      fontWeight: selectedTab == 1 ? FontWeight.w800 : FontWeight.w500,
+              Expanded(
+                child: InkWell(
+                  onTap: () => onTabChanged(1),
+                  child: SizedBox(
+                    height: 52,
+                    child: Center(
+                      child: Text(
+                        'Following',
+                        style: TextStyle(
+                          color: selectedTab == 1
+                              ? (isLight ? Colors.black : Colors.white)
+                              : (isLight ? const Color(0xff616161) : Colors.white38),
+                          fontSize: 17,
+                          fontWeight: selectedTab == 1 ? FontWeight.w800 : FontWeight.w500,
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    height: 2,
-                    width: selectedTab == 1 ? 84 : 0,
-                    color: isLight ? Colors.black : Colors.white,
-                  ),
-                ],
+                ),
+              ),
+            ],
+          ),
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(end: targetLeft),
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeInOut,
+            builder: (context, left, _) => Positioned(
+              left: left,
+              bottom: 0,
+              child: Container(
+                width: indicatorW,
+                height: 2,
+                decoration: BoxDecoration(
+                  color: isLight ? Colors.black : Colors.white,
+                  borderRadius: BorderRadius.circular(1),
+                ),
               ),
             ),
           ),
@@ -1516,14 +1538,6 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
       ),
     );
   }
-
-  @override
-  double get maxExtent => 52;
-  @override
-  double get minExtent => 52;
-  @override
-  bool shouldRebuild(covariant _TabsHeader oldDelegate) =>
-      oldDelegate.selectedTab != selectedTab;
 }
 
 class _FeedPostCard extends StatelessWidget {
@@ -2070,56 +2084,76 @@ class _SearchViewState extends State<_SearchView> {
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     return ListView(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
       children: [
-        TextField(
-          controller: _controller,
-          onChanged: _onChanged,
-          onSubmitted: (_) => _onSearchSubmitted(),
-          style: TextStyle(color: isLight ? Colors.black : Colors.white),
-          cursorColor: isLight ? Colors.black : Colors.white,
-          decoration: InputDecoration(
-            prefixIcon: Icon(Icons.search, color: isLight ? const Color(0xff8b95a3) : const Color(0xffa6a6a6)),
-            hintText: 'Search people',
-            hintStyle: TextStyle(color: isLight ? const Color(0xff8b95a3) : const Color(0xff8f8f8f)),
-            filled: true,
-            fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: isLight ? Colors.black : Colors.white),
-            ),
+        Text(
+          'Search',
+          style: TextStyle(
+            color: isLight ? Colors.black : Colors.white,
+            fontSize: 26,
+            fontWeight: FontWeight.w800,
           ),
         ),
         const SizedBox(height: 14),
-        Wrap(
-          spacing: 8,
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _controller,
+          builder: (context, value, _) {
+            return Container(
+              decoration: BoxDecoration(
+                color: isLight ? Colors.white : const Color(0xff1a1a1b),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+                ),
+                boxShadow: isLight
+                    ? [const BoxShadow(color: Color(0x0c000000), blurRadius: 10, offset: Offset(0, 3))]
+                    : null,
+              ),
+              child: TextField(
+                controller: _controller,
+                onChanged: _onChanged,
+                onSubmitted: (_) => _onSearchSubmitted(),
+                style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                cursorColor: isLight ? Colors.black : Colors.white,
+                decoration: InputDecoration(
+                  prefixIcon: Icon(
+                    Icons.search_rounded,
+                    color: isLight ? const Color(0xff8b95a3) : const Color(0xffa6a6a6),
+                    size: 20,
+                  ),
+                  suffixIcon: value.text.isNotEmpty
+                      ? IconButton(
+                          onPressed: () { _controller.clear(); _onChanged(''); },
+                          icon: Icon(
+                            Icons.close_rounded,
+                            size: 18,
+                            color: isLight ? const Color(0xff8b95a3) : const Color(0xffa6a6a6),
+                          ),
+                        )
+                      : null,
+                  hintText: 'Search people',
+                  hintStyle: TextStyle(
+                    color: isLight ? const Color(0xff8b95a3) : const Color(0xff8f8f8f),
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        Row(
           children: [
-            _SearchSegment(
-              label: 'Top',
-              selected: _section == 0,
-              onTap: () => setState(() => _section = 0),
-            ),
-            _SearchSegment(
-              label: 'Accounts',
-              selected: _section == 1,
-              onTap: () => setState(() => _section = 1),
-            ),
-            _SearchSegment(
-              label: 'Posts',
-              selected: _section == 2,
-              onTap: () => setState(() => _section = 2),
-            ),
+            _SearchSegment(label: 'Top', selected: _section == 0, onTap: () => setState(() => _section = 0)),
+            const SizedBox(width: 28),
+            _SearchSegment(label: 'Accounts', selected: _section == 1, onTap: () => setState(() => _section = 1)),
+            const SizedBox(width: 28),
+            _SearchSegment(label: 'Posts', selected: _section == 2, onTap: () => setState(() => _section = 2)),
           ],
         ),
-        const SizedBox(height: 14),
+        Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+        const SizedBox(height: 16),
         if (_controller.text.trim().isEmpty) ...[
           if (_loadingSuggestions || _loadingTop)
             const Padding(
@@ -2393,20 +2427,36 @@ class _SearchSegment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChoiceChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          color: selected ? Colors.black : Colors.white,
-          fontWeight: FontWeight.w700,
-        ),
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected
+                    ? (isLight ? Colors.black : Colors.white)
+                    : (isLight ? const Color(0xff8b8b8b) : const Color(0xff5e5e5e)),
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                fontSize: 15,
+              ),
+            ),
+          ),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            height: 2,
+            width: selected ? 28.0 : 0,
+            decoration: BoxDecoration(
+              color: isLight ? Colors.black : Colors.white,
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
+        ],
       ),
-      selected: selected,
-      onSelected: (_) => onTap(),
-      selectedColor: Colors.white,
-      backgroundColor: const Color(0xff1a1a1b),
-      side: const BorderSide(color: Color(0xff2a2a2a)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
     );
   }
 }
