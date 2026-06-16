@@ -25,8 +25,13 @@ class CityMapView extends StatefulWidget {
 
 class _CityMapViewState extends State<CityMapView> {
   static const _channelName = 'neat/native_city_map_channel';
+  static const _overviewCamera = CameraPosition(
+    target: LatLng(39.0, 22.9),
+    zoom: 6.2,
+  );
   late final MethodChannel _channel;
   GreeceCity? _selectedCity;
+  GoogleMapController? _mapController;
 
   @override
   void initState() {
@@ -58,6 +63,18 @@ class _CityMapViewState extends State<CityMapView> {
     );
     if (_selectedCity?.name == city.name) return;
     setState(() => _selectedCity = city);
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngZoom(LatLng(city.latitude, city.longitude), 10.5),
+    );
+  }
+
+  void _dismissCity() {
+    if (_selectedCity == null) return;
+    setState(() => _selectedCity = null);
+    _mapController?.animateCamera(CameraUpdate.newCameraPosition(_overviewCamera));
+    if (!kIsWeb && Platform.isIOS) {
+      _channel.invokeMethod('zoomOut');
+    }
   }
 
   void _openCityFeed() {
@@ -69,20 +86,22 @@ class _CityMapViewState extends State<CityMapView> {
 
   @override
   Widget build(BuildContext context) {
-    final selectedCity = _selectedCity ?? greeceCities.first;
+    final selectedCity = _selectedCity;
 
     return Stack(
       children: [
         Positioned.fill(
           child: _NativeMap(
-            cityName: selectedCity.name,
             cities: greeceCities,
+            overview: _overviewCamera,
+            onCityTap: _showCity,
+            onMapCreated: (controller) => _mapController = controller,
           ),
         ),
-        if (_selectedCity != null)
+        if (selectedCity != null)
           Positioned.fill(
             child: GestureDetector(
-              onTap: () => setState(() => _selectedCity = null),
+              onTap: _dismissCity,
               child: Container(
                 color: Colors.black.withValues(alpha: 0.42),
                 alignment: Alignment.center,
@@ -90,7 +109,7 @@ class _CityMapViewState extends State<CityMapView> {
                   onTap: () {},
                   child: _JoinCityCard(
                     city: selectedCity,
-                    onClose: () => setState(() => _selectedCity = null),
+                    onClose: _dismissCity,
                     onJoin: _openCityFeed,
                   ),
                 ),
@@ -116,12 +135,16 @@ class _CityMapViewState extends State<CityMapView> {
 
 class _NativeMap extends StatelessWidget {
   const _NativeMap({
-    required this.cityName,
     required this.cities,
+    required this.overview,
+    required this.onCityTap,
+    required this.onMapCreated,
   });
 
-  final String cityName;
   final List<GreeceCity> cities;
+  final CameraPosition overview;
+  final ValueChanged<String> onCityTap;
+  final ValueChanged<GoogleMapController> onMapCreated;
 
   @override
   Widget build(BuildContext context) {
@@ -133,13 +156,7 @@ class _NativeMap extends StatelessWidget {
             icon: BitmapDescriptor.defaultMarkerWithHue(
               BitmapDescriptor.hueGreen,
             ),
-            onTap: () {
-              if (context.mounted) {
-                final state =
-                    context.findAncestorStateOfType<_CityMapViewState>();
-                state?._showCity(city.name);
-              }
-            },
+            onTap: () => onCityTap(city.name),
           ),
         )
         .toSet();
@@ -160,7 +177,6 @@ class _NativeMap extends StatelessWidget {
       return UiKitView(
         viewType: 'neat/native_city_map',
         creationParams: {
-          'selectedCity': cityName,
           'cities': cities
               .map(
                 (city) => {
@@ -176,16 +192,13 @@ class _NativeMap extends StatelessWidget {
     }
 
     return GoogleMap(
-      initialCameraPosition: CameraPosition(
-        target: LatLng(cities.first.latitude, cities.first.longitude),
-        zoom: 6.2,
-      ),
+      initialCameraPosition: overview,
       markers: markers,
       myLocationButtonEnabled: false,
       zoomControlsEnabled: false,
       mapToolbarEnabled: false,
       compassEnabled: false,
-      onMapCreated: (controller) {},
+      onMapCreated: onMapCreated,
     );
   }
 }
