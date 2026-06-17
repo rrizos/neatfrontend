@@ -262,9 +262,7 @@ class _ProfilePageState extends State<ProfilePage> {
       context: context,
       isScrollControlled: true,
       showDragHandle: false,
-      backgroundColor: widget.themeMode == ThemeMode.light
-          ? const Color(0xfff3f4f6)
-          : const Color(0xff111111),
+      backgroundColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -843,6 +841,13 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Ensures the sheet repaints immediately when the theme toggles while open.
+    setState(() {});
+  }
+
+  @override
   void dispose() {
     _usernameController.dispose();
     _nameController.dispose();
@@ -899,19 +904,25 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
     final avatarBytes = _dataUrlBytes(_avatarUrl);
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 8,
-          bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    return Container(
+      decoration: BoxDecoration(
+        color: isLight ? const Color(0xfff3f4f6) : const Color(0xff111111),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 8,
+            bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             Row(
               children: [
                 TextButton(
@@ -1015,7 +1026,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                 ),
                 const Spacer(),
                 Switch(
-                  value: widget.themeMode == ThemeMode.light,
+                  value: Theme.of(context).brightness == Brightness.light,
                   onChanged: (value) {
                     widget.onThemeModeChanged(
                       value ? ThemeMode.light : ThemeMode.dark,
@@ -1027,7 +1038,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }
 
@@ -1068,7 +1080,7 @@ class _SavedPostsPageState extends State<_SavedPostsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isLight = widget.themeMode == ThemeMode.light;
+    final isLight = Theme.of(context).brightness == Brightness.light;
     return Scaffold(
       backgroundColor:
           isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
@@ -1316,7 +1328,7 @@ class _UserListPageState extends State<_UserListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isLight = widget.themeMode == ThemeMode.light;
+    final isLight = Theme.of(context).brightness == Brightness.light;
     final filtered = _filtered;
     return Scaffold(
       backgroundColor:

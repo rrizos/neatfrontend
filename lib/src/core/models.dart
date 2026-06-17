@@ -108,27 +108,44 @@ class FeedComment {
     required this.author,
     required this.text,
     required this.avatarUrl,
+    required this.imageUrl,
+    required this.parentId,
+    required this.createdAt,
     required this.likes,
     required this.liked,
+    required this.replies,
   });
 
   final int id;
   final String author;
   final String text;
   final String avatarUrl;
+  final String imageUrl;
+  final int? parentId;
+  final String createdAt;
+  final List<FeedComment> replies;
   int likes;
   bool liked;
 
   factory FeedComment.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
-    return FeedComment(
+    final replies = (json['replies'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(FeedComment.fromJson)
+        .toList();
+    final c = FeedComment(
       id: parseInt(json['id']),
       author: json['author']?.toString() ?? 'user',
       text: json['text']?.toString() ?? '',
       avatarUrl: json['avatarUrl']?.toString() ?? '',
+      imageUrl: json['imageUrl']?.toString() ?? '',
+      parentId: json['parentId'] != null ? parseInt(json['parentId']) : null,
+      createdAt: json['created']?.toString() ?? '',
       likes: parseInt(json['likes']),
       liked: json['liked'] == true,
+      replies: replies,
     );
+    return c;
   }
 }
 

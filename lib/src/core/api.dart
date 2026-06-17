@@ -46,6 +46,10 @@ Uri searchUsersEndpoint([String query = '']) {
 }
 Uri get notificationsEndpoint =>
     Uri.parse('$apiBaseUrl/api/auth/notifications/');
+Uri get searchHistoryEndpoint =>
+    Uri.parse('$apiBaseUrl/api/auth/search-history/');
+Uri searchHistoryItemEndpoint(String query) =>
+    Uri.parse('$apiBaseUrl/api/auth/search-history/${Uri.encodeComponent(query)}/');
 Uri get citiesEndpoint => Uri.parse('$apiBaseUrl/api/posts/cities/');
 Uri eventsEndpoint({String? city, String? type}) {
   final uri = Uri.parse('$apiBaseUrl/api/events/');

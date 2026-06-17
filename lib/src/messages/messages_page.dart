@@ -154,7 +154,9 @@ class _MessagesPageState extends State<MessagesPage> {
     final controller = TextEditingController();
     final username = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: const Color(0xff0f0f10),
+      backgroundColor: Theme.of(context).brightness == Brightness.light
+          ? const Color(0xfff3f4f6)
+          : const Color(0xff0f0f10),
       isScrollControlled: true,
       showDragHandle: true,
       builder: (context) {
@@ -335,16 +337,20 @@ class _MessagesPageState extends State<MessagesPage> {
                                         item.otherFullName.isNotEmpty
                                             ? item.otherFullName
                                             : item.otherUser,
-                                        style: const TextStyle(
-                                          color: Colors.white,
+                                        style: TextStyle(
+                                          color: isLight
+                                              ? Colors.black
+                                              : Colors.white,
                                           fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                     ),
                                     Text(
                                       _timeLabel(item.updated),
-                                      style: const TextStyle(
-                                        color: Color(0xff8e8e8e),
+                                      style: TextStyle(
+                                        color: isLight
+                                            ? const Color(0xff616161)
+                                            : const Color(0xff8e8e8e),
                                         fontSize: 12,
                                       ),
                                     ),
@@ -359,8 +365,10 @@ class _MessagesPageState extends State<MessagesPage> {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     color: item.unreadCount > 0
-                                        ? Colors.white
-                                        : const Color(0xff9c9c9c),
+                                        ? (isLight ? Colors.black : Colors.white)
+                                        : (isLight
+                                            ? const Color(0xff616161)
+                                            : const Color(0xff9c9c9c)),
                                   ),
                                 ),
                               ],
@@ -427,11 +435,11 @@ class _StartChatSheetState extends State<_StartChatSheet> {
             const SizedBox(height: 6),
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
                     'New message',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: isLight ? Colors.black : Colors.white,
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
                     ),
@@ -444,9 +452,11 @@ class _StartChatSheetState extends State<_StartChatSheet> {
               ],
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Search people you follow or pick a suggestion.',
-              style: TextStyle(color: Color(0xffa6a6a6)),
+              style: TextStyle(
+                color: isLight ? const Color(0xff616161) : const Color(0xffa6a6a6),
+              ),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -454,17 +464,28 @@ class _StartChatSheetState extends State<_StartChatSheet> {
               autofocus: true,
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _submit(),
-              style: const TextStyle(color: Colors.white),
-              cursorColor: Colors.white,
+              style: TextStyle(color: isLight ? Colors.black : Colors.white),
+              cursorColor: isLight ? Colors.black : Colors.white,
               decoration: InputDecoration(
                 hintText: 'Search username',
-                hintStyle: const TextStyle(color: Color(0xff9c9c9c)),
+                hintStyle: TextStyle(
+                  color: isLight
+                      ? const Color(0xff8b95a3)
+                      : const Color(0xff9c9c9c),
+                ),
                 filled: true,
-                fillColor: const Color(0xff1a1a1b),
-                prefixIcon: const Icon(Icons.search, color: Color(0xff9c9c9c)),
+                fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: isLight
+                      ? const Color(0xff8b95a3)
+                      : const Color(0xff9c9c9c),
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18),
-                  borderSide: BorderSide.none,
+                  borderSide: isLight
+                      ? const BorderSide(color: Color(0xffd9dee6))
+                      : BorderSide.none,
                 ),
               ),
             ),
@@ -482,9 +503,11 @@ class _StartChatSheetState extends State<_StartChatSheet> {
                       itemCount: widget.suggestedUsers.length + 1,
                       separatorBuilder: (_, index) => index == 0
                           ? const SizedBox(height: 6)
-                          : const Divider(
+                          : Divider(
                               height: 1,
-                              color: Color(0xff242424),
+                              color: isLight
+                                  ? const Color(0xffe0e3e8)
+                                  : const Color(0xff242424),
                             ),
                       itemBuilder: (context, index) {
                         if (index == 0) {
@@ -846,8 +869,8 @@ class _ConversationPageState extends State<ConversationPage> {
                     child: Container(
                       width: 44,
                       height: 44,
-                      decoration: const BoxDecoration(
-                        color: Color(0xff2a2a2a),
+                      decoration: BoxDecoration(
+                        color: isLight ? Colors.black : const Color(0xff2a2a2a),
                         shape: BoxShape.circle,
                       ),
                       child: const Center(
