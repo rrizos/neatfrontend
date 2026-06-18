@@ -248,13 +248,7 @@ class _HomePageState extends State<HomePage> {
     setState(() => _composeImageUrl = '');
   }
 
-  Future<void> _like(FeedPost post) async {
-    final previousLiked = post.liked;
-    final previousLikes = post.likes;
-    setState(() {
-      post.liked = !post.liked;
-      post.likes += post.liked ? 1 : -1;
-    });
+  Future<bool> _likePost(FeedPost post) async {
     final res = await http.post(
       postLikeEndpoint(post.id),
       headers: authJsonHeaders(widget.session.token),
@@ -262,32 +256,22 @@ class _HomePageState extends State<HomePage> {
     );
     if (res.statusCode == 401) {
       await widget.onLogout();
-      return;
+      return false;
     }
-    if (res.statusCode != 200 && mounted) {
-      setState(() {
-        post.liked = previousLiked;
-        post.likes = previousLikes;
-      });
-    }
+    return res.statusCode == 200;
   }
 
-  Future<void> _save(FeedPost post) async {
-    final prev = post.saved;
-    setState(() => post.saved = !post.saved);
+  Future<bool> _savePost(FeedPost post) async {
     final res = await http.post(
       postSaveEndpoint(post.id),
       headers: authJsonHeaders(widget.session.token),
       body: jsonEncode({'saved': post.saved}),
     );
     if (res.statusCode == 401) {
-      setState(() => post.saved = prev);
       await widget.onLogout();
-      return;
+      return false;
     }
-    if (res.statusCode != 200 && mounted) {
-      setState(() => post.saved = prev);
-    }
+    return res.statusCode == 200;
   }
 
   Future<void> _follow(String username) async {
@@ -553,7 +537,7 @@ class _HomePageState extends State<HomePage> {
       builder: (_) => _CommentSheet(
         post: post,
         session: widget.session,
-        onRefresh: () { if (mounted) setState(() {}); },
+        onRefresh: () {},
       ),
     );
   }
@@ -890,9 +874,11 @@ class _HomePageState extends State<HomePage> {
                                   itemBuilder: (context, index) {
                                     final post = filtered[index];
                                     return _FeedPostCard(
+                                      key: ValueKey(post.id),
                                       post: post,
-                                      onLike: () => _like(post),
-                                      onComment: () => _openComments(post),
+                                      session: widget.session,
+                                      onLike: () => _likePost(post),
+                                      onSave: () => _savePost(post),
                                       onShare: () => showShareSheet(
                                         context: context,
                                         post: post,
@@ -900,7 +886,6 @@ class _HomePageState extends State<HomePage> {
                                         currentUser: widget.session.user,
                                         onLogout: widget.onLogout,
                                       ),
-                                      onSave: () => _save(post),
                                       onMore: () => _openSheet(
                                         title: post.author,
                                         child: Column(
@@ -1259,27 +1244,110 @@ class _TabsHeaderContent extends StatelessWidget {
   }
 }
 
-class _FeedPostCard extends StatelessWidget {
+class _FeedPostCard extends StatefulWidget {
   const _FeedPostCard({
+    super.key,
     required this.post,
+    required this.session,
     required this.onLike,
-    required this.onComment,
-    required this.onShare,
     required this.onSave,
+    required this.onShare,
     required this.onMore,
     required this.onProfileTap,
     this.onFollow,
     this.isFollowing = false,
   });
+
   final FeedPost post;
-  final VoidCallback onLike;
-  final VoidCallback onComment;
+  final AuthSession session;
+  final Future<bool> Function() onLike;
+  final Future<bool> Function() onSave;
   final VoidCallback onShare;
-  final VoidCallback onSave;
   final VoidCallback onMore;
   final VoidCallback onProfileTap;
   final VoidCallback? onFollow;
   final bool isFollowing;
+
+  @override
+  State<_FeedPostCard> createState() => _FeedPostCardState();
+}
+
+class _FeedPostCardState extends State<_FeedPostCard> {
+  late bool _liked;
+  late bool _saved;
+  late int _likes;
+
+  @override
+  void initState() {
+    super.initState();
+    _liked = widget.post.liked;
+    _saved = widget.post.saved;
+    _likes = widget.post.likes;
+  }
+
+  @override
+  void didUpdateWidget(_FeedPostCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Sync state when the feed reloads with fresh post objects from the server.
+    if (!identical(oldWidget.post, widget.post)) {
+      _liked = widget.post.liked;
+      _saved = widget.post.saved;
+      _likes = widget.post.likes;
+    }
+  }
+
+  Future<void> _handleLike() async {
+    final wasLiked = _liked;
+    final wasLikes = _likes;
+    setState(() {
+      _liked = !_liked;
+      _likes += _liked ? 1 : -1;
+      widget.post.liked = _liked;
+      widget.post.likes = _likes;
+    });
+    final ok = await widget.onLike();
+    if (!ok && mounted) {
+      setState(() {
+        _liked = wasLiked;
+        _likes = wasLikes;
+        widget.post.liked = wasLiked;
+        widget.post.likes = wasLikes;
+      });
+    }
+  }
+
+  Future<void> _handleSave() async {
+    final wasSaved = _saved;
+    setState(() {
+      _saved = !_saved;
+      widget.post.saved = _saved;
+    });
+    final ok = await widget.onSave();
+    if (!ok && mounted) {
+      setState(() {
+        _saved = wasSaved;
+        widget.post.saved = wasSaved;
+      });
+    }
+  }
+
+  void _openComments() {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      builder: (_) => _CommentSheet(
+        post: widget.post,
+        session: widget.session,
+        onRefresh: () {
+          if (mounted) setState(() {});
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
@@ -1299,29 +1367,29 @@ class _FeedPostCard extends StatelessWidget {
               child: Row(
                 children: [
                   InkWell(
-                    onTap: onProfileTap,
+                    onTap: widget.onProfileTap,
                     child: _PostAvatar(
-                      username: post.author,
-                      avatarUrl: post.avatarUrl,
+                      username: widget.post.author,
+                      avatarUrl: widget.post.avatarUrl,
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: InkWell(
-                      onTap: onProfileTap,
+                      onTap: widget.onProfileTap,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            post.author,
+                            widget.post.author,
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               color: isLight ? Colors.black : Colors.white,
                             ),
                           ),
                           Text(
-                            _postAge(post.minutesAgo),
+                            _postAge(widget.post.minutesAgo),
                             style: TextStyle(
                               fontSize: 12,
                               color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
@@ -1331,16 +1399,16 @@ class _FeedPostCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (onFollow != null) ...[
+                  if (widget.onFollow != null) ...[
                     const SizedBox(width: 8),
                     OutlinedButton(
-                      onPressed: isFollowing ? null : onFollow,
+                      onPressed: widget.isFollowing ? null : widget.onFollow,
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         side: BorderSide(
-                          color: isFollowing
+                          color: widget.isFollowing
                               ? (isLight ? const Color(0xffb0b0b0) : const Color(0xff555555))
                               : (isLight ? Colors.black : Colors.white),
                         ),
@@ -1349,9 +1417,9 @@ class _FeedPostCard extends StatelessWidget {
                         ),
                       ),
                       child: Text(
-                        isFollowing ? 'Following' : 'Follow',
+                        widget.isFollowing ? 'Following' : 'Follow',
                         style: TextStyle(
-                          color: isFollowing
+                          color: widget.isFollowing
                               ? (isLight ? const Color(0xffb0b0b0) : const Color(0xff555555))
                               : (isLight ? Colors.black : Colors.white),
                           fontSize: 13,
@@ -1361,7 +1429,7 @@ class _FeedPostCard extends StatelessWidget {
                     ),
                   ],
                   IconButton(
-                    onPressed: onMore,
+                    onPressed: widget.onMore,
                     icon: Icon(
                       Icons.more_horiz_rounded,
                       color: isLight ? Colors.black : Colors.white,
@@ -1374,7 +1442,7 @@ class _FeedPostCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                post.text,
+                widget.post.text,
                 style: TextStyle(
                   fontSize: 15.5,
                   height: 1.45,
@@ -1382,14 +1450,14 @@ class _FeedPostCard extends StatelessWidget {
                 ),
               ),
             ),
-            if (post.imageUrl.isNotEmpty)
+            if (widget.post.imageUrl.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(18),
                   child: AspectRatio(
                     aspectRatio: 1.08,
-                    child: _FeedMedia(url: post.imageUrl),
+                    child: _FeedMedia(url: widget.post.imageUrl),
                   ),
                 ),
               ),
@@ -1398,24 +1466,24 @@ class _FeedPostCard extends StatelessWidget {
               child: Row(
                 children: [
                   IconButton(
-                    onPressed: onLike,
+                    onPressed: _handleLike,
                     icon: Icon(
-                      post.liked
+                      _liked
                           ? Icons.favorite_rounded
                           : Icons.favorite_border_rounded,
-                      color: post.liked ? Colors.red : (isLight ? Colors.black : Colors.white),
+                      color: _liked ? Colors.red : (isLight ? Colors.black : Colors.white),
                       size: 28,
                     ),
                   ),
                   IconButton(
-                    onPressed: onComment,
+                    onPressed: _openComments,
                     icon: CommentBubbleIcon(
                       color: isLight ? Colors.black : Colors.white,
                       size: 25,
                     ),
                   ),
                   IconButton(
-                    onPressed: onShare,
+                    onPressed: widget.onShare,
                     icon: _SharePlaneIcon(
                       color: isLight ? Colors.black : Colors.white,
                       size: 27,
@@ -1423,12 +1491,12 @@ class _FeedPostCard extends StatelessWidget {
                   ),
                   const Spacer(),
                   IconButton(
-                    onPressed: onSave,
+                    onPressed: _handleSave,
                     icon: Icon(
-                      post.saved
+                      _saved
                           ? Icons.bookmark_rounded
                           : Icons.bookmark_border_rounded,
-                      color: post.saved
+                      color: _saved
                           ? const Color(0xffFFB800)
                           : (isLight ? Colors.black : Colors.white),
                       size: 28,
@@ -1442,7 +1510,7 @@ class _FeedPostCard extends StatelessWidget {
               child: Row(
                 children: [
                   Text(
-                    '${post.likes} likes',
+                    '$_likes likes',
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       color: isLight ? Colors.black : Colors.white,
@@ -1450,11 +1518,11 @@ class _FeedPostCard extends StatelessWidget {
                   ),
                   const Spacer(),
                   InkWell(
-                    onTap: onComment,
+                    onTap: _openComments,
                     child: Text(
-                      post.comments.isEmpty
+                      widget.post.comments.isEmpty
                           ? 'Add a comment...'
-                          : 'View ${post.comments.length} comments',
+                          : 'View ${widget.post.comments.length} comments',
                       style: const TextStyle(
                         color: Color(0xffb3b3b3),
                         fontSize: 13,
@@ -2280,15 +2348,20 @@ class _PostAvatar extends StatelessWidget {
   }
 }
 
+final _dataUrlCache = <String, Uint8List?>{};
+
 Uint8List? _decodeDataUrl(String value) {
   if (!value.startsWith('data:')) return null;
+  if (_dataUrlCache.containsKey(value)) return _dataUrlCache[value];
   final comma = value.indexOf(',');
-  if (comma < 0) return null;
-  try {
-    return base64Decode(value.substring(comma + 1));
-  } catch (_) {
-    return null;
+  Uint8List? result;
+  if (comma >= 0) {
+    try {
+      result = base64Decode(value.substring(comma + 1));
+    } catch (_) {}
   }
+  _dataUrlCache[value] = result;
+  return result;
 }
 
 class _ComposeAction extends StatelessWidget {
