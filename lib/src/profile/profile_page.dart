@@ -152,6 +152,7 @@ class _ProfilePageState extends State<ProfilePage> {
           conversationId: conversation.id,
           otherUsername: conversation.otherUser,
           otherFullName: conversation.otherFullName,
+          otherAvatarUrl: conversation.otherAvatarUrl,
           onLogout: widget.onLogout,
           onOpenPost: widget.onOpenProfileAtPost != null
               ? (author, postId) {
@@ -460,12 +461,28 @@ class _ProfilePageState extends State<ProfilePage> {
                 : Row(
                     children: [
                       Expanded(
-                        child: FilledButton(
-                          onPressed: _toggleFollow,
-                          child: Text(
-                            profile.isFollowing ? 'Following' : 'Follow',
-                          ),
-                        ),
+                        child: profile.isFollowing
+                            ? OutlinedButton(
+                                onPressed: _toggleFollow,
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(
+                                    color: isLight ? Colors.black : Colors.white,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  foregroundColor:
+                                      isLight ? Colors.black : Colors.white,
+                                ),
+                                child: const Text(
+                                  'Following',
+                                  style: TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                              )
+                            : FilledButton(
+                                onPressed: _toggleFollow,
+                                child: const Text('Follow'),
+                              ),
                       ),
                       const SizedBox(width: 12),
                       SizedBox(
@@ -1451,31 +1468,48 @@ class _UserListPageState extends State<_UserListPage> {
                               )
                             : null,
                         trailing: canToggle
-                            ? OutlinedButton(
-                                onPressed: () =>
-                                    _toggleFollow(globalIndex, user),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 16),
-                                  side: BorderSide(
-                                    color: isLight
-                                        ? Colors.black
-                                        : Colors.white,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                ),
-                                child: Text(
-                                  user.isFollowing ? 'Following' : 'Follow',
-                                  style: TextStyle(
-                                    color:
-                                        isLight ? Colors.black : Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              )
+                            ? (user.isFollowing
+                                ? OutlinedButton(
+                                    onPressed: () =>
+                                        _toggleFollow(globalIndex, user),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16),
+                                      side: BorderSide(
+                                        color: isLight
+                                            ? Colors.black
+                                            : Colors.white,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      foregroundColor:
+                                          isLight ? Colors.black : Colors.white,
+                                    ),
+                                    child: const Text(
+                                      'Following',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  )
+                                : FilledButton(
+                                    onPressed: () =>
+                                        _toggleFollow(globalIndex, user),
+                                    style: FilledButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      textStyle: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    child: const Text('Follow'),
+                                  ))
                             : null,
                         onTap: () {
                           Navigator.of(context).pop();

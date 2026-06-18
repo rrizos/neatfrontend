@@ -8,8 +8,18 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import 'greece_cities.dart';
 
-// Paste your MapKit JS token here (JWT from developer.apple.com → Maps → Keys)
-const _kMapKitJsToken = 'eyJraWQiOiIySDdDRjVUOVRSIiwidHlwIjoiSldUIiwiYWxnIjoiRVMyNTYifQ.eyJpc3MiOiJSWjM2UE5XUzgyIiwiaWF0IjoxNzUyMDkwNjM2LCJvcmlnaW4iOiJuZXRuZXN0Lm5ldCJ9.r9qHYkpSBP65h1O9HkVJcxiYN4rHgtwdHgLyhbS0fFnbZOlvx5LcYZELtt4Q7MBQEGDFICKLp-9nUpsMlA-ZuQ';
+// MapKit JS JWT — origin: netnest.net
+const _kMapKitToken =
+    'eyJraWQiOiIySDdDRjVUOVRSIiwidHlwIjoiSldUIiwiYWxnIjoiRVMyNTYifQ'
+    '.eyJpc3MiOiJSWjM2UE5XUzgyIiwiaWF0IjoxNzUyMDkwNjM2LCJvcmlnaW4iO'
+    'iJuZXRuZXN0Lm5ldCJ9.r9qHYkpSBP65h1O9HkVJcxiYN4rHgtwdHgLyhbS0f'
+    'FnbZOlvx5LcYZELtt4Q7MBQEGDFICKLp-9nUpsMlA-ZuQ';
+
+const _kMapKitCdnUrl = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public widget
+// ─────────────────────────────────────────────────────────────────────────────
 
 class CityMapView extends StatefulWidget {
   const CityMapView({
@@ -28,219 +38,299 @@ class CityMapView extends StatefulWidget {
 }
 
 class _CityMapViewState extends State<CityMapView> {
-  static const _channelName = 'neat/native_city_map_channel';
-  late final MethodChannel _channel;
-  WebViewController? _webController;
-  GreeceCity? _selectedCity;
+  // ── iOS channel ──────────────────────────────────────────────────────────
+  static const _iosChannel = MethodChannel('neat/native_city_map_channel');
+
+  // ── Android WebView ───────────────────────────────────────────────────────
+  // mapkit.js content cached for the lifetime of the app process so subsequent
+  // map opens are instant and only the first ever visit pays the fetch cost.
+  static String? _cachedMapkitJs;
+
+  WebViewController? _webCtrl;
+
+  // ── UI state ──────────────────────────────────────────────────────────────
+  GreeceCity? _activeCity;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Lifecycle
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    _channel = const MethodChannel(_channelName);
-    _channel.setMethodCallHandler(_handleNativeCall);
-    if (!kIsWeb && Platform.isAndroid) {
-      _initWebController();
-    }
+    _iosChannel.setMethodCallHandler(_onNativeCall);
+    if (!kIsWeb && Platform.isAndroid) _initAndroid();
   }
 
   @override
   void dispose() {
-    _channel.setMethodCallHandler(null);
+    _iosChannel.setMethodCallHandler(null);
     super.dispose();
   }
 
-  void _initWebController() {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Native → Flutter  (iOS)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Future<void> _onNativeCall(MethodCall call) async {
+    if (call.method == 'citySelected') {
+      final name = call.arguments?.toString() ?? '';
+      if (name.isNotEmpty && mounted) _onCityPinTapped(name);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Android WebView
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Load mapkit.js from the bundled Flutter asset (assets/mapkit.js).
+  // This is instant (reads from the app bundle, no network) and works on every
+  // device including emulators where CDN DNS may fail.  The CDN URL in the
+  // HTML is only ever used as a last-resort fallback if the asset load fails.
+  Future<void> _initAndroid() async {
+    if (_cachedMapkitJs == null) {
+      try {
+        _cachedMapkitJs = await rootBundle.loadString('assets/mapkit.js');
+      } catch (e) {
+        debugPrint('[map] MapKit JS asset load: $e');
+      }
+    }
+    if (!mounted) return;
+    _buildWebView();
+    setState(() {});
+  }
+
+  void _buildWebView() {
     final citiesJson = jsonEncode(
       greeceCities
-          .map((c) => {
-                'name': c.name,
-                'latitude': c.latitude,
-                'longitude': c.longitude,
-              })
+          .map((c) => {'name': c.name, 'lat': c.latitude, 'lng': c.longitude})
           .toList(),
     );
 
-    _webController = WebViewController()
+    _webCtrl = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xff0a0a0a))
-      ..addJavaScriptChannel(
-        'CityChannel',
-        onMessageReceived: (msg) {
-          if (mounted) _showCity(msg.message);
-        },
-      )
-      ..loadHtmlString(_buildMapHtml(citiesJson), baseUrl: 'https://netnest.net');
+      ..setNavigationDelegate(NavigationDelegate(
+        onWebResourceError: (e) => debugPrint('[map] ${e.description}'),
+      ))
+      ..addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+        if (mounted) _onCityPinTapped(msg.message);
+      })
+      ..loadHtmlString(
+        _mapHtml(citiesJson, inlineJs: _cachedMapkitJs),
+        baseUrl: 'https://netnest.net',
+      );
   }
 
-  Future<dynamic> _handleNativeCall(MethodCall call) async {
-    if (call.method == 'citySelected') {
-      final city = call.arguments?.toString();
-      if (city != null && city.isNotEmpty) _showCity(city);
-    }
-    return null;
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Shared event handlers
+  // ─────────────────────────────────────────────────────────────────────────
 
-  void _showCity(String cityName) {
+  void _onCityPinTapped(String name) {
     final city = greeceCities.firstWhere(
-      (item) => item.name == cityName,
+      (c) => c.name == name,
       orElse: () => greeceCities.first,
     );
-    if (_selectedCity?.name == city.name) return;
-    setState(() => _selectedCity = city);
-    // Camera is already moved by the WebView JS (Android) or native MapKit (iOS)
+    if (_activeCity?.name == city.name) return;
+    setState(() => _activeCity = city);
   }
 
-  void _dismissCity() {
-    if (_selectedCity == null) return;
-    setState(() => _selectedCity = null);
-    if (!kIsWeb && Platform.isAndroid) {
-      _webController?.runJavaScript('zoomOut()');
-    } else if (!kIsWeb && Platform.isIOS) {
-      _channel.invokeMethod('zoomOut');
+  void _closeCard() {
+    if (_activeCity == null) return;
+    setState(() => _activeCity = null);
+    _resetNativeMap();
+  }
+
+  void _joinCity() {
+    final city = _activeCity;
+    if (city == null) return;
+    setState(() => _activeCity = null);
+    _resetNativeMap();
+    widget.onCitySelected(city.name);
+  }
+
+  // Must be called on every card-close path — dismiss AND join — so native
+  // map interaction is never permanently locked.
+  void _resetNativeMap() {
+    if (kIsWeb) return;
+    if (Platform.isAndroid) {
+      _webCtrl?.runJavaScript('resetMap()').catchError(
+        (e) => debugPrint('[map] resetMap: $e'),
+      );
+    } else if (Platform.isIOS) {
+      _iosChannel.invokeMethod('zoomOut');
     }
   }
 
-  void _openCityFeed() {
-    final city = _selectedCity;
-    if (city == null) return;
-    widget.onCitySelected(city.name);
-    setState(() => _selectedCity = null);
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Build
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final selectedCity = _selectedCity;
-
+    final city = _activeCity;
     return Stack(
       children: [
-        Positioned.fill(
-          child: _NativeMap(
-            cities: greeceCities,
-            webController: _webController,
-          ),
-        ),
-        if (selectedCity != null)
+        Positioned.fill(child: _MapLayer(webCtrl: _webCtrl)),
+
+        if (city != null)
           Positioned.fill(
             child: GestureDetector(
-              onTap: _dismissCity,
-              child: Container(
-                color: Colors.black.withValues(alpha: 0.42),
-                alignment: Alignment.center,
-                child: GestureDetector(
-                  onTap: () {},
-                  child: _JoinCityCard(
-                    city: selectedCity,
-                    onClose: _dismissCity,
-                    onJoin: _openCityFeed,
+              behavior: HitTestBehavior.opaque,
+              onTap: _closeCard,
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: 0.45),
+                child: Center(
+                  child: GestureDetector(
+                    onTap: () {},
+                    child: _CityCard(
+                      city: city,
+                      onClose: _closeCard,
+                      onJoin: _joinCity,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Align(
-              alignment: Alignment.topRight,
-              child: _GlassIconButton(
-                icon: Icons.public,
-                onTap: () {},
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }
 }
 
-String _buildMapHtml(String citiesJson) {
-  return '''
-<!DOCTYPE html>
+// ─────────────────────────────────────────────────────────────────────────────
+// Android: Apple MapKit JS
+//
+// mapkit.js is loaded from the Flutter asset bundle (assets/mapkit.js) and
+// injected inline so the WebView never makes a network request for the library.
+// This works on all devices including emulators where DNS may be unreliable.
+// The CDN URL (cdn.apple-mapkit.com) is only hit if the asset load fails.
+// ─────────────────────────────────────────────────────────────────────────────
+
+String _mapHtml(String citiesJson, {String? inlineJs}) {
+  // Use StringBuffer so the (potentially large) mapkit.js content is appended
+  // without being inside a Dart string literal — avoids any ''' termination
+  // risk in minified JS and keeps the Dart source clean.
+  final buf = StringBuffer();
+
+  buf.write('''<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="initial-scale=1.0, width=device-width">
+  <meta name="viewport" content="initial-scale=1.0,width=device-width">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0a0a0a; overflow: hidden; }
-    #map { width: 100vw; height: 100vh; }
+    html, body, #map { margin:0; padding:0; width:100%; height:100%; background:#0a0a0a; overflow:hidden; }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <script>
-    var _map, _overviewCenter, _overviewSpan;
+    var busy = false;
+    var map, home, homeSpan, activePin = null;
 
     function initMap() {
       mapkit.init({
-        authorizationCallback: function(done) {
-          done('$_kMapKitJsToken');
-        }
+        authorizationCallback: function(done) { done('$_kMapKitToken'); }
       });
 
-      _map = new mapkit.Map('map', {
-        colorScheme: mapkit.Map.ColorSchemes.Dark,
+      home     = new mapkit.Coordinate(39.0, 22.9);
+      homeSpan = new mapkit.CoordinateSpan(7.5, 7.5);
+
+      map = new mapkit.Map('map', {
+        colorScheme:              mapkit.Map.ColorSchemes.Dark,
+        showsCompass:             mapkit.FeatureVisibility.Hidden,
+        showsScale:               mapkit.FeatureVisibility.Hidden,
+        showsMapTypeControl:      false,
+        showsZoomControl:         false,
         showsUserLocationControl: false,
-        showsCompass: mapkit.FeatureVisibility.Hidden,
-        showsScale: mapkit.FeatureVisibility.Hidden,
-        showsMapTypeControl: false,
-        showsZoomControl: false,
       });
 
-      _overviewCenter = new mapkit.Coordinate(39.0, 22.9);
-      _overviewSpan = new mapkit.CoordinateSpan(7.5, 7.5);
-      _map.region = new mapkit.CoordinateRegion(_overviewCenter, _overviewSpan);
+      map.isRotationEnabled = false;
+      map.isPitchEnabled    = false;
+
+      // Mirror iOS: map.pointOfInterestFilter = .excludingAll
+      try { map.pointOfInterestFilter = mapkit.PointOfInterestFilter.excludingAllCategories; } catch(_) {}
+
+      map.region = new mapkit.CoordinateRegion(home, homeSpan);
 
       var cities = $citiesJson;
-      cities.forEach(function(city) {
-        var coord = new mapkit.Coordinate(city.latitude, city.longitude);
-        var annotation = new mapkit.MarkerAnnotation(coord, {
-          title: city.name,
-          color: '#4CAF50',
+      cities.forEach(function(c) {
+        var coord = new mapkit.Coordinate(c.lat, c.lng);
+        var pin   = new mapkit.MarkerAnnotation(coord, {
+          title:          c.name,
+          color:          '#34C759',   // iOS systemGreen exact hex
+          calloutEnabled: false,
         });
-        annotation.addEventListener('select', function() {
-          _map.setRegionAnimated(new mapkit.CoordinateRegion(
-            coord,
-            new mapkit.CoordinateSpan(0.7, 0.7)
-          ));
-          CityChannel.postMessage(city.name);
+        pin.addEventListener('select', function() {
+          // Mirror iOS didSelect: lock immediately, zoom in, notify Flutter
+          if (busy) { map.deselectAnnotation(pin); return; }
+          busy      = true;
+          activePin = pin;
+          document.getElementById('map').style.pointerEvents = 'none';
+          // 70 000 m radius ≈ 0.63° lat × 0.81° lng at 39°N — matches iOS
+          map.setRegionAnimated(
+            new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.63, 0.81))
+          );
+          FlutterBridge.postMessage(c.name);
         });
-        _map.addAnnotation(annotation);
+        map.addAnnotation(pin);
       });
     }
 
-    function zoomOut() {
-      if (!_map) return;
+    // Mirror iOS zoomOut(): unlock FIRST (unconditional), deselect, then zoom out.
+    function resetMap() {
+      busy = false;
+      document.getElementById('map').style.pointerEvents = '';
+      if (!map) return;
+      if (activePin) {
+        try { map.deselectAnnotation(activePin); } catch(_) {}
+        activePin = null;
+      }
+      var overview = new mapkit.CoordinateRegion(
+        new mapkit.Coordinate(39.0, 22.9),
+        new mapkit.CoordinateSpan(7.5, 7.5)
+      );
       try {
-        if (_map.selectedAnnotation) _map.deselectAnnotation(_map.selectedAnnotation);
-      } catch(e) {}
-      _map.setRegionAnimated(new mapkit.CoordinateRegion(_overviewCenter, _overviewSpan));
+        map.setRegionAnimated(overview);
+      } catch(e) {
+        console.error('[map] setRegionAnimated: ' + e);
+        try { map.region = overview; } catch(_) {}
+      }
     }
-
-    // Load MapKit JS dynamically — guarantees initMap runs only after the
-    // script is fully parsed and mapkit is defined.
-    var s = document.createElement('script');
-    s.src = 'https://cdn.apple-cdn.com/mapkitjs/mapkit.js';
-    s.onload = initMap;
-    s.onerror = function() {
-      console.error('MapKit JS failed to load from CDN');
-    };
-    document.head.appendChild(s);
   </script>
-</body>
-</html>
-''';
+''');
+
+  if (inlineJs != null) {
+    // Injected inline — no CDN request needed inside the WebView.
+    buf.write('<script>');
+    buf.write(inlineJs);
+    buf.write('</script>\n<script>initMap();</script>\n');
+  } else {
+    // Dart pre-fetch failed; let the WebView try the CDN directly.
+    // Works on real devices; may fail on emulators with broken DNS.
+    buf.write('''  <script>
+(function() {
+  var s    = document.createElement('script');
+  s.src    = '$_kMapKitCdnUrl';
+  s.onload = initMap;
+  s.onerror = function() { console.error('[map] MapKit JS CDN unavailable'); };
+  document.head.appendChild(s);
+})();
+  </script>
+''');
+  }
+
+  buf.write('</body>\n</html>');
+  return buf.toString();
 }
 
-class _NativeMap extends StatelessWidget {
-  const _NativeMap({
-    required this.cities,
-    this.webController,
-  });
+// ─────────────────────────────────────────────────────────────────────────────
+// Map layer widget
+// ─────────────────────────────────────────────────────────────────────────────
 
-  final List<GreeceCity> cities;
-  final WebViewController? webController;
+class _MapLayer extends StatelessWidget {
+  const _MapLayer({this.webCtrl});
+  final WebViewController? webCtrl;
 
   @override
   Widget build(BuildContext context) {
@@ -249,7 +339,7 @@ class _NativeMap extends StatelessWidget {
         color: Color(0xff050505),
         child: Center(
           child: Text(
-            'Map view is available on mobile only.',
+            'Map is available on mobile only.',
             style: TextStyle(color: Color(0xffd0d0d0)),
           ),
         ),
@@ -260,53 +350,31 @@ class _NativeMap extends StatelessWidget {
       return UiKitView(
         viewType: 'neat/native_city_map',
         creationParams: {
-          'cities': cities
-              .map(
-                (city) => {
-                  'name': city.name,
-                  'latitude': city.latitude,
-                  'longitude': city.longitude,
-                },
-              )
+          'cities': greeceCities
+              .map((c) => {
+                    'name': c.name,
+                    'latitude': c.latitude,
+                    'longitude': c.longitude,
+                  })
               .toList(),
         },
         creationParamsCodec: const StandardMessageCodec(),
       );
     }
 
-    // Android — Apple MapKit JS via WebView, no Google Maps required
-    final controller = webController;
-    if (controller == null) {
-      return const ColoredBox(color: Color(0xff0a0a0a));
-    }
-    return WebViewWidget(controller: controller);
+    // Android — null while mapkit.js is being pre-fetched
+    final ctrl = webCtrl;
+    if (ctrl == null) return const ColoredBox(color: Color(0xff0a0a0a));
+    return WebViewWidget(controller: ctrl);
   }
 }
 
-class _GlassIconButton extends StatelessWidget {
-  const _GlassIconButton({
-    required this.icon,
-    required this.onTap,
-  });
+// ─────────────────────────────────────────────────────────────────────────────
+// City card
+// ─────────────────────────────────────────────────────────────────────────────
 
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: const Color(0xcc0c0c0c),
-      shape: const CircleBorder(),
-      child: IconButton(
-        onPressed: onTap,
-        icon: Icon(icon, color: Colors.white),
-      ),
-    );
-  }
-}
-
-class _JoinCityCard extends StatelessWidget {
-  const _JoinCityCard({
+class _CityCard extends StatelessWidget {
+  const _CityCard({
     required this.city,
     required this.onClose,
     required this.onJoin,
@@ -320,116 +388,120 @@ class _JoinCityCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 320),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: const Color(0xff101010),
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: const Color(0xff2a2a2a)),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black54,
-              blurRadius: 22,
-              offset: Offset(0, 12),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Stack(
-                children: [
-                  Container(
-                    height: 132,
-                    width: double.infinity,
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Color(0xff1c1c1c), Color(0xff090909)],
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: CircleAvatar(
-                      radius: 38,
-                      backgroundColor: const Color(0xff171717),
-                      child: Text(
-                        cityInitialFor(city.name),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w800,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xff101010),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: const Color(0xff2a2a2a)),
+            boxShadow: const [
+              BoxShadow(
+                  color: Colors.black54, blurRadius: 24, offset: Offset(0, 14)),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Stack(
+                  children: [
+                    Container(
+                      height: 132,
+                      width: double.infinity,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xff1c1c1c), Color(0xff090909)],
                         ),
                       ),
-                    ),
-                  ),
-                  Positioned(
-                    right: 8,
-                    top: 8,
-                    child: IconButton(
-                      onPressed: onClose,
-                      icon: const Icon(Icons.close, color: Colors.white),
-                    ),
-                  ),
-                ],
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-                child: Column(
-                  children: [
-                    Text(
-                      city.name,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'You can view this city feed and join the local network.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Color(0xffababab),
-                        fontSize: 13,
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: FilledButton(
-                        onPressed: onJoin,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                      alignment: Alignment.center,
+                      child: CircleAvatar(
+                        radius: 38,
+                        backgroundColor: const Color(0xff171717),
+                        child: Text(
+                          _initial(city.name),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
-                        child: const Text(
-                          'Join city',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white),
+                        onPressed: onClose,
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
+                  child: Column(
+                    children: [
+                      Text(
+                        city.name,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'View this city\'s feed and join the local network.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Color(0xffababab),
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: FilledButton(
+                          onPressed: onJoin,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Text(
+                            'Join city',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+
+  String _initial(String s) {
+    final t = s.trim();
+    return t.isEmpty ? '?' : t[0].toUpperCase();
+  }
 }
 
+// Keep this top-level so home_page.dart can still call it if needed.
 String cityInitialFor(String value) {
-  final trimmed = value.trim();
-  if (trimmed.isEmpty) return '?';
-  return trimmed.substring(0, 1).toUpperCase();
+  final t = value.trim();
+  return t.isEmpty ? '?' : t[0].toUpperCase();
 }

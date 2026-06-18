@@ -192,6 +192,7 @@ class ConversationSummary {
     required this.id,
     required this.otherUser,
     required this.otherFullName,
+    required this.otherAvatarUrl,
     required this.lastMessage,
     required this.lastSender,
     required this.updated,
@@ -202,6 +203,7 @@ class ConversationSummary {
   final int id;
   final String otherUser;
   final String otherFullName;
+  final String otherAvatarUrl;
   final String lastMessage;
   final String lastSender;
   final DateTime updated;
@@ -214,6 +216,7 @@ class ConversationSummary {
       id: parseInt(json['id']),
       otherUser: json['otherUser']?.toString() ?? '',
       otherFullName: json['otherFullName']?.toString() ?? '',
+      otherAvatarUrl: json['otherAvatarUrl']?.toString() ?? '',
       lastMessage: json['lastMessage']?.toString() ?? '',
       lastSender: json['lastSender']?.toString() ?? '',
       updated:

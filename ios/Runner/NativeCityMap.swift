@@ -2,6 +2,8 @@ import Flutter
 import MapKit
 import UIKit
 
+// MARK: - Factory
+
 final class NativeCityMapFactory: NSObject, FlutterPlatformViewFactory {
   private let messenger: FlutterBinaryMessenger
 
@@ -19,96 +21,117 @@ final class NativeCityMapFactory: NSObject, FlutterPlatformViewFactory {
     viewIdentifier viewId: Int64,
     arguments args: Any?
   ) -> any FlutterPlatformView {
-    NativeCityMapView(
-      frame: frame,
-      viewId: viewId,
-      args: args,
-      messenger: messenger
-    )
+    NativeCityMapView(frame: frame, args: args, messenger: messenger)
   }
 }
 
+// MARK: - Platform View
+
 final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate {
-  private let mapView = MKMapView()
+  private let map = MKMapView()
   private var channel: FlutterMethodChannel?
-  private let overviewRegion = MKCoordinateRegion(
+
+  private let overview = MKCoordinateRegion(
     center: CLLocationCoordinate2D(latitude: 39.0, longitude: 22.9),
     span: MKCoordinateSpan(latitudeDelta: 7.5, longitudeDelta: 7.5)
   )
 
-  init(frame: CGRect, viewId: Int64, args: Any?, messenger: FlutterBinaryMessenger) {
+  init(frame: CGRect, args: Any?, messenger: FlutterBinaryMessenger) {
     super.init()
-    mapView.frame = frame
-    mapView.delegate = self
-    mapView.isRotateEnabled = false
-    mapView.isPitchEnabled = false
-    mapView.showsCompass = false
-    mapView.showsScale = false
-    mapView.showsTraffic = false
-    mapView.pointOfInterestFilter = .excludingAll
-    mapView.overrideUserInterfaceStyle = .dark
-    mapView.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier: "city")
-    mapView.setRegion(overviewRegion, animated: false)
-    channel = FlutterMethodChannel(name: "neat/native_city_map_channel", binaryMessenger: messenger)
-    channel?.setMethodCallHandler { [weak self] call, result in
-      if call.method == "zoomOut" {
-        self?.zoomOut()
-      }
-      result(nil)
-    }
-
-    if let dict = args as? [String: Any],
-       let cities = dict["cities"] as? [[String: Any]] {
-      addAnnotations(cities)
-    }
+    configureMap(frame: frame)
+    wireChannel(messenger: messenger)
+    loadCities(from: args)
   }
 
-  func view() -> UIView {
-    mapView
-  }
+  func view() -> UIView { map }
 
-  func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+  // MARK: MKMapViewDelegate
+
+  func mapView(_ mv: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
     guard annotation is MKPointAnnotation else { return nil }
-    let view = mapView.dequeueReusableAnnotationView(withIdentifier: "city", for: annotation) as! MKMarkerAnnotationView
-    view.markerTintColor = UIColor.systemGreen
-    view.glyphImage = UIImage(systemName: "mappin")
-    view.canShowCallout = false
-    return view
+    let v = mv.dequeueReusableAnnotationView(
+      withIdentifier: "pin", for: annotation
+    ) as! MKMarkerAnnotationView
+    v.markerTintColor = .systemGreen
+    v.glyphImage = UIImage(systemName: "mappin")
+    v.canShowCallout = false
+    return v
   }
 
-  func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-    guard let annotation = view.annotation, let city = annotation.title ?? nil else { return }
-    let region = MKCoordinateRegion(
-      center: annotation.coordinate,
-      latitudinalMeters: 70_000,
-      longitudinalMeters: 70_000
+  func mapView(_ mv: MKMapView, didSelect view: MKAnnotationView) {
+    guard
+      let annotation = view.annotation,
+      let name = annotation.title ?? nil,
+      !name.isEmpty
+    else { return }
+
+    // Lock the map immediately so no further taps can land while the
+    // Flutter card is visible. Unlocked as the first act of zoomOut().
+    mv.isUserInteractionEnabled = false
+
+    mv.setRegion(
+      MKCoordinateRegion(
+        center: annotation.coordinate,
+        latitudinalMeters: 70_000,
+        longitudinalMeters: 70_000
+      ),
+      animated: true
     )
-    mapView.setRegion(region, animated: true)
-    channel?.invokeMethod("citySelected", arguments: city)
+    channel?.invokeMethod("citySelected", arguments: name)
   }
+
+  // MARK: Private
 
   private func zoomOut() {
-    for annotation in mapView.selectedAnnotations {
-      mapView.deselectAnnotation(annotation, animated: false)
-    }
-    mapView.setRegion(overviewRegion, animated: true)
+    // Unlock first — this must happen unconditionally so the map is never
+    // permanently stuck even if something else in this function throws.
+    map.isUserInteractionEnabled = true
+    map.selectedAnnotations.forEach { map.deselectAnnotation($0, animated: false) }
+    map.setRegion(overview, animated: true)
   }
 
-  private func addAnnotations(_ cities: [[String: Any]]) {
-    for city in cities {
-      guard
-        let name = city["name"] as? String,
-        let latitude = city["latitude"] as? Double,
-        let longitude = city["longitude"] as? Double
-      else { continue }
+  private func configureMap(frame: CGRect) {
+    map.frame = frame
+    map.delegate = self
+    map.isRotateEnabled = false
+    map.isPitchEnabled = false
+    map.showsCompass = false
+    map.showsScale = false
+    map.showsTraffic = false
+    map.pointOfInterestFilter = .excludingAll
+    map.overrideUserInterfaceStyle = .dark
+    map.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier: "pin")
+    map.setRegion(overview, animated: false)
+  }
 
-      let annotation = MKPointAnnotation()
-      annotation.title = name
-      annotation.coordinate = CLLocationCoordinate2D(
-        latitude: latitude,
-        longitude: longitude
-      )
-      mapView.addAnnotation(annotation)
+  private func wireChannel(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(
+      name: "neat/native_city_map_channel",
+      binaryMessenger: messenger
+    )
+    channel?.setMethodCallHandler { [weak self] call, result in
+      if call.method == "zoomOut" { self?.zoomOut() }
+      result(nil)
     }
+  }
+
+  private func loadCities(from args: Any?) {
+    guard
+      let dict   = args as? [String: Any],
+      let cities = dict["cities"] as? [[String: Any]]
+    else { return }
+
+    let annotations: [MKPointAnnotation] = cities.compactMap { c in
+      guard
+        let name = c["name"]      as? String,
+        let lat  = c["latitude"]  as? Double,
+        let lng  = c["longitude"] as? Double
+      else { return nil }
+      let a = MKPointAnnotation()
+      a.title = name
+      a.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+      return a
+    }
+    map.addAnnotations(annotations)
   }
 }

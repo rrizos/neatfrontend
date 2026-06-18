@@ -42,6 +42,7 @@ class _HomePageState extends State<HomePage> {
   final List<NotificationItem> _notificationsList = [];
   final Set<String> _followingAuthors = {};
   final List<UserProfile> _followingProfiles = [];
+  final ScrollController _feedScroll = ScrollController();
   int _nav = 0;
   int _selectedTab = 0;
   final Set<int> _visitedTabs = <int>{0};
@@ -62,6 +63,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _compose.dispose();
+    _feedScroll.dispose();
     super.dispose();
   }
 
@@ -842,7 +844,7 @@ class _HomePageState extends State<HomePage> {
                         RefreshIndicator(
                           onRefresh: _load,
                           child: CustomScrollView(
-                            key: PageStorageKey<String>('feed_$_selectedTab'),
+                            controller: _feedScroll,
                             slivers: [
                               const SliverToBoxAdapter(child: SizedBox.shrink()),
                               SliverPersistentHeader(
@@ -851,6 +853,9 @@ class _HomePageState extends State<HomePage> {
                                   selectedTab: _selectedTab,
                                   onTabChanged: (value) {
                                     setState(() => _selectedTab = value);
+                                    if (_feedScroll.hasClients) {
+                                      _feedScroll.jumpTo(0);
+                                    }
                                   },
                                 ),
                               ),
@@ -1162,84 +1167,132 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(covariant _TabsHeader old) => old.selectedTab != selectedTab;
 }
 
-class _TabsHeaderContent extends StatelessWidget {
+class _TabsHeaderContent extends StatefulWidget {
   const _TabsHeaderContent({required this.selectedTab, required this.onTabChanged});
   final int selectedTab;
   final ValueChanged<int> onTabChanged;
 
   @override
+  State<_TabsHeaderContent> createState() => _TabsHeaderContentState();
+}
+
+class _TabsHeaderContentState extends State<_TabsHeaderContent>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final CurvedAnimation _curved;
+
+  static const _indicatorW = 56.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+      value: widget.selectedTab.toDouble(),
+    );
+    _curved = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+  }
+
+  @override
+  void didUpdateWidget(_TabsHeaderContent old) {
+    super.didUpdateWidget(old);
+    if (old.selectedTab != widget.selectedTab) {
+      widget.selectedTab == 1 ? _ctrl.forward() : _ctrl.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _curved.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    const indicatorW = 40.0;
-    final tabW = MediaQuery.sizeOf(context).width / 2;
-    final targetLeft = selectedTab * tabW + (tabW - indicatorW) / 2;
-    return Container(
-      color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
-      child: Stack(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: InkWell(
-                  onTap: () => onTabChanged(0),
-                  child: SizedBox(
-                    height: 52,
-                    child: Center(
-                      child: Text(
-                        'For you',
-                        style: TextStyle(
-                          color: selectedTab == 0
-                              ? (isLight ? Colors.black : Colors.white)
-                              : (isLight ? const Color(0xff616161) : Colors.white38),
-                          fontSize: 17,
-                          fontWeight: selectedTab == 0 ? FontWeight.w800 : FontWeight.w500,
+    final activeClr   = isLight ? Colors.black       : Colors.white;
+    final inactiveClr = isLight ? const Color(0xff888888) : Colors.white38;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tabW    = constraints.maxWidth / 2;
+        final fromX   = (tabW - _indicatorW) / 2;
+        final toX     = tabW + fromX;
+
+        return AnimatedBuilder(
+          animation: _curved,
+          builder: (context, _) {
+            final t    = _curved.value;          // 0 = For You, 1 = Following
+            final left = fromX + (toX - fromX) * t;
+
+            // Smoothly interpolate label colours
+            final forYouClr    = Color.lerp(activeClr,   inactiveClr, t)!;
+            final followingClr = Color.lerp(inactiveClr, activeClr,   t)!;
+
+            return Container(
+              color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+              child: Stack(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => widget.onTabChanged(0),
+                          child: SizedBox(
+                            height: 52,
+                            child: Center(
+                              child: Text(
+                                'For you',
+                                style: TextStyle(
+                                  color: forYouClr,
+                                  fontSize: 17,
+                                  fontWeight: t < 0.5 ? FontWeight.w800 : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => widget.onTabChanged(1),
+                          child: SizedBox(
+                            height: 52,
+                            child: Center(
+                              child: Text(
+                                'Following',
+                                style: TextStyle(
+                                  color: followingClr,
+                                  fontSize: 17,
+                                  fontWeight: t >= 0.5 ? FontWeight.w800 : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Positioned(
+                    left: left,
+                    bottom: 0,
+                    child: Container(
+                      width: _indicatorW,
+                      height: 3,
+                      decoration: BoxDecoration(
+                        color: const Color(0xff3897f0),
+                        borderRadius: BorderRadius.circular(1.5),
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
-              Expanded(
-                child: InkWell(
-                  onTap: () => onTabChanged(1),
-                  child: SizedBox(
-                    height: 52,
-                    child: Center(
-                      child: Text(
-                        'Following',
-                        style: TextStyle(
-                          color: selectedTab == 1
-                              ? (isLight ? Colors.black : Colors.white)
-                              : (isLight ? const Color(0xff616161) : Colors.white38),
-                          fontSize: 17,
-                          fontWeight: selectedTab == 1 ? FontWeight.w800 : FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          TweenAnimationBuilder<double>(
-            tween: Tween<double>(end: targetLeft),
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeInOut,
-            builder: (context, left, _) => Positioned(
-              left: left,
-              bottom: 0,
-              child: Container(
-                width: indicatorW,
-                height: 2,
-                decoration: BoxDecoration(
-                  color: isLight ? Colors.black : Colors.white,
-                  borderRadius: BorderRadius.circular(1),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+            );
+          },
+        );
+      },
     );
   }
 }
