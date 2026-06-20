@@ -157,6 +157,7 @@ class NotificationItem {
     required this.targetType,
     required this.targetId,
     required this.targetText,
+    required this.imageUrl,
     required this.isRead,
     required this.created,
   });
@@ -167,6 +168,7 @@ class NotificationItem {
   final String targetType;
   final String targetId;
   final String targetText;
+  final String imageUrl;
   final bool isRead;
   final DateTime created;
 
@@ -179,6 +181,7 @@ class NotificationItem {
       targetType: json['targetType']?.toString() ?? '',
       targetId: json['targetId']?.toString() ?? '',
       targetText: json['targetText']?.toString() ?? '',
+      imageUrl: json['imageUrl']?.toString() ?? '',
       isRead: json['isRead'] == true,
       created:
           DateTime.tryParse(json['created']?.toString() ?? '') ??

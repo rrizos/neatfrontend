@@ -19,6 +19,7 @@ Uri postsEndpoint({bool fresh = false, String? city}) {
 }
 
 Uri postLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/like/');
+Uri postLikersEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/likers/');
 Uri postSaveEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/save/');
 Uri postCommentsEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/posts/$id/comments/');
@@ -59,6 +60,8 @@ Uri eventsEndpoint({String? city, String? type}) {
   if (params.isEmpty) return uri;
   return uri.replace(queryParameters: params);
 }
+Uri eventDetailEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/$id/');
 Uri eventAttendEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/attend/');
 Uri eventDeleteEndpoint(int id) =>

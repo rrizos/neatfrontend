@@ -52,7 +52,6 @@ class _HomePageState extends State<HomePage> {
   bool _showInlineProfile = false;
   String _inlineProfileUsername = '';
   int? _inlinePostId;
-
   @override
   void initState() {
     super.initState();
@@ -203,6 +202,7 @@ class _HomePageState extends State<HomePage> {
               targetType: item.targetType,
               targetId: item.targetId,
               targetText: item.targetText,
+              imageUrl: item.imageUrl,
               isRead: true,
               created: item.created,
             );
@@ -215,13 +215,12 @@ class _HomePageState extends State<HomePage> {
   Future<void> _createPost() async {
     final text = _compose.text.trim();
     if (text.isEmpty) return;
+    final body = <String, dynamic>{'text': text};
+    if (_composeImageUrl.isNotEmpty) body['imageUrl'] = _composeImageUrl;
     final res = await http.post(
       postsEndpoint(),
       headers: authJsonHeaders(widget.session.token),
-      body: jsonEncode({
-        'text': text,
-        if (_composeImageUrl.isNotEmpty) 'imageUrl': _composeImageUrl,
-      }),
+      body: jsonEncode(body),
     );
     if (res.statusCode == 201) {
       _compose.clear();
@@ -295,6 +294,25 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _unfollow(String username) async {
+    setState(() => _followingAuthors.remove(username));
+    final res = await http.post(
+      followEndpoint(username),
+      headers: authJsonHeaders(widget.session.token),
+      body: jsonEncode({'follow': false}),
+    );
+    if (res.statusCode == 401) {
+      setState(() => _followingAuthors.add(username));
+      await widget.onLogout();
+      return;
+    }
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      if (mounted) setState(() => _followingAuthors.add(username));
+    } else if (mounted) {
+      await _loadFollowingAuthors();
+    }
+  }
+
   Future<void> _deletePost(FeedPost post) async {
     final res = await http.delete(
       postDeleteEndpoint(post.id),
@@ -352,6 +370,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openNotificationTarget(NotificationItem item) async {
+    if (item.targetType == 'event' && item.targetId.isNotEmpty) {
+      if (mounted) setState(() { _selectedTab = 4; _visitedTabs.add(4); });
+      return;
+    }
     if (item.targetType == 'post' && item.targetId.isNotEmpty) {
       final post = _posts
           .where((p) => p.id.toString() == item.targetId)
@@ -379,154 +401,23 @@ class _HomePageState extends State<HomePage> {
       showDragHandle: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff141414),
       isScrollControlled: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            child: FutureBuilder<List<NotificationItem>>(
-              future: _fetchNotifications(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-
-                final items = snapshot.data ?? const [];
-                final unread = items.where((item) => !item.isRead).toList();
-                final today = items
-                    .where(
-                      (item) => _notificationBucket(item.created) == 'Today',
-                    )
-                    .toList();
-                final thisWeek = items
-                    .where(
-                      (item) =>
-                          _notificationBucket(item.created) == 'This week',
-                    )
-                    .toList();
-                final earlier = items
-                    .where(
-                      (item) => _notificationBucket(item.created) == 'Earlier',
-                    )
-                    .toList();
-
-                return StatefulBuilder(
-                  builder: (context, setSheetState) {
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              'Notifications',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w800,
-                                color: isLight ? Colors.black : Colors.white,
-                              ),
-                            ),
-                            const Spacer(),
-                            if (unread.isNotEmpty)
-                              TextButton.icon(
-                                onPressed: () async {
-                                  await _markNotificationsRead(unread);
-                                  if (!mounted) return;
-                                  setSheetState(() {});
-                                },
-                                icon: Icon(
-                                  Icons.done_all,
-                                  size: 18,
-                                  color: isLight ? Colors.black : const Color(0xffededed),
-                                ),
-                                label: const Text('Mark all read'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: isLight ? Colors.black : const Color(0xffededed),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 10,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Activity',
-                          style: TextStyle(
-                            color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        if (items.isEmpty)
-                          Padding(
-                            padding: EdgeInsets.symmetric(vertical: 32),
-                            child: Center(
-                              child: Text(
-                                'No notifications yet.',
-                                style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb7b7b7)),
-                              ),
-                            ),
-                          )
-                        else
-                          Flexible(
-                            child: ListView(
-                              shrinkWrap: true,
-                              children: [
-                                _NotificationGroup(
-                                  title: 'Today',
-                                  items: today,
-                                  onTapItem: (item) async {
-                                    Navigator.of(sheetContext).pop();
-                                    await _markNotificationsRead([item]);
-                                    if (!mounted) return;
-                                    await _openNotificationTarget(item);
-                                  },
-                                ),
-                                _NotificationGroup(
-                                  title: 'This week',
-                                  items: thisWeek,
-                                  onTapItem: (item) async {
-                                    Navigator.of(sheetContext).pop();
-                                    await _markNotificationsRead([item]);
-                                    if (!mounted) return;
-                                    await _openNotificationTarget(item);
-                                  },
-                                ),
-                                _NotificationGroup(
-                                  title: 'Earlier',
-                                  items: earlier,
-                                  onTapItem: (item) async {
-                                    Navigator.of(sheetContext).pop();
-                                    await _markNotificationsRead([item]);
-                                    if (!mounted) return;
-                                    await _openNotificationTarget(item);
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                      ],
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        );
-      },
+      builder: (sheetCtx) => SizedBox(
+        height: MediaQuery.of(sheetCtx).size.height * 0.93,
+        child: _NotificationsSheet(
+          fetchNotifications: _fetchNotifications,
+          followingAuthors: Set.of(_followingAuthors),
+          token: widget.session.token,
+          onFollow: _follow,
+          onUnfollow: _unfollow,
+          onTapItem: (item) async {
+            Navigator.of(sheetCtx).pop();
+            await _markNotificationsRead([item]);
+            if (!mounted) return;
+            await _openNotificationTarget(item);
+          },
+        ),
+      ),
     );
-  }
-
-  String _notificationBucket(DateTime created) {
-    final diff = DateTime.now().difference(created);
-    if (diff.inDays == 0) return 'Today';
-    if (diff.inDays <= 7) return 'This week';
-    return 'Earlier';
   }
 
   void _openComments(FeedPost post) {
@@ -643,7 +534,7 @@ class _HomePageState extends State<HomePage> {
                             ),
                             cursorColor: isLight ? Colors.black : Colors.white,
                             decoration: InputDecoration(
-                              hintText: 'What’s happening?',
+                              hintText: "What's happening?",
                               hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
                               border: InputBorder.none,
                             ),
@@ -701,7 +592,20 @@ class _HomePageState extends State<HomePage> {
                         ),
                         _ComposeAction(
                           icon: Icons.gif_box_outlined,
-                          onTap: () {},
+                          onTap: () async {
+                            final url = await showModalBottomSheet<String>(
+                              context: context,
+                              isScrollControlled: true,
+                              showDragHandle: true,
+                              backgroundColor:
+                                  isLight ? Colors.white : const Color(0xff141414),
+                              builder: (_) => const _GifPickerSheet(),
+                            );
+                            if (url != null && url.isNotEmpty) {
+                              _composeImageUrl = url;
+                              setSheetState(() {});
+                            }
+                          },
                         ),
                         _ComposeAction(
                           icon: Icons.poll_outlined,
@@ -1384,6 +1288,18 @@ class _FeedPostCardState extends State<_FeedPostCard> {
     }
   }
 
+  void _openFullscreen(BuildContext context) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: true,
+        pageBuilder: (_, _, _) =>
+            _FullscreenMediaViewer(url: widget.post.imageUrl),
+        transitionsBuilder: (_, animation, _, child) =>
+            FadeTransition(opacity: animation, child: child),
+      ),
+    );
+  }
+
   void _openComments() {
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
@@ -1504,13 +1420,16 @@ class _FeedPostCardState extends State<_FeedPostCard> {
               ),
             ),
             if (widget.post.imageUrl.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: AspectRatio(
-                    aspectRatio: 1.08,
-                    child: _FeedMedia(url: widget.post.imageUrl),
+              GestureDetector(
+                onTap: () => _openFullscreen(context),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: AspectRatio(
+                      aspectRatio: 1.08,
+                      child: _FeedMedia(url: widget.post.imageUrl),
+                    ),
                   ),
                 ),
               ),
@@ -2373,6 +2292,44 @@ class _FeedMedia extends StatelessWidget {
   }
 }
 
+class _FullscreenMediaViewer extends StatelessWidget {
+  const _FullscreenMediaViewer({required this.url});
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          Center(
+            child: InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: _FeedMedia(url: url),
+            ),
+          ),
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 12,
+            right: 16,
+            child: GestureDetector(
+              onTap: () => Navigator.of(context).pop(),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                padding: const EdgeInsets.all(8),
+                child: const Icon(Icons.close, color: Colors.white, size: 24),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PostAvatar extends StatelessWidget {
   const _PostAvatar({
     required this.username,
@@ -2443,153 +2400,580 @@ class _ComposeAction extends StatelessWidget {
   }
 }
 
-class _NotificationGroup extends StatelessWidget {
-  const _NotificationGroup({
-    required this.title,
-    required this.items,
+// ── Notifications sheet ─────────────────────────────────────────────────────
+
+class _NotificationsSheet extends StatefulWidget {
+  const _NotificationsSheet({
+    required this.fetchNotifications,
+    required this.followingAuthors,
+    required this.token,
+    required this.onFollow,
+    required this.onUnfollow,
     required this.onTapItem,
   });
+  final Future<List<NotificationItem>> Function() fetchNotifications;
+  final Set<String> followingAuthors;
+  final String token;
+  final Future<void> Function(String username) onFollow;
+  final Future<void> Function(String username) onUnfollow;
+  final Future<void> Function(NotificationItem) onTapItem;
 
-  final String title;
-  final List<NotificationItem> items;
-  final Future<void> Function(NotificationItem item) onTapItem;
+  @override
+  State<_NotificationsSheet> createState() => _NotificationsSheetState();
+}
+
+class _NotificationsSheetState extends State<_NotificationsSheet> {
+  late Future<List<NotificationItem>> _future;
+  late Set<String> _following;
+  final Map<String, String> _eventImages = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _following = Set.of(widget.followingAuthors);
+    _future = widget.fetchNotifications().then((items) {
+      _loadEventImages(items);
+      return items;
+    });
+  }
+
+  Future<void> _loadEventImages(List<NotificationItem> items) async {
+    final eventNotifs = items
+        .where((n) => n.targetType == "event" && n.targetId.isNotEmpty);
+    for (final n in eventNotifs) {
+      final id = int.tryParse(n.targetId);
+      if (id == null) continue;
+      try {
+        final res = await http.get(
+          eventDetailEndpoint(id),
+          headers: authGetHeaders(widget.token),
+        );
+        if (res.statusCode == 200) {
+          final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+          final url = decoded['imageUrl']?.toString() ?? '';
+          if (url.isNotEmpty && mounted) {
+            setState(() => _eventImages[n.targetId] = url);
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  void _toggleFollow(String username) {
+    if (_following.contains(username)) {
+      setState(() => _following.remove(username));
+      widget.onUnfollow(username);
+    } else {
+      setState(() => _following.add(username));
+      widget.onFollow(username);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (items.isEmpty) return const SizedBox.shrink();
     final isLight = Theme.of(context).brightness == Brightness.light;
     final textColor = isLight ? Colors.black : Colors.white;
-    final secondaryColor =
-        isLight ? const Color(0xff555555) : const Color(0xffb7b7b7);
-    final timeColor =
-        isLight ? const Color(0xff888888) : const Color(0xff8f8f8f);
+    const subColor = Color(0xff8e8e8e);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Text(
-              title,
-              style: TextStyle(
-                color: secondaryColor,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+    return FutureBuilder<List<NotificationItem>>(
+      future: _future,
+      builder: (context, snapshot) {
+        final items = snapshot.data ?? const [];
+        final now = DateTime.now();
+        final last7 =
+            items.where((n) => now.difference(n.created).inDays <= 7).toList();
+        final last30 = items.where((n) {
+          final d = now.difference(n.created).inDays;
+          return d > 7 && d <= 30;
+        }).toList();
+        final older = items
+            .where((n) => now.difference(n.created).inDays > 30)
+            .toList();
+
+        Widget tileFor(NotificationItem n) => _NotifTile(
+              item: n,
+              isFollowing: _following.contains(n.actor),
+              onFollowToggle: () => _toggleFollow(n.actor),
+              eventImageUrl: _eventImages[n.targetId] ?? "",
+              onTap: () => widget.onTapItem(n),
+            );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Text(
+                "Notifications",
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: textColor,
+                ),
               ),
             ),
-          ),
-          for (final item in items)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(18),
-                onTap: () => onTapItem(item),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isLight
-                        ? (item.isRead
-                            ? Colors.white
-                            : const Color(0xfff0f4ff))
-                        : (item.isRead
-                            ? const Color(0xff161616)
-                            : const Color(0xff1c1c1c)),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: isLight
-                          ? (item.isRead
-                              ? const Color(0xffe0e3e8)
-                              : const Color(0xffbdd0ff))
-                          : (item.isRead
-                              ? const Color(0xff262626)
-                              : const Color(0xff3a3a3a)),
-                    ),
+            const _FollowRequestsRow(),
+            const Divider(height: 1, thickness: 1),
+            if (snapshot.connectionState == ConnectionState.waiting)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else if (items.isEmpty)
+              const Expanded(
+                child: Center(
+                  child: Text(
+                    "No notifications yet.",
+                    style: TextStyle(color: subColor),
                   ),
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CircleAvatar(
-                        radius: 20,
-                        backgroundColor: isLight
-                            ? const Color(0xffe6e9ef)
-                            : const Color(0xff2a2a2a),
-                        child: Text(
-                          initialFor(item.actor),
-                          style: TextStyle(
-                            color: isLight
-                                ? const Color(0xff444444)
-                                : Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            RichText(
-                              text: TextSpan(
-                                style: TextStyle(
-                                  color: textColor,
-                                  fontSize: 14,
-                                  height: 1.35,
-                                ),
-                                children: [
-                                  TextSpan(
-                                    text: item.actor,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  TextSpan(text: ' ${_actionLabel(item.verb)}'),
-                                ],
-                              ),
-                            ),
-                            if (item.targetText.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                item.targetText,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: secondaryColor,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                            const SizedBox(height: 8),
-                            Text(
-                              _timeAgo(item.created),
-                              style: TextStyle(
-                                color: timeColor,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (!item.isRead)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: isLight
-                                  ? const Color(0xff1479ff)
-                                  : Colors.white,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
+                ),
+              )
+            else
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.only(bottom: 32),
+                  children: [
+                    if (last7.isNotEmpty) ...[
+                      const _NotifSectionHeader(title: "Last 7 Days"),
+                      ...last7.map(tileFor),
                     ],
+                    if (last30.isNotEmpty) ...[
+                      const _NotifSectionHeader(title: "Last 30 Days"),
+                      ...last30.map(tileFor),
+                    ],
+                    if (older.isNotEmpty) ...[
+                      const _NotifSectionHeader(title: "Older"),
+                      ...older.map(tileFor),
+                    ],
+                    const SizedBox(height: 16),
+                    const _SuggestionsSection(),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _NotifSectionHeader extends StatelessWidget {
+  const _NotifSectionHeader({required this.title});
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          color: isLight ? Colors.black : Colors.white,
+        ),
+      ),
+    );
+  }
+}
+
+class _NotifTile extends StatelessWidget {
+  const _NotifTile({
+    required this.item,
+    required this.isFollowing,
+    required this.onFollowToggle,
+    required this.eventImageUrl,
+    required this.onTap,
+  });
+  final NotificationItem item;
+  final bool isFollowing;
+  final VoidCallback onFollowToggle;
+  final String eventImageUrl;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final unreadBg =
+        isLight ? const Color(0xffeff8ff) : const Color(0xff1a2535);
+    final bg = isLight ? Colors.white : const Color(0xff141414);
+    final textColor = isLight ? Colors.black : Colors.white;
+    const subColor = Color(0xff8e8e8e);
+    final isFollowVerb = item.verb.contains("follow");
+    final isEvent = item.targetType == "event";
+
+    // Trailing widget logic:
+    // - follow notification → Follow / Following button (wired up)
+    // - event notification with image → show thumbnail
+    // - event notification without image → nothing
+    // - post notification → grey placeholder thumbnail
+    Widget? trailing;
+    if (isFollowVerb) {
+      trailing = SizedBox(
+        height: 34,
+        child: OutlinedButton(
+          onPressed: onFollowToggle,
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            side: BorderSide(
+              color: isLight
+                  ? const Color(0xffdbdbdb)
+                  : const Color(0xff363636),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            foregroundColor: textColor,
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          child: Text(isFollowing ? "Following" : "Follow"),
+        ),
+      );
+    } else if (isEvent) {
+      if (eventImageUrl.isNotEmpty) {
+        trailing = ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Image.network(
+              eventImageUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+          ),
+        );
+      }
+      // no image → trailing stays null (nothing shown)
+    } else {
+      // post notification — grey placeholder
+      trailing = ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          width: 44,
+          height: 44,
+          color: isLight
+              ? const Color(0xffe8e8e8)
+              : const Color(0xff2a2a2a),
+        ),
+      );
+    }
+
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        color: item.isRead ? bg : unreadBg,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: isLight
+                  ? const Color(0xffe0e0e0)
+                  : const Color(0xff2a2a2a),
+              child: Text(
+                initialFor(item.actor),
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  color: isLight ? const Color(0xff333333) : Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: RichText(
+                text: TextSpan(
+                  style:
+                      TextStyle(fontSize: 14, color: textColor, height: 1.4),
+                  children: [
+                    TextSpan(
+                      text: item.actor,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    TextSpan(text: " ${_actionLabel(item.verb)}"),
+                    if (item.targetText.isNotEmpty)
+                      TextSpan(
+                        text: ": ${item.targetText}",
+                        style: const TextStyle(color: subColor),
+                      ),
+                    TextSpan(
+                      text: "  ${_timeAgo(item.created)}",
+                      style: const TextStyle(color: subColor, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (trailing != null) ...[
+              const SizedBox(width: 12),
+              trailing,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FollowRequestsRow extends StatelessWidget {
+  const _FollowRequestsRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final textColor = isLight ? Colors.black : Colors.white;
+    const subColor = Color(0xff8e8e8e);
+
+    return ListTile(
+      contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      leading: SizedBox(
+        width: 50,
+        height: 44,
+        child: Stack(
+          children: [
+            Positioned(
+              bottom: 0,
+              left: 0,
+              child: CircleAvatar(
+                radius: 19,
+                backgroundColor: const Color(0xff6c63ff),
+                child: const Text(
+                  "A",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
                   ),
                 ),
               ),
             ),
+            Positioned(
+              top: 0,
+              right: 0,
+              child: CircleAvatar(
+                radius: 19,
+                backgroundColor: const Color(0xffff6584),
+                child: const Text(
+                  "M",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      title: Text(
+        "Follow Requests",
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 15,
+          color: textColor,
+        ),
+      ),
+      subtitle: const Text(
+        "alex_m, mike_r and 1 other",
+        style: TextStyle(color: subColor, fontSize: 13),
+      ),
+      trailing: const Icon(Icons.chevron_right, color: subColor),
+      onTap: () {},
+    );
+  }
+}
+
+const List<(String, String, String)> _kSuggestions = [
+  ("Sarah K.", "@sarah_k", "Followed by jake and 3 others"),
+  ("Mike R.", "@mike_runner", "Followed by emma_l"),
+  ("Alex M.", "@alex_m", "Popular in your area"),
+  ("Luna V.", "@luna.v", "New to Neat"),
+  ("David C.", "@david_c", "Followed by you and 5 others"),
+];
+
+const _kAvatarColors = [
+  Color(0xff6c63ff),
+  Color(0xffff6584),
+  Color(0xff43d6a0),
+  Color(0xffffb347),
+  Color(0xff4fc3f7),
+];
+
+class _SuggestionsSection extends StatefulWidget {
+  const _SuggestionsSection();
+
+  @override
+  State<_SuggestionsSection> createState() => _SuggestionsSectionState();
+}
+
+class _SuggestionsSectionState extends State<_SuggestionsSection> {
+  final Set<int> _followed = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final textColor = isLight ? Colors.black : Colors.white;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Row(
+            children: [
+              Text(
+                "Suggestions For You",
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () {},
+                child: Text(
+                  "See All",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        for (int i = 0; i < _kSuggestions.length; i++)
+          _SuggestionTile(
+            name: _kSuggestions[i].$1,
+            username: _kSuggestions[i].$2,
+            sub: _kSuggestions[i].$3,
+            avatarColor: _kAvatarColors[i % _kAvatarColors.length],
+            followed: _followed.contains(i),
+            onFollow: () => setState(() {
+              if (_followed.contains(i)) {
+                _followed.remove(i);
+              } else {
+                _followed.add(i);
+              }
+            }),
+          ),
+      ],
+    );
+  }
+}
+
+class _SuggestionTile extends StatelessWidget {
+  const _SuggestionTile({
+    required this.name,
+    required this.username,
+    required this.sub,
+    required this.avatarColor,
+    required this.followed,
+    required this.onFollow,
+  });
+
+  final String name;
+  final String username;
+  final String sub;
+  final Color avatarColor;
+  final bool followed;
+  final VoidCallback onFollow;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final textColor = isLight ? Colors.black : Colors.white;
+    const subColor = Color(0xff8e8e8e);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 22,
+            backgroundColor: avatarColor,
+            child: Text(
+              name.substring(0, 1),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  username,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: textColor,
+                  ),
+                ),
+                Text(
+                  name,
+                  style: const TextStyle(fontSize: 13, color: subColor),
+                ),
+                Text(
+                  sub,
+                  style: const TextStyle(fontSize: 12, color: subColor),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            height: 34,
+            child: followed
+                ? OutlinedButton(
+                    onPressed: onFollow,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      side: BorderSide(
+                        color: isLight
+                            ? const Color(0xffdbdbdb)
+                            : const Color(0xff363636),
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      foregroundColor: textColor,
+                      textStyle: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    child: const Text("Following"),
+                  )
+                : ElevatedButton(
+                    onPressed: onFollow,
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      backgroundColor: const Color(0xff1479ff),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    child: const Text("Follow"),
+                  ),
+          ),
         ],
       ),
     );
@@ -3169,4 +3553,280 @@ class _SharePlanePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SharePlanePainter old) => old.color != color;
+}
+
+// ── GIF picker ────────────────────────────────────────────────────────────────
+
+class _GifResult {
+  const _GifResult({required this.previewUrl, required this.fullUrl});
+  final String previewUrl;
+  final String fullUrl;
+}
+
+class _GifPickerSheet extends StatefulWidget {
+  const _GifPickerSheet();
+
+  @override
+  State<_GifPickerSheet> createState() => _GifPickerSheetState();
+}
+
+class _GifPickerSheetState extends State<_GifPickerSheet> {
+  // Replace with your own GIPHY API key from developers.giphy.com
+  static const _apiKey = 'dc6zaTOxFJmzC';
+  static const _limit = 24;
+
+  static const _categories = [
+    ('🔥 Trending', null),
+    ('😂 Reactions', 'reactions'),
+    ('❤️ Love', 'love'),
+    ('😂 LOL', 'lol'),
+    ('😢 Sad', 'sad'),
+    ('🎉 Celebrate', 'celebrate'),
+    ('😤 Angry', 'angry'),
+    ('👋 Hello', 'hello'),
+    ('🙏 Thanks', 'thank you'),
+    ('💪 Motivation', 'motivation'),
+    ('😴 Tired', 'tired'),
+    ('🤔 Thinking', 'thinking'),
+  ];
+
+  final _search = TextEditingController();
+  Timer? _debounce;
+  List<_GifResult> _gifs = const [];
+  bool _loading = true;
+  int _selectedCategory = 0;
+  bool _isSearching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCategory(0);
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetchCategory(int index) async {
+    final query = _categories[index].$2;
+    if (mounted) setState(() { _loading = true; _selectedCategory = index; });
+    try {
+      final uri = query == null
+          ? Uri.parse(
+              'https://api.giphy.com/v1/gifs/trending?api_key=$_apiKey&limit=$_limit&rating=g',
+            )
+          : Uri.parse(
+              'https://api.giphy.com/v1/gifs/search'
+              '?api_key=$_apiKey&q=${Uri.encodeComponent(query)}&limit=$_limit&rating=g',
+            );
+      await _loadFrom(uri);
+    } catch (_) {} finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _fetchSearch(String query) async {
+    if (mounted) setState(() => _loading = true);
+    try {
+      final uri = Uri.parse(
+        'https://api.giphy.com/v1/gifs/search'
+        '?api_key=$_apiKey&q=${Uri.encodeComponent(query)}&limit=$_limit&rating=g',
+      );
+      await _loadFrom(uri);
+    } catch (_) {} finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadFrom(Uri uri) async {
+    final res = await http.get(uri);
+    if (!mounted) return;
+    if (res.statusCode == 200) {
+      final data =
+          (jsonDecode(res.body) as Map<String, dynamic>)['data'] as List<dynamic>? ??
+              const [];
+      setState(() {
+        _gifs = data.whereType<Map<String, dynamic>>().map((item) {
+          final images = item['images'] as Map<String, dynamic>? ?? {};
+          final preview =
+              (images['fixed_width'] as Map<String, dynamic>? ?? {})['url']
+                  ?.toString() ??
+                  '';
+          final full =
+              (images['original'] as Map<String, dynamic>? ?? {})['url']
+                  ?.toString() ??
+                  '';
+          return _GifResult(previewUrl: preview, fullUrl: full);
+        }).where((g) => g.previewUrl.isNotEmpty).toList();
+      });
+    }
+  }
+
+  void _onSearchChanged(String v) {
+    final trimmed = v.trim();
+    setState(() => _isSearching = trimmed.isNotEmpty);
+    _debounce?.cancel();
+    if (trimmed.isEmpty) {
+      _fetchCategory(_selectedCategory);
+      return;
+    }
+    _debounce = Timer(
+      const Duration(milliseconds: 400),
+      () => _fetchSearch(trimmed),
+    );
+  }
+
+  void _onCategoryTap(int index) {
+    if (_isSearching || _search.text.isNotEmpty) {
+      _search.clear();
+      setState(() => _isSearching = false);
+    }
+    _fetchCategory(index);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final screenH = MediaQuery.sizeOf(context).height;
+    final chipBg = isLight ? const Color(0xffeef1f5) : const Color(0xff1e1e1e);
+    final chipSelectedBg = isLight ? Colors.black : Colors.white;
+    final chipSelectedText = isLight ? Colors.white : Colors.black;
+    final chipText = isLight ? const Color(0xff444444) : const Color(0xffcccccc);
+
+    return SizedBox(
+      height: screenH * 0.75,
+      child: Column(
+        children: [
+          // search bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
+            child: TextField(
+              controller: _search,
+              onChanged: _onSearchChanged,
+              autofocus: false,
+              style: TextStyle(color: isLight ? Colors.black : Colors.white),
+              cursorColor: isLight ? Colors.black : Colors.white,
+              decoration: InputDecoration(
+                hintText: 'Search GIFs',
+                hintStyle: TextStyle(
+                  color: isLight ? const Color(0xff8b95a3) : const Color(0xff8f8f8f),
+                ),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: isLight ? const Color(0xff8b95a3) : const Color(0xffa6a6a6),
+                ),
+                filled: true,
+                fillColor: chipBg,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
+          ),
+          // category chips — hidden while typing
+          if (!_isSearching)
+            SizedBox(
+              height: 36,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                itemCount: _categories.length,
+                separatorBuilder: (_, index) => const SizedBox(width: 8),
+                itemBuilder: (context, i) {
+                  final selected = i == _selectedCategory;
+                  return GestureDetector(
+                    onTap: () => _onCategoryTap(i),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: selected ? chipSelectedBg : chipBg,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _categories[i].$1,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                          color: selected ? chipSelectedText : chipText,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          const SizedBox(height: 8),
+          // gif grid
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _gifs.isEmpty
+                    ? Center(
+                        child: Text(
+                          'No GIFs found',
+                          style: TextStyle(
+                            color: isLight
+                                ? const Color(0xff616161)
+                                : const Color(0xffb3b3b3),
+                          ),
+                        ),
+                      )
+                    : GridView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 6,
+                          crossAxisSpacing: 6,
+                          childAspectRatio: 1.5,
+                        ),
+                        itemCount: _gifs.length,
+                        itemBuilder: (context, i) {
+                          final gif = _gifs[i];
+                          return GestureDetector(
+                            onTap: () => Navigator.of(context).pop(gif.fullUrl),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.network(
+                                gif.previewUrl,
+                                fit: BoxFit.cover,
+                                loadingBuilder: (_, child, progress) =>
+                                    progress == null
+                                        ? child
+                                        : ColoredBox(
+                                            color: isLight
+                                                ? const Color(0xffe0e0e0)
+                                                : const Color(0xff222222),
+                                          ),
+                                errorBuilder: (_, err, stack) => ColoredBox(
+                                  color: isLight
+                                      ? const Color(0xffe0e0e0)
+                                      : const Color(0xff222222),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              'Powered by GIPHY',
+              style: TextStyle(
+                fontSize: 11,
+                color: isLight ? const Color(0xffaaaaaa) : const Color(0xff666666),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
