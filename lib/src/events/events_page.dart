@@ -15,12 +15,14 @@ class EventsPage extends StatefulWidget {
     required this.city,
     required this.currentUser,
     required this.onOpenUserProfile,
+    this.preferredTab,
   });
 
   final String token;
   final String city;
   final UserProfile currentUser;
   final ValueChanged<String> onOpenUserProfile;
+  final int? preferredTab;
 
   @override
   State<EventsPage> createState() => _EventsPageState();
@@ -39,7 +41,17 @@ class _EventsPageState extends State<EventsPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.preferredTab != null) _tab = widget.preferredTab!;
     Future.wait([_loadLocalCategories(), _loadLocalDates(), _loadLocalAttending()]).then((_) => _load());
+  }
+
+  @override
+  void didUpdateWidget(EventsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.preferredTab != null &&
+        widget.preferredTab != oldWidget.preferredTab) {
+      setState(() => _tab = widget.preferredTab!);
+    }
   }
 
   Future<void> _loadLocalCategories() async {

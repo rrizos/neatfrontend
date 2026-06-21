@@ -45,6 +45,7 @@ class _HomePageState extends State<HomePage> {
   final ScrollController _feedScroll = ScrollController();
   int _nav = 0;
   int _selectedTab = 0;
+  int? _pendingEventsTab;
   final Set<int> _visitedTabs = <int>{0};
   bool _loading = true;
   String? _activeCity;
@@ -369,9 +370,13 @@ class _HomePageState extends State<HomePage> {
     await _load();
   }
 
-  Future<void> _openNotificationTarget(NotificationItem item) async {
-    if (item.targetType == 'event' && item.targetId.isNotEmpty) {
-      if (mounted) setState(() { _selectedTab = 4; _visitedTabs.add(4); });
+  Future<void> _openNotificationTarget(NotificationItem item, {String? eventType}) async {
+    if (item.targetType == 'event') {
+      final tab = eventType == 'community' ? 1 : 0;
+      setState(() { _nav = 4; _visitedTabs.add(4); _pendingEventsTab = tab; });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _pendingEventsTab = null);
+      });
       return;
     }
     if (item.targetType == 'post' && item.targetId.isNotEmpty) {
@@ -409,11 +414,11 @@ class _HomePageState extends State<HomePage> {
           token: widget.session.token,
           onFollow: _follow,
           onUnfollow: _unfollow,
-          onTapItem: (item) async {
+          onTapItem: (item, eventType) async {
             Navigator.of(sheetCtx).pop();
             await _markNotificationsRead([item]);
             if (!mounted) return;
-            await _openNotificationTarget(item);
+            await _openNotificationTarget(item, eventType: eventType);
           },
         ),
       ),
@@ -559,7 +564,10 @@ class _HomePageState extends State<HomePage> {
                               top: 10,
                               right: 10,
                               child: GestureDetector(
-                                onTap: _clearComposeImage,
+                                onTap: () {
+                                  _clearComposeImage();
+                                  setSheetState(() {});
+                                },
                                 child: Container(
                                   decoration: BoxDecoration(
                                     color: isLight ? Colors.black.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.65),
@@ -864,6 +872,7 @@ class _HomePageState extends State<HomePage> {
                                 city: widget.session.user.city,
                                 currentUser: widget.session.user,
                                 onOpenUserProfile: _openProfile,
+                                preferredTab: _pendingEventsTab,
                               )
                             : const SizedBox.shrink(),
                       ],
@@ -2416,7 +2425,7 @@ class _NotificationsSheet extends StatefulWidget {
   final String token;
   final Future<void> Function(String username) onFollow;
   final Future<void> Function(String username) onUnfollow;
-  final Future<void> Function(NotificationItem) onTapItem;
+  final Future<void> Function(NotificationItem, String? eventType) onTapItem;
 
   @override
   State<_NotificationsSheet> createState() => _NotificationsSheetState();
@@ -2426,18 +2435,19 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
   late Future<List<NotificationItem>> _future;
   late Set<String> _following;
   final Map<String, String> _eventImages = {};
+  final Map<String, String> _eventTypes = {};
 
   @override
   void initState() {
     super.initState();
     _following = Set.of(widget.followingAuthors);
     _future = widget.fetchNotifications().then((items) {
-      _loadEventImages(items);
+      _loadEventData(items);
       return items;
     });
   }
 
-  Future<void> _loadEventImages(List<NotificationItem> items) async {
+  Future<void> _loadEventData(List<NotificationItem> items) async {
     final eventNotifs = items
         .where((n) => n.targetType == "event" && n.targetId.isNotEmpty);
     for (final n in eventNotifs) {
@@ -2451,8 +2461,12 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         if (res.statusCode == 200) {
           final decoded = jsonDecode(res.body) as Map<String, dynamic>;
           final url = decoded['imageUrl']?.toString() ?? '';
-          if (url.isNotEmpty && mounted) {
-            setState(() => _eventImages[n.targetId] = url);
+          final type = decoded['eventType']?.toString() ?? '';
+          if (mounted) {
+            setState(() {
+              if (url.isNotEmpty) _eventImages[n.targetId] = url;
+              if (type.isNotEmpty) _eventTypes[n.targetId] = type;
+            });
           }
         }
       } catch (_) {}
@@ -2480,8 +2494,17 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       builder: (context, snapshot) {
         final items = snapshot.data ?? const [];
         final now = DateTime.now();
-        final last7 =
-            items.where((n) => now.difference(n.created).inDays <= 7).toList();
+        final justNow = items
+            .where((n) => now.difference(n.created).inMinutes <= 5)
+            .toList();
+        final today = items.where((n) {
+          final diff = now.difference(n.created);
+          return diff.inMinutes > 5 && diff.inHours < 24;
+        }).toList();
+        final last7 = items.where((n) {
+          final d = now.difference(n.created).inDays;
+          return d >= 1 && d <= 7;
+        }).toList();
         final last30 = items.where((n) {
           final d = now.difference(n.created).inDays;
           return d > 7 && d <= 30;
@@ -2495,7 +2518,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
               isFollowing: _following.contains(n.actor),
               onFollowToggle: () => _toggleFollow(n.actor),
               eventImageUrl: _eventImages[n.targetId] ?? "",
-              onTap: () => widget.onTapItem(n),
+              onTap: () => widget.onTapItem(n, _eventTypes[n.targetId]),
             );
 
         return Column(
@@ -2512,8 +2535,6 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                 ),
               ),
             ),
-            const _FollowRequestsRow(),
-            const Divider(height: 1, thickness: 1),
             if (snapshot.connectionState == ConnectionState.waiting)
               const Expanded(child: Center(child: CircularProgressIndicator()))
             else if (items.isEmpty)
@@ -2530,6 +2551,14 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                 child: ListView(
                   padding: const EdgeInsets.only(bottom: 32),
                   children: [
+                    if (justNow.isNotEmpty) ...[
+                      const _NotifSectionHeader(title: "Just Now"),
+                      ...justNow.map(tileFor),
+                    ],
+                    if (today.isNotEmpty) ...[
+                      const _NotifSectionHeader(title: "Today"),
+                      ...today.map(tileFor),
+                    ],
                     if (last7.isNotEmpty) ...[
                       const _NotifSectionHeader(title: "Last 7 Days"),
                       ...last7.map(tileFor),
@@ -2542,8 +2571,6 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                       const _NotifSectionHeader(title: "Older"),
                       ...older.map(tileFor),
                     ],
-                    const SizedBox(height: 16),
-                    const _SuggestionsSection(),
                   ],
                 ),
               ),
@@ -2713,268 +2740,6 @@ class _NotifTile extends StatelessWidget {
             ],
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _FollowRequestsRow extends StatelessWidget {
-  const _FollowRequestsRow();
-
-  @override
-  Widget build(BuildContext context) {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    final textColor = isLight ? Colors.black : Colors.white;
-    const subColor = Color(0xff8e8e8e);
-
-    return ListTile(
-      contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      leading: SizedBox(
-        width: 50,
-        height: 44,
-        child: Stack(
-          children: [
-            Positioned(
-              bottom: 0,
-              left: 0,
-              child: CircleAvatar(
-                radius: 19,
-                backgroundColor: const Color(0xff6c63ff),
-                child: const Text(
-                  "A",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              top: 0,
-              right: 0,
-              child: CircleAvatar(
-                radius: 19,
-                backgroundColor: const Color(0xffff6584),
-                child: const Text(
-                  "M",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-      title: Text(
-        "Follow Requests",
-        style: TextStyle(
-          fontWeight: FontWeight.w700,
-          fontSize: 15,
-          color: textColor,
-        ),
-      ),
-      subtitle: const Text(
-        "alex_m, mike_r and 1 other",
-        style: TextStyle(color: subColor, fontSize: 13),
-      ),
-      trailing: const Icon(Icons.chevron_right, color: subColor),
-      onTap: () {},
-    );
-  }
-}
-
-const List<(String, String, String)> _kSuggestions = [
-  ("Sarah K.", "@sarah_k", "Followed by jake and 3 others"),
-  ("Mike R.", "@mike_runner", "Followed by emma_l"),
-  ("Alex M.", "@alex_m", "Popular in your area"),
-  ("Luna V.", "@luna.v", "New to Neat"),
-  ("David C.", "@david_c", "Followed by you and 5 others"),
-];
-
-const _kAvatarColors = [
-  Color(0xff6c63ff),
-  Color(0xffff6584),
-  Color(0xff43d6a0),
-  Color(0xffffb347),
-  Color(0xff4fc3f7),
-];
-
-class _SuggestionsSection extends StatefulWidget {
-  const _SuggestionsSection();
-
-  @override
-  State<_SuggestionsSection> createState() => _SuggestionsSectionState();
-}
-
-class _SuggestionsSectionState extends State<_SuggestionsSection> {
-  final Set<int> _followed = {};
-
-  @override
-  Widget build(BuildContext context) {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    final textColor = isLight ? Colors.black : Colors.white;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Row(
-            children: [
-              Text(
-                "Suggestions For You",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: textColor,
-                ),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: () {},
-                child: Text(
-                  "See All",
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        for (int i = 0; i < _kSuggestions.length; i++)
-          _SuggestionTile(
-            name: _kSuggestions[i].$1,
-            username: _kSuggestions[i].$2,
-            sub: _kSuggestions[i].$3,
-            avatarColor: _kAvatarColors[i % _kAvatarColors.length],
-            followed: _followed.contains(i),
-            onFollow: () => setState(() {
-              if (_followed.contains(i)) {
-                _followed.remove(i);
-              } else {
-                _followed.add(i);
-              }
-            }),
-          ),
-      ],
-    );
-  }
-}
-
-class _SuggestionTile extends StatelessWidget {
-  const _SuggestionTile({
-    required this.name,
-    required this.username,
-    required this.sub,
-    required this.avatarColor,
-    required this.followed,
-    required this.onFollow,
-  });
-
-  final String name;
-  final String username;
-  final String sub;
-  final Color avatarColor;
-  final bool followed;
-  final VoidCallback onFollow;
-
-  @override
-  Widget build(BuildContext context) {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    final textColor = isLight ? Colors.black : Colors.white;
-    const subColor = Color(0xff8e8e8e);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: avatarColor,
-            child: Text(
-              name.substring(0, 1),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  username,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                    color: textColor,
-                  ),
-                ),
-                Text(
-                  name,
-                  style: const TextStyle(fontSize: 13, color: subColor),
-                ),
-                Text(
-                  sub,
-                  style: const TextStyle(fontSize: 12, color: subColor),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            height: 34,
-            child: followed
-                ? OutlinedButton(
-                    onPressed: onFollow,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      side: BorderSide(
-                        color: isLight
-                            ? const Color(0xffdbdbdb)
-                            : const Color(0xff363636),
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      foregroundColor: textColor,
-                      textStyle: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    child: const Text("Following"),
-                  )
-                : ElevatedButton(
-                    onPressed: onFollow,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      backgroundColor: const Color(0xff1479ff),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      textStyle: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    child: const Text("Follow"),
-                  ),
-          ),
-        ],
       ),
     );
   }
