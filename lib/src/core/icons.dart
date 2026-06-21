@@ -38,12 +38,12 @@ class _CommentBubblePainter extends CustomPainter {
     final cy = h * 0.42;
     final r = cx - inset;
 
-    const startAngle = 32.0 * math.pi / 180;
-    const endAngle = 62.0 * math.pi / 180;
+    const startAngle = 20.0 * math.pi / 180;
+    const endAngle = 60.0 * math.pi / 180;
     const sweepAngle = 2 * math.pi - (endAngle - startAngle);
 
     final gapEndPt = Offset(cx + r * math.cos(endAngle), cy + r * math.sin(endAngle));
-    final tailTip  = Offset(w - inset, h - inset);
+    final tailTip  = Offset(w * 0.845, h * 0.775);
 
     final path = Path()
       ..moveTo(gapEndPt.dx, gapEndPt.dy)

@@ -102,6 +102,23 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     map.overrideUserInterfaceStyle = .dark
     map.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier: "pin")
     map.setRegion(overview, animated: false)
+
+    // Constrain centre to a padded Greece bounding box so panning can't
+    // reach a different country, but there's breathing room around every pin.
+    if #available(iOS 13.0, *) {
+      map.setCameraBoundary(
+        MKMapView.CameraBoundary(coordinateRegion: MKCoordinateRegion(
+          center: CLLocationCoordinate2D(latitude: 38.0, longitude: 24.0),
+          span: MKCoordinateSpan(latitudeDelta: 12.0, longitudeDelta: 16.0)
+        )),
+        animated: false
+      )
+      // Cap zoom-out so the user can't pull back to see the whole planet.
+      map.setCameraZoomRange(
+        MKMapView.CameraZoomRange(maxCenterCoordinateDistance: 2_500_000),
+        animated: false
+      )
+    }
   }
 
   private func wireChannel(messenger: FlutterBinaryMessenger) {

@@ -728,12 +728,14 @@ class _EventCard extends StatelessWidget {
                           Icons.more_horiz_rounded,
                           color: Colors.white,
                         ),
+                        constraints: const BoxConstraints(),
                         onSelected: (value) async {
                           if (value == 'delete') onDelete();
                         },
                         itemBuilder: (context) => [
                           const PopupMenuItem(
                             value: 'delete',
+                            padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
                             child: Text(
                               'Delete event',
                               style: TextStyle(color: Color(0xfff66c6c)),

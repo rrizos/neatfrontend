@@ -185,6 +185,7 @@ class _CityMapViewState extends State<CityMapView> {
                     onTap: () {},
                     child: _CityCard(
                       city: city,
+                      imageUrl: city.imageUrl,
                       onClose: _closeCard,
                       onJoin: _joinCity,
                     ),
@@ -252,6 +253,20 @@ String _mapHtml(String citiesJson, {String? inlineJs}) {
       try { map.pointOfInterestFilter = mapkit.PointOfInterestFilter.excludingAllCategories; } catch(_) {}
 
       map.region = new mapkit.CoordinateRegion(home, homeSpan);
+
+      // Constrain centre to a padded Greece bounding box (N, E, S, W).
+      try { map.cameraBoundary = new mapkit.BoundingRegion(44, 32, 32, 16); } catch(_) {}
+
+      // Cap zoom-out: refuse spans wider than ~12° lat (≈ 2× Greece height).
+      map.addEventListener('region-change-end', function() {
+        if (busy) return;
+        var r = map.region;
+        if (r.span.latitudeDelta > 13) {
+          map.region = new mapkit.CoordinateRegion(
+            r.center, new mapkit.CoordinateSpan(13, 13)
+          );
+        }
+      });
 
       var cities = $citiesJson;
       cities.forEach(function(c) {
@@ -378,11 +393,13 @@ class _CityCard extends StatelessWidget {
     required this.city,
     required this.onClose,
     required this.onJoin,
+    this.imageUrl,
   });
 
   final GreeceCity city;
   final VoidCallback onClose;
   final VoidCallback onJoin;
+  final String? imageUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -407,30 +424,37 @@ class _CityCard extends StatelessWidget {
               children: [
                 Stack(
                   children: [
-                    Container(
+                    SizedBox(
                       height: 132,
                       width: double.infinity,
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [Color(0xff1c1c1c), Color(0xff090909)],
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: CircleAvatar(
-                        radius: 38,
-                        backgroundColor: const Color(0xff171717),
-                        child: Text(
-                          _initial(city.name),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.w800,
+                      child: imageUrl != null
+                          ? Image.network(
+                              imageUrl!,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (ctx, child, progress) =>
+                                  progress == null ? child : _fallbackHeader(),
+                              errorBuilder: (ctx, error, stack) {
+                                debugPrint('[CityCard] image failed: $error');
+                                return _fallbackHeader();
+                              },
+                            )
+                          : _fallbackHeader(),
+                    ),
+                    if (imageUrl != null)
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.15),
+                                Colors.black.withValues(alpha: 0.5),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
                     Positioned(
                       top: 8,
                       right: 8,
@@ -456,7 +480,7 @@ class _CityCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'View this city\'s feed and join the local network.',
+                        'Επιλέξτε προσεκτικά την πόλη σας! Μπορείτε να αλλάξετε πόλη μετά από 6 μήνες.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Color(0xffababab),
@@ -477,9 +501,9 @@ class _CityCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                          child: const Text(
-                            'Join city',
-                            style: TextStyle(fontWeight: FontWeight.w700),
+                          child: Text(
+                            'Παρακολούθησε ${city.name}',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),
                       ),
@@ -494,9 +518,30 @@ class _CityCard extends StatelessWidget {
     );
   }
 
-  String _initial(String s) {
-    final t = s.trim();
-    return t.isEmpty ? '?' : t[0].toUpperCase();
+  Widget _fallbackHeader() {
+    final initial = city.name.trim().isEmpty ? '?' : city.name.trim()[0].toUpperCase();
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xff1c1c1c), Color(0xff090909)],
+        ),
+      ),
+      alignment: Alignment.center,
+      child: CircleAvatar(
+        radius: 38,
+        backgroundColor: const Color(0xff171717),
+        child: Text(
+          initial,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 28,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -6,8 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
-import '../core/icons.dart';
 import '../core/models.dart';
+import '../core/post_card.dart';
 import '../core/share_sheet.dart';
 import '../messages/messages_page.dart';
 
@@ -44,23 +44,35 @@ class ProfilePage extends StatefulWidget {
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> {
+class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin {
   UserProfile? _profile;
   bool _loading = true;
   final ImagePicker _imagePicker = ImagePicker();
   final ScrollController _scrollController = ScrollController();
   final Map<int, GlobalKey> _postKeys = {};
+  late final TabController _tabController;
+  List<FeedPost>? _savedPosts;
+  bool _savedLoading = false;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(_onTabChanged);
     _load();
   }
 
   @override
   void dispose() {
+    _tabController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onTabChanged() {
+    if (_tabController.index == 2 && _savedPosts == null && !_savedLoading) {
+      _loadSavedPosts();
+    }
   }
 
   Future<void> _load() async {
@@ -165,46 +177,87 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Future<void> _like(FeedPost post) async {
-    final previousLiked = post.liked;
-    final previousLikes = post.likes;
-    setState(() {
-      post.liked = !post.liked;
-      post.likes += post.liked ? 1 : -1;
-    });
-    final res = await http.post(
-      postLikeEndpoint(post.id),
-      headers: authJsonHeaders(widget.token),
-      body: jsonEncode({'liked': post.liked}),
-    );
-    if (res.statusCode == 401) {
-      await widget.onLogout();
-      return;
-    }
-    if (res.statusCode != 200 && mounted) {
-      setState(() {
-        post.liked = previousLiked;
-        post.likes = previousLikes;
-      });
+  Future<bool> _likePost(FeedPost post) async {
+    try {
+      final res = await http.post(
+        postLikeEndpoint(post.id),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'liked': post.liked}),
+      );
+      if (res.statusCode == 401) { await widget.onLogout(); return false; }
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
     }
   }
 
-  Future<void> _save(FeedPost post) async {
-    final prev = post.saved;
-    setState(() => post.saved = !post.saved);
-    final res = await http.post(
-      postSaveEndpoint(post.id),
-      headers: authJsonHeaders(widget.token),
-      body: jsonEncode({'saved': post.saved}),
+  Future<bool> _savePost(FeedPost post) async {
+    try {
+      final res = await http.post(
+        postSaveEndpoint(post.id),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'saved': post.saved}),
+      );
+      if (res.statusCode == 401) { await widget.onLogout(); return false; }
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _openMoreSheet(FeedPost post) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      showDragHandle: true,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (post.author == widget.currentUser.username)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
+                title: const Text('Delete post', style: TextStyle(color: Color(0xfff66c6c))),
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _deletePost(post);
+                },
+              ),
+            const ListTile(
+              leading: Icon(Icons.visibility_off_outlined),
+              title: Text('Hide post'),
+            ),
+            const ListTile(
+              leading: Icon(Icons.flag_outlined),
+              title: Text('Report post'),
+            ),
+          ],
+        ),
+      ),
     );
-    if (res.statusCode == 401) {
-      setState(() => post.saved = prev);
-      await widget.onLogout();
-      return;
-    }
-    if (res.statusCode != 200 && mounted) {
-      setState(() => post.saved = prev);
-    }
+  }
+
+  Widget _buildPostCard(FeedPost post, {Key? key}) {
+    return FeedPostCard(
+      key: key,
+      post: post,
+      token: widget.token,
+      currentUser: widget.currentUser,
+      onLike: () => _likePost(post),
+      onSave: () => _savePost(post),
+      onShare: () => showShareSheet(
+        context: context,
+        post: post,
+        token: widget.token,
+        currentUser: widget.currentUser,
+        onLogout: widget.onLogout,
+      ),
+      onMore: () => _openMoreSheet(post),
+      onComment: () => widget.onPostTap(post),
+      onProfileTap: () => widget.onOpenUserProfile(post.author),
+      onOpenUserProfile: widget.onOpenUserProfile,
+    );
   }
 
   Future<void> _deletePost(FeedPost post) async {
@@ -217,42 +270,31 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _openSavedPosts() async {
-    final res = await http.get(
-      savedPostsEndpoint,
-      headers: authGetHeaders(widget.token),
-    );
-    if (res.statusCode == 401) {
-      await widget.onLogout();
-      return;
+  Future<void> _loadSavedPosts() async {
+    if (_savedLoading) return;
+    setState(() => _savedLoading = true);
+    try {
+      final res = await http.get(
+        savedPostsEndpoint,
+        headers: authGetHeaders(widget.token),
+      );
+      if (res.statusCode == 401) {
+        await widget.onLogout();
+        return;
+      }
+      if (!mounted) return;
+      List<FeedPost> posts = const [];
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        posts = (decoded['posts'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(FeedPost.fromJson)
+            .toList();
+      }
+      if (mounted) setState(() { _savedPosts = posts; _savedLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _savedPosts = []; _savedLoading = false; });
     }
-    if (!mounted) return;
-    final List<FeedPost> posts;
-    if (res.statusCode == 200) {
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      posts = (decoded['posts'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(FeedPost.fromJson)
-          .toList();
-    } else {
-      posts = const [];
-    }
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _SavedPostsPage(
-          posts: posts,
-          themeMode: widget.themeMode,
-          onOpenPost: (author, postId) {
-            if (widget.onOpenProfileAtPost != null) {
-              widget.onOpenProfileAtPost!(author, postId);
-            } else {
-              widget.onOpenUserProfile(author);
-            }
-          },
-        ),
-      ),
-    );
   }
 
   Future<void> _openEditProfile() async {
@@ -319,6 +361,7 @@ class _ProfilePageState extends State<ProfilePage> {
     if (_loading || profile == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    final isOwn = profile.username == widget.currentUser.username;
     final userPosts = widget.posts
         .where((p) => p.author == profile.username)
         .toList();
@@ -354,26 +397,15 @@ class _ProfilePageState extends State<ProfilePage> {
           ],
         ),
         actions: [
-          if (profile.username == widget.currentUser.username) ...[
-            IconButton(
-              onPressed: _openSavedPosts,
-              icon: Icon(
-                Icons.bookmark_border_rounded,
-                color: isLight ? Colors.black : Colors.white,
-              ),
-            ),
+          if (profile.username == widget.currentUser.username)
             IconButton(
               onPressed: () async => widget.onLogout(),
-              icon: Icon(
-                Icons.logout,
-                color: isLight ? Colors.black : Colors.white,
-              ),
+              icon: Icon(Icons.logout, color: isLight ? Colors.black : Colors.white),
             ),
-          ],
         ],
       ),
-      body: ListView(
-        controller: _scrollController,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -397,11 +429,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _Metric(
-                        label: 'posts',
-                        value: '${userPosts.length}',
-                        onTap: null,
-                      ),
+                      _Metric(label: 'posts', value: '${userPosts.length}', onTap: null),
                       _Metric(
                         label: 'followers',
                         value: '${profile.followers}',
@@ -426,13 +454,11 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
-                  profile.fullName.isEmpty
-                      ? profile.username
-                      : profile.fullName,
+                  profile.fullName.isEmpty ? profile.username : profile.fullName,
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
@@ -452,12 +478,9 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: profile.username == widget.currentUser.username
-                ? OutlinedButton(
-                    onPressed: _openEditProfile,
-                    child: const Text('Edit profile'),
-                  )
+                ? OutlinedButton(onPressed: _openEditProfile, child: const Text('Edit profile'))
                 : Row(
                     children: [
                       Expanded(
@@ -465,24 +488,13 @@ class _ProfilePageState extends State<ProfilePage> {
                             ? OutlinedButton(
                                 onPressed: _toggleFollow,
                                 style: OutlinedButton.styleFrom(
-                                  side: BorderSide(
-                                    color: isLight ? Colors.black : Colors.white,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  foregroundColor:
-                                      isLight ? Colors.black : Colors.white,
+                                  side: BorderSide(color: isLight ? Colors.black : Colors.white),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  foregroundColor: isLight ? Colors.black : Colors.white,
                                 ),
-                                child: const Text(
-                                  'Following',
-                                  style: TextStyle(fontWeight: FontWeight.w600),
-                                ),
+                                child: const Text('Following', style: TextStyle(fontWeight: FontWeight.w600)),
                               )
-                            : FilledButton(
-                                onPressed: _toggleFollow,
-                                child: const Text('Follow'),
-                              ),
+                            : FilledButton(onPressed: _toggleFollow, child: const Text('Follow')),
                       ),
                       const SizedBox(width: 12),
                       SizedBox(
@@ -492,9 +504,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           onPressed: _startDirectMessage,
                           style: OutlinedButton.styleFrom(
                             padding: EdgeInsets.zero,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
                           child: const Icon(Icons.send_outlined, size: 18),
                         ),
@@ -502,191 +512,74 @@ class _ProfilePageState extends State<ProfilePage> {
                     ],
                   ),
           ),
-          Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
-          if (userPosts.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(
-                child: Text(
-                  'No posts yet.',
-                  style: TextStyle(color: Color(0xffb3b3b3)),
-                ),
-              ),
-            )
-          else
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: userPosts.length,
-              separatorBuilder: (_, _) =>
-                  Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
-              itemBuilder: (context, index) {
-                final post = userPosts[index];
-                final postKey = _postKeys.putIfAbsent(post.id, () => GlobalKey());
-                return InkWell(
-                  key: postKey,
-                  onTap: () => widget.onPostTap(post),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 18,
-                              backgroundColor: const Color(0xff2a2a2a),
-                              foregroundImage:
-                                  post.author == profile.username &&
-                                          _dataUrlBytes(profile.avatarUrl) !=
-                                              null
-                                      ? MemoryImage(
-                                          _dataUrlBytes(profile.avatarUrl)!,
-                                        )
-                                      : null,
-                              child:
-                                  post.author == profile.username &&
-                                          _dataUrlBytes(profile.avatarUrl) !=
-                                              null
-                                      ? null
-                                      : Text(
-                                          initialFor(post.author),
-                                          style: TextStyle(
-                                            color: isLight ? Colors.black : Colors.white,
-                                          ),
-                                        ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    post.author,
-                                    style: TextStyle(
-                                      color: isLight ? Colors.black : Colors.white,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 15,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '${post.minutesAgo}m ago',
-                                    style: const TextStyle(
-                                      color: Color(0xff9c9c9c),
-                                      fontSize: 12.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuButton<String>(
-                              icon: const Icon(
-                                Icons.more_horiz,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                              onSelected: (value) async {
-                                if (value == 'delete') {
-                                  await _deletePost(post);
-                                }
-                              },
-                              itemBuilder: (context) => [
-                                if (post.author == widget.currentUser.username)
-                                  const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text(
-                                      'Delete post',
-                                      style: TextStyle(color: Color(0xfff66c6c)),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        if (post.text.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            post.text,
-                              style: TextStyle(
-                                color: isLight ? Colors.black : Colors.white,
-                                fontSize: 15.5,
-                                height: 1.4,
-                              ),
-                          ),
-                        ],
-                        if (post.imageUrl.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(18),
-                            child: AspectRatio(
-                              aspectRatio: 1.08,
-                              child: _AvatarPreview(url: post.imageUrl),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            GestureDetector(
-                              onTap: () => _like(post),
-                              child: Icon(
-                                post.liked ? Icons.favorite_rounded : Icons.favorite_border,
-                                color: post.liked ? Colors.red : (isLight ? Colors.black : Colors.white),
-                                size: 20,
-                              ),
-                            ),
-                            const SizedBox(width: 18),
-                            GestureDetector(
-                              onTap: () => widget.onPostTap(post),
-                              child: CommentBubbleIcon(
-                                color: isLight ? Colors.black : Colors.white,
-                                size: 20,
-                              ),
-                            ),
-                            const SizedBox(width: 18),
-                            GestureDetector(
-                              onTap: () => showShareSheet(
-                                context: context,
-                                post: post,
-                                token: widget.token,
-                                currentUser: widget.currentUser,
-                                onLogout: widget.onLogout,
-                              ),
-                              child: Icon(
-                                Icons.send_outlined,
-                                color: isLight ? Colors.black : Colors.white,
-                                size: 20,
-                              ),
-                            ),
-                            const Spacer(),
-                            GestureDetector(
-                              onTap: () => _save(post),
-                              child: Icon(
-                                post.saved ? Icons.bookmark_rounded : Icons.bookmark_border,
-                                color: post.saved ? const Color(0xffFFB800) : (isLight ? Colors.black : Colors.white),
-                                size: 20,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${post.likes} likes',
-                          style: TextStyle(
-                            color: isLight ? Colors.black : Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+          TabBar(
+            controller: _tabController,
+            dividerColor: Colors.transparent,
+            indicatorColor: isLight ? Colors.black : Colors.white,
+            indicatorSize: TabBarIndicatorSize.tab,
+            labelColor: isLight ? Colors.black : Colors.white,
+            unselectedLabelColor: isLight ? const Color(0xff9e9e9e) : const Color(0xff666666),
+            tabs: const [
+              Tab(icon: Icon(Icons.grid_on_rounded, size: 22)),
+              Tab(icon: Icon(Icons.favorite_border_rounded, size: 22)),
+              Tab(icon: Icon(Icons.bookmark_border_rounded, size: 22)),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                // Tab 0: Posts
+                userPosts.isEmpty
+                    ? const Center(child: Text('No posts yet.', style: TextStyle(color: Color(0xffb3b3b3))))
+                    : ListView.builder(
+                        controller: _scrollController,
+                        itemCount: userPosts.length,
+                        itemBuilder: (_, i) {
+                          final post = userPosts[i];
+                          final key = _postKeys.putIfAbsent(post.id, () => GlobalKey());
+                          return _buildPostCard(post, key: key);
+                        },
+                      ),
+                // Tab 1: Liked
+                _buildLikedTab(isOwn),
+                // Tab 2: Saved
+                _buildSavedTab(isOwn),
+              ],
             ),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildLikedTab(bool isOwn) {
+    if (!isOwn) {
+      return const Center(child: Icon(Icons.lock_outline, size: 48, color: Color(0xffb3b3b3)));
+    }
+    final liked = widget.posts.where((p) => p.liked).toList();
+    if (liked.isEmpty) {
+      return const Center(child: Text('No liked posts yet.', style: TextStyle(color: Color(0xffb3b3b3))));
+    }
+    return ListView.builder(
+      itemCount: liked.length,
+      itemBuilder: (_, i) => _buildPostCard(liked[i]),
+    );
+  }
+
+  Widget _buildSavedTab(bool isOwn) {
+    if (!isOwn) {
+      return const Center(child: Icon(Icons.lock_outline, size: 48, color: Color(0xffb3b3b3)));
+    }
+    if (_savedLoading) return const Center(child: CircularProgressIndicator());
+    final saved = _savedPosts;
+    if (saved == null) return const SizedBox.shrink();
+    if (saved.isEmpty) {
+      return const Center(child: Text('No saved posts yet.', style: TextStyle(color: Color(0xffb3b3b3))));
+    }
+    return ListView.builder(
+      itemCount: saved.length,
+      itemBuilder: (_, i) => _buildPostCard(saved[i]),
     );
   }
 }
