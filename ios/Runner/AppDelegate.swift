@@ -95,6 +95,7 @@ import UIKit
             bar.tintColor = .label
             bar.unselectedItemTintColor = .secondaryLabel
             bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.isHidden = true
 
             rootView.addSubview(bar)
             NSLayoutConstraint.activate([

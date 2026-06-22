@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/giphy_dialog.dart';
@@ -61,6 +62,7 @@ class _HomePageState extends State<HomePage> {
   String _inlineProfileUsername = '';
   int? _inlinePostId;
   bool _isIOS26 = false;
+  int _navBarHideCount = 0; // reference count; bar only shows when this reaches 0
 
   static bool _detectIOS26() {
     if (!Platform.isIOS) return false;
@@ -84,14 +86,18 @@ class _HomePageState extends State<HomePage> {
         case 'onTabTapped':
           _onNavTap(call.arguments as int);
         case 'nativeTabBarReady':
-          // Native iOS 26 tab bar is live — switch Flutter layout to placeholder.
-          if (!_isIOS26 && mounted) setState(() => _isIOS26 = true);
+          // Native iOS 26 tab bar is live — switch Flutter layout to placeholder and show bar.
+          if (mounted) {
+            if (!_isIOS26) setState(() => _isIOS26 = true);
+            _kTabChannel.invokeMethod('showTabBar');
+          }
       }
     });
   }
 
   @override
   void dispose() {
+    if (_isIOS26) _kTabChannel.invokeMethod('hideTabBar');
     _kTabChannel.setMethodCallHandler(null);
     _compose.dispose();
     _feedScroll.dispose();
@@ -388,21 +394,48 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openProfile(String username) {
-    setState(() {
-      _inlineProfileUsername = username;
-      _inlinePostId = null;
-      _showInlineProfile = true;
-      _nav = 0;
-    });
-  }
-
   void _openProfileAtPost(String username, int postId) {
     setState(() {
       _inlineProfileUsername = username;
       _inlinePostId = postId;
       _showInlineProfile = true;
       _nav = 0;
+    });
+  }
+
+  void _pushProfileRoute(String username, {int? postId}) {
+    // Profile pages always show the native bar. Save the current hide count
+    // so we can restore it when the profile pops (e.g. back into messages).
+    final savedCount = _navBarHideCount;
+    _navBarHideCount = 0;
+    if (_isIOS26) _kTabChannel.invokeMethod('showTabBar');
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfilePage(
+          key: ValueKey('route:$username:${postId ?? ""}'),
+          username: username,
+          currentUser: widget.session.user,
+          token: widget.session.token,
+          posts: _posts,
+          onOpenUserProfile: _pushProfileRoute,
+          onOpenProfileAtPost: (u, id) => _pushProfileRoute(u, postId: id),
+          onLogout: widget.onLogout,
+          onSessionUpdated: widget.onSessionChanged,
+          onPostTap: _openComments,
+          initialPostId: postId,
+          themeMode: widget.themeMode,
+          onThemeModeChanged: widget.onThemeModeChanged,
+          onHideNavBar: _hideNativeBar,
+          onShowNavBar: _showNativeBar,
+        ),
+      ),
+    ).then((_) {
+      _navBarHideCount = savedCount;
+      if (savedCount > 0 && _isIOS26 && mounted) {
+        _kTabChannel.invokeMethod('hideTabBar');
+      } else if (_isIOS26 && mounted) {
+        _kTabChannel.invokeMethod('showTabBar');
+      }
     });
   }
 
@@ -442,7 +475,7 @@ class _HomePageState extends State<HomePage> {
           token: widget.session.token,
           city: widget.session.user.city,
           currentUser: widget.session.user,
-          onOpenUserProfile: _openProfile,
+          onOpenUserProfile: _pushProfileRoute,
           preferredTab: initialTab,
         ),
       ),
@@ -473,7 +506,7 @@ class _HomePageState extends State<HomePage> {
         return;
       }
     }
-    _openProfile(item.actor);
+    _pushProfileRoute(item.actor);
   }
 
   void _openNotifications() {
@@ -492,6 +525,7 @@ class _HomePageState extends State<HomePage> {
           token: widget.session.token,
           onFollow: _follow,
           onUnfollow: _unfollow,
+          onOpenUserProfile: _pushProfileRoute,
           onTapItem: (item, eventType) async {
             Navigator.of(sheetCtx).pop();
             await _markNotificationsRead([item]);
@@ -515,6 +549,7 @@ class _HomePageState extends State<HomePage> {
         post: post,
         session: widget.session,
         onRefresh: () {},
+        onOpenUserProfile: _pushProfileRoute,
       ),
     ).whenComplete(_showNativeBar);
   }
@@ -974,11 +1009,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _hideNativeBar() {
+    _navBarHideCount++;
     if (_isIOS26) _kTabChannel.invokeMethod('hideTabBar');
   }
 
   void _showNativeBar() {
-    if (_isIOS26 && mounted) _kTabChannel.invokeMethod('showTabBar');
+    _navBarHideCount = (_navBarHideCount - 1).clamp(0, 999);
+    if (_navBarHideCount == 0 && _isIOS26 && mounted) {
+      _kTabChannel.invokeMethod('showTabBar');
+    }
   }
 
   void _openSheet({required String title, required Widget child}) {
@@ -1053,6 +1092,7 @@ class _HomePageState extends State<HomePage> {
                         Navigator.popUntil(context, (route) => route.isFirst);
                         _openProfileAtPost(author, postId);
                       },
+                      onOpenUserProfile: _pushProfileRoute,
                     ),
                   ),
                 );
@@ -1161,8 +1201,8 @@ class _HomePageState extends State<HomePage> {
                                         ),
                                       ),
                                       onComment: () => _openComments(post),
-                                      onProfileTap: () => _openProfile(post.author),
-                                      onOpenUserProfile: _openProfile,
+                                      onProfileTap: () => _pushProfileRoute(post.author),
+                                      onOpenUserProfile: _pushProfileRoute,
                                       onFollow: post.author != widget.session.user.username
                                           ? () => _follow(post.author)
                                           : null,
@@ -1180,8 +1220,8 @@ class _HomePageState extends State<HomePage> {
                             ? _SearchView(
                                 token: widget.session.token,
                                 currentUser: widget.session.user,
-                                onOpenUserProfile: _openProfile,
-                                onOpenPost: _openProfileAtPost,
+                                onOpenUserProfile: _pushProfileRoute,
+                                onOpenPost: (u, id) => _pushProfileRoute(u, postId: id),
                               )
                             : const SizedBox.shrink(),
                         // 2: Create (intercepted by bottom nav, never shown)
@@ -1191,7 +1231,7 @@ class _HomePageState extends State<HomePage> {
                             ? RepaintBoundary(
                                 child: CityMapView(
                                   token: widget.session.token,
-                                  onOpenUserProfile: _openProfile,
+                                  onOpenUserProfile: _pushProfileRoute,
                                   onCitySelected: _openCityFeed,
                                 ),
                               )
@@ -1211,8 +1251,8 @@ class _HomePageState extends State<HomePage> {
                         currentUser: widget.session.user,
                         token: widget.session.token,
                         posts: _posts,
-                        onOpenUserProfile: _openProfile,
-                        onOpenProfileAtPost: _openProfileAtPost,
+                        onOpenUserProfile: _pushProfileRoute,
+                        onOpenProfileAtPost: (u, id) => _pushProfileRoute(u, postId: id),
                         onLogout: widget.onLogout,
                         onSessionUpdated: widget.onSessionChanged,
                         onPostTap: _openComments,
@@ -2392,6 +2432,7 @@ class _NotificationsSheet extends StatefulWidget {
     required this.onFollow,
     required this.onUnfollow,
     required this.onTapItem,
+    required this.onOpenUserProfile,
   });
   final Future<List<NotificationItem>> Function() fetchNotifications;
   final Set<String> followingAuthors;
@@ -2399,6 +2440,7 @@ class _NotificationsSheet extends StatefulWidget {
   final Future<void> Function(String username) onFollow;
   final Future<void> Function(String username) onUnfollow;
   final Future<void> Function(NotificationItem, String? eventType) onTapItem;
+  final ValueChanged<String> onOpenUserProfile;
 
   @override
   State<_NotificationsSheet> createState() => _NotificationsSheetState();
@@ -2492,6 +2534,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
               onFollowToggle: () => _toggleFollow(n.actor),
               eventImageUrl: _eventImages[n.targetId] ?? "",
               onTap: () => widget.onTapItem(n, _eventTypes[n.targetId]),
+              onOpenUserProfile: () => widget.onOpenUserProfile(n.actor),
             );
 
         return Column(
@@ -2582,12 +2625,14 @@ class _NotifTile extends StatelessWidget {
     required this.onFollowToggle,
     required this.eventImageUrl,
     required this.onTap,
+    required this.onOpenUserProfile,
   });
   final NotificationItem item;
   final bool isFollowing;
   final VoidCallback onFollowToggle;
   final String eventImageUrl;
   final VoidCallback onTap;
+  final VoidCallback onOpenUserProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -2668,17 +2713,21 @@ class _NotifTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: isLight
-                  ? const Color(0xffe0e0e0)
-                  : const Color(0xff2a2a2a),
-              child: Text(
-                initialFor(item.actor),
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                  color: isLight ? const Color(0xff333333) : Colors.white,
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onOpenUserProfile,
+              child: CircleAvatar(
+                radius: 22,
+                backgroundColor: isLight
+                    ? const Color(0xffe0e0e0)
+                    : const Color(0xff2a2a2a),
+                child: Text(
+                  initialFor(item.actor),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                    color: isLight ? const Color(0xff333333) : Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -2732,10 +2781,12 @@ class _CommentSheet extends StatefulWidget {
     required this.post,
     required this.session,
     required this.onRefresh,
+    required this.onOpenUserProfile,
   });
   final FeedPost post;
   final AuthSession session;
   final VoidCallback onRefresh;
+  final ValueChanged<String> onOpenUserProfile;
 
   @override
   State<_CommentSheet> createState() => _CommentSheetState();
@@ -2872,20 +2923,23 @@ class _CommentSheetState extends State<_CommentSheet> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: isReply ? 14 : 18,
-            backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-            foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-            child: bytes == null
-                ? Text(
-                    initialFor(c.author),
-                    style: TextStyle(
-                      color: isLight ? const Color(0xff444444) : Colors.white,
-                      fontSize: isReply ? 9 : 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  )
-                : null,
+          GestureDetector(
+            onTap: () => widget.onOpenUserProfile(c.author),
+            child: CircleAvatar(
+              radius: isReply ? 14 : 18,
+              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+              child: bytes == null
+                  ? Text(
+                      initialFor(c.author),
+                      style: TextStyle(
+                        color: isLight ? const Color(0xff444444) : Colors.white,
+                        fontSize: isReply ? 9 : 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    )
+                  : null,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -2903,6 +2957,8 @@ class _CommentSheetState extends State<_CommentSheet> {
                           fontSize: isReply ? 13.5 : 15,
                           height: 1.5,
                         ),
+                        recognizer: TapGestureRecognizer()
+                          ..onTap = () => widget.onOpenUserProfile(c.author),
                       ),
                       if (c.text.isNotEmpty)
                         TextSpan(

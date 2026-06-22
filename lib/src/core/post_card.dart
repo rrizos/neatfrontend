@@ -768,7 +768,6 @@ class _LikersSheetState extends State<_LikersSheet> {
   }
 
   void _openProfile(String username) {
-    Navigator.of(context).pop();
     widget.onOpenUserProfile(username);
   }
 

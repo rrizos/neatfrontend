@@ -171,6 +171,7 @@ class MessagesPage extends StatefulWidget {
     required this.suggestedUsers,
     required this.onLogout,
     this.onOpenPost,
+    this.onOpenUserProfile,
   });
 
   final String token;
@@ -178,6 +179,7 @@ class MessagesPage extends StatefulWidget {
   final List<UserProfile> suggestedUsers;
   final Future<void> Function() onLogout;
   final void Function(String author, int postId)? onOpenPost;
+  final ValueChanged<String>? onOpenUserProfile;
 
   @override
   State<MessagesPage> createState() => _MessagesPageState();
@@ -220,6 +222,7 @@ class _MessagesPageState extends State<MessagesPage> {
         otherAvatarUrl: s.otherAvatarUrl,
         onLogout: widget.onLogout,
         onOpenPost: widget.onOpenPost,
+        onOpenUserProfile: widget.onOpenUserProfile,
       ),
     ));
     if (mounted) _load();
@@ -712,6 +715,7 @@ class ConversationPage extends StatefulWidget {
     required this.otherAvatarUrl,
     required this.onLogout,
     this.onOpenPost,
+    this.onOpenUserProfile,
   });
 
   final String token;
@@ -722,6 +726,7 @@ class ConversationPage extends StatefulWidget {
   final String otherAvatarUrl;
   final Future<void> Function() onLogout;
   final void Function(String author, int postId)? onOpenPost;
+  final ValueChanged<String>? onOpenUserProfile;
 
   @override
   State<ConversationPage> createState() => _ConversationPageState();
@@ -834,36 +839,41 @@ class _ConversationPageState extends State<ConversationPage> {
           icon: Icon(Icons.arrow_back_ios_new_rounded, size: 20, color: isLight ? Colors.black : Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Row(
-          children: [
-            _avatar(
-              username: widget.otherUsername,
-              url: widget.otherAvatarUrl,
-              radius: 20,
-              isLight: isLight,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: isLight ? Colors.black : Colors.white,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    '@${widget.otherUsername}',
-                    style: TextStyle(fontSize: 11.5, color: isLight ? _kSubLgt : _kSubDark),
-                  ),
-                ],
+        title: GestureDetector(
+          onTap: widget.onOpenUserProfile != null
+              ? () => widget.onOpenUserProfile!(widget.otherUsername)
+              : null,
+          child: Row(
+            children: [
+              _avatar(
+                username: widget.otherUsername,
+                url: widget.otherAvatarUrl,
+                radius: 20,
+                isLight: isLight,
               ),
-            ),
-          ],
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: isLight ? Colors.black : Colors.white,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      '@${widget.otherUsername}',
+                      style: TextStyle(fontSize: 11.5, color: isLight ? _kSubLgt : _kSubDark),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       body: Column(
@@ -899,6 +909,9 @@ class _ConversationPageState extends State<ConversationPage> {
                                 otherAvatarUrl: widget.otherAvatarUrl,
                                 isLight: isLight,
                                 onOpenPost: widget.onOpenPost,
+                                onOpenUserProfile: widget.onOpenUserProfile != null
+                                    ? () => widget.onOpenUserProfile!(widget.otherUsername)
+                                    : null,
                               ),
                             ],
                           );
@@ -930,6 +943,7 @@ class _MessageRow extends StatelessWidget {
     required this.otherAvatarUrl,
     required this.isLight,
     required this.onOpenPost,
+    this.onOpenUserProfile,
   });
 
   final MessageItem message;
@@ -939,6 +953,7 @@ class _MessageRow extends StatelessWidget {
   final String otherAvatarUrl;
   final bool isLight;
   final void Function(String, int)? onOpenPost;
+  final VoidCallback? onOpenUserProfile;
 
   Widget _content() {
     final imgBytes  = _parseImage(message.text);
@@ -998,7 +1013,10 @@ class _MessageRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (isLast)
-            _avatar(username: otherUsername, url: otherAvatarUrl, radius: 16, isLight: isLight)
+            GestureDetector(
+              onTap: onOpenUserProfile,
+              child: _avatar(username: otherUsername, url: otherAvatarUrl, radius: 16, isLight: isLight),
+            )
           else
             const SizedBox(width: 32),
           const SizedBox(width: 6),

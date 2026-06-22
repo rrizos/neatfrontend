@@ -55,6 +55,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   final ScrollController _scrollController = ScrollController();
   final Map<int, GlobalKey> _postKeys = {};
   late final TabController _tabController;
+  List<FeedPost>? _likedPosts;
+  bool _likedLoading = false;
   List<FeedPost>? _savedPosts;
   bool _savedLoading = false;
   final Set<String> _followingAuthors = {};
@@ -76,9 +78,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _onTabChanged() {
-    if (_tabController.index == 2 && _savedPosts == null && !_savedLoading) {
-      _loadSavedPosts();
-    }
+    if (_tabController.indexIsChanging) return;
+    final i = _tabController.index;
+    if (i == 1) _loadLikedPosts(silent: _likedPosts != null);
+    if (i == 2) _loadSavedPosts(silent: _savedPosts != null);
   }
 
   Future<void> _load() async {
@@ -98,7 +101,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           decoded['user'] as Map<String, dynamic>,
         );
         _loading = false;
+        _likedPosts = null;
+        _savedPosts = null;
       });
+      // Refresh whichever tab is open; null above ensures a fresh fetch
+      if (_tabController.index == 1) _loadLikedPosts();
+      if (_tabController.index == 2) _loadSavedPosts();
       if (widget.initialPostId != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final key = _postKeys[widget.initialPostId!];
@@ -252,7 +260,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         body: jsonEncode({'liked': post.liked}),
       );
       if (res.statusCode == 401) { await widget.onLogout(); return false; }
-      return res.statusCode == 200;
+      if (res.statusCode == 200) {
+        if (_likedPosts != null && mounted) {
+          setState(() {
+            final rest = _likedPosts!.where((p) => p.id != post.id).toList();
+            // Move to top on like, remove on unlike
+            _likedPosts = post.liked ? [post, ...rest] : rest;
+          });
+        }
+        return true;
+      }
+      return false;
     } catch (_) {
       return false;
     }
@@ -266,7 +284,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         body: jsonEncode({'saved': post.saved}),
       );
       if (res.statusCode == 401) { await widget.onLogout(); return false; }
-      return res.statusCode == 200;
+      if (res.statusCode == 200) {
+        if (_savedPosts != null && mounted) {
+          setState(() {
+            final rest = _savedPosts!.where((p) => p.id != post.id).toList();
+            // Move to top on save, remove on unsave
+            _savedPosts = post.saved ? [post, ...rest] : rest;
+          });
+        }
+        return true;
+      }
+      return false;
     } catch (_) {
       return false;
     }
@@ -341,19 +369,45 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
   }
 
-  Future<void> _loadSavedPosts() async {
+  Future<void> _loadLikedPosts({bool silent = false}) async {
+    if (_likedLoading) return;
+    _likedLoading = true; // guard against concurrent fetches
+    if (!silent && mounted) setState(() => _likedLoading = true);
+    try {
+      final res = await http.get(likedPostsEndpoint, headers: authGetHeaders(widget.token));
+      if (res.statusCode == 401) { _likedLoading = false; await widget.onLogout(); return; }
+      if (!mounted) { _likedLoading = false; return; }
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        final posts = (decoded['posts'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(FeedPost.fromJson)
+            .toList();
+        setState(() { _likedPosts = posts; _likedLoading = false; });
+      } else {
+        // Endpoint missing — fall back to posts seen in the feed
+        setState(() {
+          _likedPosts = widget.posts.where((p) => p.liked).toList();
+          _likedLoading = false;
+        });
+      }
+    } catch (_) {
+      _likedLoading = false;
+      if (mounted) setState(() { _likedPosts ??= []; _likedLoading = false; });
+    }
+  }
+
+  Future<void> _loadSavedPosts({bool silent = false}) async {
     if (_savedLoading) return;
-    setState(() => _savedLoading = true);
+    _savedLoading = true; // guard against concurrent fetches
+    if (!silent && mounted) setState(() => _savedLoading = true);
     try {
       final res = await http.get(
         savedPostsEndpoint,
         headers: authGetHeaders(widget.token),
       );
-      if (res.statusCode == 401) {
-        await widget.onLogout();
-        return;
-      }
-      if (!mounted) return;
+      if (res.statusCode == 401) { _savedLoading = false; await widget.onLogout(); return; }
+      if (!mounted) { _savedLoading = false; return; }
       List<FeedPost> posts = const [];
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -364,7 +418,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       }
       if (mounted) setState(() { _savedPosts = posts; _savedLoading = false; });
     } catch (_) {
-      if (mounted) setState(() { _savedPosts = []; _savedLoading = false; });
+      _savedLoading = false;
+      if (mounted) setState(() { _savedPosts ??= []; _savedLoading = false; });
     }
   }
 
@@ -632,13 +687,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     if (!isOwn) {
       return const Center(child: Icon(Icons.lock_outline, size: 48, color: Color(0xffb3b3b3)));
     }
-    final liked = widget.posts.where((p) => p.liked).toList();
+    if (_likedLoading) return const Center(child: CircularProgressIndicator());
+    final liked = _likedPosts;
+    if (liked == null) return const SizedBox.shrink();
     if (liked.isEmpty) {
       return const Center(child: Text('No liked posts yet.', style: TextStyle(color: Color(0xffb3b3b3))));
     }
     return ListView.builder(
       itemCount: liked.length,
-      itemBuilder: (_, i) => _buildPostCard(liked[i]),
+      itemBuilder: (_, i) => _buildPostCard(liked[i], key: ValueKey(liked[i].id)),
     );
   }
 
@@ -654,7 +711,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
     return ListView.builder(
       itemCount: saved.length,
-      itemBuilder: (_, i) => _buildPostCard(saved[i]),
+      itemBuilder: (_, i) => _buildPostCard(saved[i], key: ValueKey(saved[i].id)),
     );
   }
 }

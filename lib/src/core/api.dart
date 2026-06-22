@@ -26,6 +26,7 @@ Uri postCommentsEndpoint(int id) =>
 Uri postDeleteEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/delete/');
 Uri commentLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/like/');
 Uri get savedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/saved/');
+Uri get likedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/liked/');
 Uri get signupEndpoint => Uri.parse('$apiBaseUrl/api/auth/signup/');
 Uri get loginEndpoint => Uri.parse('$apiBaseUrl/api/auth/login/');
 Uri get logoutEndpoint => Uri.parse('$apiBaseUrl/api/auth/logout/');
