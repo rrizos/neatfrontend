@@ -1161,13 +1161,16 @@ class _HomePageState extends State<HomePage> {
                                       onUnfollowUser: _unfollow,
                                       onLike: () => _likePost(post),
                                       onSave: () => _savePost(post),
-                                      onShare: () => showShareSheet(
-                                        context: context,
-                                        post: post,
-                                        token: widget.session.token,
-                                        currentUser: widget.session.user,
-                                        onLogout: widget.onLogout,
-                                      ),
+                                      onShare: () {
+                                        _hideNativeBar();
+                                        showShareSheet(
+                                          context: context,
+                                          post: post,
+                                          token: widget.session.token,
+                                          currentUser: widget.session.user,
+                                          onLogout: widget.onLogout,
+                                        ).whenComplete(_showNativeBar);
+                                      },
                                       onMore: () => _openSheet(
                                         title: post.author,
                                         child: Column(

@@ -1,3 +1,20 @@
+class MutualUser {
+  const MutualUser({
+    required this.username,
+    required this.fullName,
+    required this.avatarUrl,
+  });
+  final String username;
+  final String fullName;
+  final String avatarUrl;
+
+  factory MutualUser.fromJson(Map<String, dynamic> json) => MutualUser(
+    username: json['username']?.toString() ?? '',
+    fullName: json['fullName']?.toString() ?? '',
+    avatarUrl: json['avatarUrl']?.toString() ?? '',
+  );
+}
+
 class MediaItem {
   const MediaItem({required this.type, required this.url, this.duration});
   final String type; // 'image' or 'video'
@@ -32,6 +49,8 @@ class UserProfile {
     required this.followers,
     required this.following,
     required this.isFollowing,
+    this.mutuals = const [],
+    this.mutualsCount = 0,
   });
   final int id;
   final String username;
@@ -43,6 +62,9 @@ class UserProfile {
   final int followers;
   final int following;
   final bool isFollowing;
+  final List<MutualUser> mutuals;
+  final int mutualsCount;
+
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
     return UserProfile(
@@ -56,6 +78,11 @@ class UserProfile {
       followers: parseInt(json['followers']),
       following: parseInt(json['following']),
       isFollowing: json['isFollowing'] == true,
+      mutuals: (json['mutuals'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(MutualUser.fromJson)
+          .toList(),
+      mutualsCount: parseInt(json['mutualsCount']),
     );
   }
 }
@@ -240,6 +267,7 @@ class ConversationSummary {
     required this.updated,
     required this.unreadCount,
     required this.lastReadAt,
+    this.otherLastActive,
   });
 
   final int id;
@@ -251,6 +279,7 @@ class ConversationSummary {
   final DateTime updated;
   final int unreadCount;
   final DateTime? lastReadAt;
+  final DateTime? otherLastActive;
 
   factory ConversationSummary.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -266,6 +295,7 @@ class ConversationSummary {
           DateTime.now(),
       unreadCount: parseInt(json['unreadCount']),
       lastReadAt: DateTime.tryParse(json['lastReadAt']?.toString() ?? ''),
+      otherLastActive: DateTime.tryParse(json['otherLastActive']?.toString() ?? ''),
     );
   }
 }

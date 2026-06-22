@@ -604,6 +604,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     ),
                   ),
                 ],
+                if (!isOwn && profile.mutualsCount > 0) ...[
+                  const SizedBox(height: 8),
+                  _MutualsRow(
+                    mutuals: profile.mutuals,
+                    mutualsCount: profile.mutualsCount,
+                    isLight: isLight,
+                    onTap: widget.onOpenUserProfile,
+                  ),
+                ],
               ],
             ),
           ),
@@ -762,6 +771,113 @@ class _Metric extends StatelessWidget {
       ],
     );
     return onTap == null ? child : InkWell(onTap: onTap, child: child);
+  }
+}
+
+class _MutualsRow extends StatelessWidget {
+  const _MutualsRow({
+    required this.mutuals,
+    required this.mutualsCount,
+    required this.isLight,
+    required this.onTap,
+  });
+
+  final List<MutualUser> mutuals;
+  final int mutualsCount;
+  final bool isLight;
+  final ValueChanged<String> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final subClr = isLight ? const Color(0xff616161) : const Color(0xffb3b3b3);
+    final boldClr = isLight ? Colors.black : Colors.white;
+
+    // Build the label spans: "Followed by user1, user2 and 3 others"
+    final preview = mutuals.take(3).toList();
+    final extra = mutualsCount - preview.length;
+
+    final spans = <InlineSpan>[
+      TextSpan(text: 'Followed by ', style: TextStyle(color: subClr, fontSize: 13)),
+    ];
+    for (var i = 0; i < preview.length; i++) {
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: GestureDetector(
+            onTap: () => onTap(preview[i].username),
+            child: Text(
+              preview[i].username,
+              style: TextStyle(
+                color: boldClr,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+      );
+      if (i < preview.length - 1 || extra > 0) {
+        final isLastPreview = i == preview.length - 1;
+        final sep = isLastPreview ? ' and ' : ', ';
+        spans.add(TextSpan(text: sep, style: TextStyle(color: subClr, fontSize: 13)));
+      }
+    }
+    if (extra > 0) {
+      spans.add(
+        TextSpan(
+          text: '$extra ${extra == 1 ? 'other' : 'others'}',
+          style: TextStyle(color: boldClr, fontWeight: FontWeight.w700, fontSize: 13),
+        ),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Overlapping mini avatars
+        SizedBox(
+          width: preview.length * 16.0 + 8,
+          height: 22,
+          child: Stack(
+            children: [
+              for (var i = 0; i < preview.length; i++)
+                Positioned(
+                  left: i * 16.0,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isLight ? Colors.white : const Color(0xff121212),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: CircleAvatar(
+                      radius: 9,
+                      backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+                      foregroundImage: _dataUrlBytes(preview[i].avatarUrl) != null
+                          ? MemoryImage(_dataUrlBytes(preview[i].avatarUrl)!)
+                          : null,
+                      child: _dataUrlBytes(preview[i].avatarUrl) == null
+                          ? Text(
+                              initialFor(preview[i].username),
+                              style: TextStyle(
+                                fontSize: 7,
+                                color: isLight ? Colors.black : Colors.white,
+                              ),
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text.rich(TextSpan(children: spans)),
+        ),
+      ],
+    );
   }
 }
 

@@ -107,6 +107,28 @@ String _inboxTime(DateTime t) {
   return '${t.day}/${t.month}';
 }
 
+// ─── Presence helpers ─────────────────────────────────────────────────────────
+
+const _kGreen = Color(0xff3fc95a);
+const _kActiveNowThreshold = Duration(minutes: 5);
+
+/// Returns "Active now", "Active 3m ago", "Active 2h ago", "Active 3d ago",
+/// or null when last_active is unknown / too old (>7 days).
+String? _presenceLabel(DateTime? lastActive) {
+  if (lastActive == null) return null;
+  final d = DateTime.now().toUtc().difference(lastActive.toUtc());
+  if (d < _kActiveNowThreshold) return 'Active now';
+  if (d.inMinutes < 60) return 'Active ${d.inMinutes}m ago';
+  if (d.inHours   < 24) return 'Active ${d.inHours}h ago';
+  if (d.inDays    < 7)  return 'Active ${d.inDays}d ago';
+  return null;
+}
+
+bool _isActiveNow(DateTime? lastActive) {
+  if (lastActive == null) return false;
+  return DateTime.now().toUtc().difference(lastActive.toUtc()) < _kActiveNowThreshold;
+}
+
 String _chatTime(DateTime t) {
   final d  = DateTime.now().difference(t);
   final hh = t.hour.toString().padLeft(2, '0');
@@ -189,12 +211,28 @@ class _MessagesPageState extends State<MessagesPage> {
   List<ConversationSummary> _convs = [];
   bool _loading = true;
   final _search = TextEditingController();
+  Timer? _presenceTimer;
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+    _pingPresence();
+    _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
+  }
 
   @override
-  void dispose() { _search.dispose(); super.dispose(); }
+  void dispose() {
+    _presenceTimer?.cancel();
+    _search.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pingPresence() async {
+    try {
+      await http.post(presenceEndpoint, headers: authJsonHeaders(widget.token));
+    } catch (_) {}
+  }
 
   Future<void> _load() async {
     try {
@@ -220,6 +258,7 @@ class _MessagesPageState extends State<MessagesPage> {
         otherUsername: s.otherUser,
         otherFullName: s.otherFullName,
         otherAvatarUrl: s.otherAvatarUrl,
+        otherLastActive: s.otherLastActive,
         onLogout: widget.onLogout,
         onOpenPost: widget.onOpenPost,
         onOpenUserProfile: widget.onOpenUserProfile,
@@ -408,8 +447,10 @@ class _InboxRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final unread = summary.unreadCount > 0;
-    final name   = summary.otherFullName.isNotEmpty ? summary.otherFullName : summary.otherUser;
+    final unread   = summary.unreadCount > 0;
+    final name     = summary.otherFullName.isNotEmpty ? summary.otherFullName : summary.otherUser;
+    final presence = _presenceLabel(summary.otherLastActive);
+    final activeNow = _isActiveNow(summary.otherLastActive);
 
     return InkWell(
       onTap: onTap,
@@ -417,12 +458,35 @@ class _InboxRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
-            _avatar(
-              username: summary.otherUser,
-              url: summary.otherAvatarUrl,
-              radius: 28,
-              isLight: isLight,
-              ring: unread,
+            // Avatar with optional green active-now dot
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _avatar(
+                  username: summary.otherUser,
+                  url: summary.otherAvatarUrl,
+                  radius: 28,
+                  isLight: isLight,
+                  ring: unread,
+                ),
+                if (activeNow)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: _kGreen,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isLight ? _kBgLgt : _kBgDark,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -438,18 +502,31 @@ class _InboxRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    _preview,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: unread
-                          ? (isLight ? Colors.black87 : Colors.white)
-                          : (isLight ? _kSubLgt : _kSubDark),
-                      fontWeight: unread ? FontWeight.w600 : FontWeight.w400,
-                      fontSize: 13.5,
+                  // Presence label OR last-message preview
+                  if (presence != null)
+                    Text(
+                      presence,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: activeNow ? _kGreen : (isLight ? _kSubLgt : _kSubDark),
+                        fontWeight: activeNow ? FontWeight.w600 : FontWeight.w400,
+                        fontSize: 12.5,
+                      ),
+                    )
+                  else
+                    Text(
+                      _preview,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: unread
+                            ? (isLight ? Colors.black87 : Colors.white)
+                            : (isLight ? _kSubLgt : _kSubDark),
+                        fontWeight: unread ? FontWeight.w600 : FontWeight.w400,
+                        fontSize: 13.5,
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -714,6 +791,7 @@ class ConversationPage extends StatefulWidget {
     required this.otherFullName,
     required this.otherAvatarUrl,
     required this.onLogout,
+    this.otherLastActive,
     this.onOpenPost,
     this.onOpenUserProfile,
   });
@@ -724,6 +802,7 @@ class ConversationPage extends StatefulWidget {
   final String otherUsername;
   final String otherFullName;
   final String otherAvatarUrl;
+  final DateTime? otherLastActive;
   final Future<void> Function() onLogout;
   final void Function(String author, int postId)? onOpenPost;
   final ValueChanged<String>? onOpenUserProfile;
@@ -738,19 +817,45 @@ class _ConversationPageState extends State<ConversationPage> {
   List<MessageItem> _messages = [];
   bool _loading = true;
   bool _sending = false;
+  Timer? _presenceTimer;
+  DateTime? _otherLastActive;
 
   @override
   void initState() {
     super.initState();
-    _composer.addListener(() => setState(() {}));
+    _otherLastActive = widget.otherLastActive;
     _load(initial: true);
+    _pingPresence();
+    _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
   }
 
   @override
   void dispose() {
+    _presenceTimer?.cancel();
     _composer.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<void> _pingPresence() async {
+    try {
+      final res = await http.post(presenceEndpoint, headers: authJsonHeaders(widget.token));
+      if (res.statusCode == 200) {
+        // Also refresh conversation to get updated otherLastActive
+        final convRes = await http.get(
+          messageConversationEndpoint(widget.conversationId),
+          headers: authGetHeaders(widget.token),
+        );
+        if (convRes.statusCode == 200 && mounted) {
+          final body = jsonDecode(convRes.body) as Map<String, dynamic>;
+          final conv = body['conversation'] as Map<String, dynamic>?;
+          if (conv != null) {
+            final ts = DateTime.tryParse(conv['otherLastActive']?.toString() ?? '');
+            if (mounted) setState(() => _otherLastActive = ts);
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   void _scrollToBottom({bool jump = false}) {
@@ -865,10 +970,21 @@ class _ConversationPageState extends State<ConversationPage> {
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    Text(
-                      '@${widget.otherUsername}',
-                      style: TextStyle(fontSize: 11.5, color: isLight ? _kSubLgt : _kSubDark),
-                    ),
+                    Builder(builder: (_) {
+                      final label = _presenceLabel(_otherLastActive);
+                      final activeNow = _isActiveNow(_otherLastActive);
+                      return Text(
+                        label ?? '@${widget.otherUsername}',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: activeNow
+                              ? _kGreen
+                              : label != null
+                                  ? (isLight ? _kSubLgt : _kSubDark)
+                                  : (isLight ? _kSubLgt : _kSubDark),
+                        ),
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -1268,8 +1384,17 @@ class _ComposerState extends State<_Composer> {
   Timer? _timer;
   String? _recPath;
 
+  void _onTextChanged() => setState(() {});
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onTextChanged);
+  }
+
   @override
   void dispose() {
+    widget.controller.removeListener(_onTextChanged);
     _timer?.cancel();
     _recorder.dispose();
     super.dispose();

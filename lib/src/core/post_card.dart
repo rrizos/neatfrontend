@@ -131,7 +131,7 @@ class _FeedMedia extends StatelessWidget {
         try {
           return Image.memory(
             base64Decode(url.substring(comma + 1)),
-            fit: BoxFit.contain,
+            fit: BoxFit.cover,
             width: double.infinity,
             height: double.infinity,
           );
@@ -140,7 +140,7 @@ class _FeedMedia extends StatelessWidget {
     }
     return Image.network(
       url,
-      fit: BoxFit.contain,
+      fit: BoxFit.cover,
       width: double.infinity,
       height: double.infinity,
     );
@@ -292,7 +292,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
         children: [
           // Video frame
           FittedBox(
-            fit: BoxFit.contain,
+            fit: BoxFit.cover,
             child: SizedBox(
               width: ctrl.value.size.width,
               height: ctrl.value.size.height,
@@ -491,7 +491,6 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final single = widget.media.length == 1;
-    final bg = isLight ? const Color(0xfff0f0f0) : const Color(0xff1a1a1a);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -502,9 +501,7 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
             borderRadius: BorderRadius.circular(18),
             child: AspectRatio(
               aspectRatio: 1.0,
-              child: ColoredBox(
-                color: bg,
-                child: Stack(
+              child: Stack(
                   children: [
                     if (single)
                       _buildPage(widget.media.first, 0)
@@ -554,7 +551,6 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
                       ),
                   ],
                 ],
-                ),
               ),
             ),
           ),
