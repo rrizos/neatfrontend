@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:video_player/video_player.dart';
 
 import 'api.dart';
 import 'icons.dart';
@@ -112,6 +116,9 @@ class PostAvatar extends StatelessWidget {
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
+// Temp-file cache so the same video data URL isn't decoded + written twice.
+final _videoTempCache = <int, String>{};
+
 class _FeedMedia extends StatelessWidget {
   const _FeedMedia({required this.url});
   final String url;
@@ -122,43 +129,571 @@ class _FeedMedia extends StatelessWidget {
       final comma = url.indexOf(',');
       if (comma > -1) {
         try {
-          return Image.memory(base64Decode(url.substring(comma + 1)), fit: BoxFit.cover);
+          return Image.memory(
+            base64Decode(url.substring(comma + 1)),
+            fit: BoxFit.contain,
+            width: double.infinity,
+            height: double.infinity,
+          );
         } catch (_) {}
       }
     }
-    return Image.network(url, fit: BoxFit.cover);
+    return Image.network(
+      url,
+      fit: BoxFit.contain,
+      width: double.infinity,
+      height: double.infinity,
+    );
   }
 }
 
-class _FullscreenMediaViewer extends StatelessWidget {
-  const _FullscreenMediaViewer({required this.url});
+// ── Video player widget ───────────────────────────────────────────────────────
+// Feed mode: auto-plays muted, tap opens fullscreen.
+// Fullscreen mode: auto-plays muted, tap toggles controls overlay with
+// play/pause, seek bar, time counter, and mute button.
+
+class _FeedVideoPlayer extends StatefulWidget {
+  const _FeedVideoPlayer({required this.url, this.onTap, this.fullscreen = false});
   final String url;
+  final VoidCallback? onTap; // feed: opens fullscreen; null in fullscreen mode
+  final bool fullscreen;
+
+  @override
+  State<_FeedVideoPlayer> createState() => _FeedVideoPlayerState();
+}
+
+class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
+  VideoPlayerController? _ctrl;
+  bool _ready = false;
+  bool _muted = true;
+  bool _showControls = false;
+  Timer? _hideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      VideoPlayerController ctrl;
+      final url = widget.url;
+      if (url.startsWith('data:')) {
+        final key = url.hashCode;
+        var path = _videoTempCache[key];
+        if (path == null || !File(path).existsSync()) {
+          final comma = url.indexOf(',');
+          final bytes = base64Decode(url.substring(comma + 1));
+          final dir = await getTemporaryDirectory();
+          path = '${dir.path}/neatv_$key.mp4';
+          await File(path).writeAsBytes(bytes);
+          _videoTempCache[key] = path;
+        }
+        ctrl = VideoPlayerController.file(File(path));
+      } else {
+        ctrl = VideoPlayerController.networkUrl(Uri.parse(url));
+      }
+      await ctrl.initialize();
+      ctrl.setLooping(true);
+      ctrl.setVolume(0);
+      ctrl.play();
+      ctrl.addListener(_onVideoUpdate);
+      if (!mounted) { ctrl.dispose(); return; }
+      setState(() { _ctrl = ctrl; _ready = true; });
+    } catch (_) {}
+  }
+
+  void _onVideoUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    _ctrl?.removeListener(_onVideoUpdate);
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  void _toggleMute() {
+    setState(() => _muted = !_muted);
+    _ctrl?.setVolume(_muted ? 0 : 1);
+  }
+
+  void _togglePlayPause() {
+    final ctrl = _ctrl;
+    if (ctrl == null) return;
+    if (ctrl.value.isPlaying) {
+      ctrl.pause();
+    } else {
+      ctrl.play();
+    }
+    _resetHideTimer();
+    setState(() {});
+  }
+
+  void _showControlsTemporarily() {
+    setState(() => _showControls = true);
+    _resetHideTimer();
+  }
+
+  void _resetHideTimer() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _showControls = false);
+    });
+  }
+
+  void _onTap() {
+    if (!widget.fullscreen) {
+      widget.onTap?.call();
+      return;
+    }
+    if (_showControls) {
+      _togglePlayPause();
+    } else {
+      _showControlsTemporarily();
+    }
+  }
+
+  String _fmtDuration(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (!_ready || _ctrl == null) {
+      return GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          color: Colors.black,
+          child: const Center(
+            child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    final ctrl = _ctrl!;
+    final duration = ctrl.value.duration;
+    final position = ctrl.value.position;
+    final progress = duration.inMilliseconds > 0
+        ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    final isPlaying = ctrl.value.isPlaying;
+
+    return GestureDetector(
+      onTap: _onTap,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Video frame
+          FittedBox(
+            fit: BoxFit.contain,
+            child: SizedBox(
+              width: ctrl.value.size.width,
+              height: ctrl.value.size.height,
+              child: VideoPlayer(ctrl),
+            ),
+          ),
+
+          // Mute button — always visible
+          Positioned(
+            top: 10,
+            right: 10,
+            child: GestureDetector(
+              onTap: _toggleMute,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                padding: const EdgeInsets.all(7),
+                child: Icon(
+                  _muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                  color: Colors.white,
+                  size: 16,
+                ),
+              ),
+            ),
+          ),
+
+          // Controls overlay (fullscreen only)
+          if (widget.fullscreen && _showControls) ...[
+            // Semi-transparent scrim at bottom
+            Positioned(
+              left: 0, right: 0, bottom: 0,
+              child: Container(
+                height: 90,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [Colors.black87, Colors.transparent],
+                  ),
+                ),
+              ),
+            ),
+            // Play/pause centre button
+            Center(
+              child: GestureDetector(
+                onTap: _togglePlayPause,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(14),
+                  child: Icon(
+                    isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    color: Colors.white,
+                    size: 38,
+                  ),
+                ),
+              ),
+            ),
+            // Seek bar + time at bottom
+            Positioned(
+              left: 16, right: 16,
+              bottom: MediaQuery.of(context).padding.bottom + 20,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Time
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _fmtDuration(position),
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        _fmtDuration(duration),
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // Seek slider
+                  SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 3,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                      activeTrackColor: Colors.white,
+                      inactiveTrackColor: Colors.white38,
+                      thumbColor: Colors.white,
+                      overlayColor: Colors.white24,
+                    ),
+                    child: Slider(
+                      value: progress,
+                      onChanged: (v) {
+                        final target = Duration(milliseconds: (v * duration.inMilliseconds).round());
+                        ctrl.seekTo(target);
+                        _resetHideTimer();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // Feed-mode: small play indicator in centre when paused
+          if (!widget.fullscreen && !isPlaying)
+            Center(
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                padding: const EdgeInsets.all(12),
+                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 32),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Navigation arrow used in both carousel and fullscreen ─────────────────────
+
+class _NavArrow extends StatelessWidget {
+  const _NavArrow({required this.left, required this.onTap});
+  final bool left;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: left ? 10 : null,
+      right: left ? null : 10,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Colors.black45,
+              shape: BoxShape.circle,
+            ),
+            padding: const EdgeInsets.all(6),
+            child: Icon(
+              left ? Icons.chevron_left_rounded : Icons.chevron_right_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── In-feed media carousel (images + videos, max 4) ──────────────────────────
+
+class _PostMediaCarousel extends StatefulWidget {
+  const _PostMediaCarousel({required this.media, required this.onTap});
+  final List<MediaItem> media;
+  final ValueChanged<int> onTap;
+
+  @override
+  State<_PostMediaCarousel> createState() => _PostMediaCarouselState();
+}
+
+class _PostMediaCarouselState extends State<_PostMediaCarousel> {
+  final _pageCtrl = PageController();
+  int _current = 0;
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  Widget _buildPage(MediaItem item, int index) {
+    if (item.isVideo) {
+      return _FeedVideoPlayer(url: item.url, onTap: () => widget.onTap(index));
+    }
+    return GestureDetector(
+      onTap: () => widget.onTap(index),
+      child: _FeedMedia(url: item.url),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final single = widget.media.length == 1;
+    final bg = isLight ? const Color(0xfff0f0f0) : const Color(0xff1a1a1a);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: AspectRatio(
+              aspectRatio: 1.0,
+              child: ColoredBox(
+                color: bg,
+                child: Stack(
+                  children: [
+                    if (single)
+                      _buildPage(widget.media.first, 0)
+                    else
+                      PageView.builder(
+                        controller: _pageCtrl,
+                        itemCount: widget.media.length,
+                        onPageChanged: (i) => setState(() => _current = i),
+                        itemBuilder: (_, i) => _buildPage(widget.media[i], i),
+                      ),
+                  if (!single) ...[
+                    // Counter badge
+                    Positioned(
+                      top: 10,
+                      left: 10,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        child: Text(
+                          '${_current + 1}/${widget.media.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (_current > 0)
+                      _NavArrow(
+                        left: true,
+                        onTap: () => _pageCtrl.previousPage(
+                          duration: const Duration(milliseconds: 240),
+                          curve: Curves.easeInOut,
+                        ),
+                      ),
+                    if (_current < widget.media.length - 1)
+                      _NavArrow(
+                        left: false,
+                        onTap: () => _pageCtrl.nextPage(
+                          duration: const Duration(milliseconds: 240),
+                          curve: Curves.easeInOut,
+                        ),
+                      ),
+                  ],
+                ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (!single) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(
+              widget.media.length,
+              (i) => AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width: i == _current ? 8 : 5,
+                height: i == _current ? 8 : 5,
+                decoration: BoxDecoration(
+                  color: i == _current
+                      ? (isLight ? Colors.black : Colors.white)
+                      : Colors.grey,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ── Fullscreen media viewer (swipeable, images + videos) ─────────────────────
+
+class _FullscreenMediaViewer extends StatefulWidget {
+  const _FullscreenMediaViewer({required this.media, required this.initialIndex});
+  final List<MediaItem> media;
+  final int initialIndex;
+
+  @override
+  State<_FullscreenMediaViewer> createState() => _FullscreenMediaViewerState();
+}
+
+class _FullscreenMediaViewerState extends State<_FullscreenMediaViewer> {
+  late final PageController _ctrl;
+  late int _current;
+
+  @override
+  void initState() {
+    super.initState();
+    _current = widget.initialIndex;
+    _ctrl = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final single = widget.media.length == 1;
+    final topPad = MediaQuery.of(context).padding.top;
+    final botPad = MediaQuery.of(context).padding.bottom;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          Center(
-            child: InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 4.0,
-              child: _FeedMedia(url: url),
-            ),
+          PageView.builder(
+            controller: _ctrl,
+            itemCount: widget.media.length,
+            onPageChanged: (i) => setState(() => _current = i),
+            itemBuilder: (_, i) {
+              final item = widget.media[i];
+              if (item.isVideo) {
+                return _FeedVideoPlayer(url: item.url, fullscreen: true);
+              }
+              return InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Center(child: _FeedMedia(url: item.url)),
+              );
+            },
           ),
+          // Close button
           Positioned(
-            top: MediaQuery.of(context).padding.top + 12,
+            top: topPad + 12,
             right: 16,
             child: GestureDetector(
               onTap: () => Navigator.of(context).pop(),
               child: Container(
-                decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
                 padding: const EdgeInsets.all(8),
-                child: const Icon(Icons.close, color: Colors.white, size: 24),
+                child: const Icon(Icons.close, color: Colors.white, size: 22),
               ),
             ),
           ),
+          if (!single) ...[
+            if (_current > 0)
+              _NavArrow(
+                left: true,
+                onTap: () => _ctrl.previousPage(
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeInOut,
+                ),
+              ),
+            if (_current < widget.media.length - 1)
+              _NavArrow(
+                left: false,
+                onTap: () => _ctrl.nextPage(
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeInOut,
+                ),
+              ),
+            Positioned(
+              bottom: botPad + 24,
+              left: 0,
+              right: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  widget.media.length,
+                  (i) => AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    width: i == _current ? 8 : 5,
+                    height: i == _current ? 8 : 5,
+                    decoration: BoxDecoration(
+                      color: i == _current ? Colors.white : Colors.white54,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -169,10 +704,18 @@ class _LikersSheet extends StatefulWidget {
   const _LikersSheet({
     required this.postId,
     required this.token,
+    required this.currentUsername,
+    required this.followingAuthors,
+    required this.onFollow,
+    required this.onUnfollow,
     required this.onOpenUserProfile,
   });
   final int postId;
   final String token;
+  final String currentUsername;
+  final Set<String> followingAuthors;
+  final Future<void> Function(String) onFollow;
+  final Future<void> Function(String) onUnfollow;
   final ValueChanged<String> onOpenUserProfile;
 
   @override
@@ -182,10 +725,12 @@ class _LikersSheet extends StatefulWidget {
 class _LikersSheetState extends State<_LikersSheet> {
   List<UserProfile>? _users;
   bool _error = false;
+  late Set<String> _following;
 
   @override
   void initState() {
     super.initState();
+    _following = Set.of(widget.followingAuthors);
     _load();
   }
 
@@ -195,7 +740,6 @@ class _LikersSheetState extends State<_LikersSheet> {
         postLikersEndpoint(widget.postId),
         headers: authGetHeaders(widget.token),
       );
-      debugPrint('[LikersSheet] status=${res.statusCode} body=${res.body}');
       if (!mounted) return;
       if (res.statusCode != 200) { setState(() => _error = true); return; }
       final body = jsonDecode(res.body);
@@ -209,52 +753,179 @@ class _LikersSheetState extends State<_LikersSheet> {
       }
       setState(() => _users = raw.whereType<Map<String, dynamic>>().map(UserProfile.fromJson).toList());
     } catch (e) {
-      debugPrint('[LikersSheet] error: $e');
       if (mounted) setState(() => _error = true);
     }
+  }
+
+  void _toggleFollow(String username) {
+    if (_following.contains(username)) {
+      setState(() => _following.remove(username));
+      widget.onUnfollow(username);
+    } else {
+      setState(() => _following.add(username));
+      widget.onFollow(username);
+    }
+  }
+
+  void _openProfile(String username) {
+    Navigator.of(context).pop();
+    widget.onOpenUserProfile(username);
   }
 
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
+    final bg = isLight ? Colors.white : const Color(0xff111111);
+    final textColor = isLight ? Colors.black : Colors.white;
     final users = _users;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.5,
-      minChildSize: 0.3,
-      maxChildSize: 0.9,
-      builder: (ctx, scrollController) {
-        if (_error) return const Center(child: Text('Could not load likes.'));
-        if (users == null) return const Center(child: CircularProgressIndicator());
-        if (users.isEmpty) return const Center(child: Text('No likes yet.'));
-        return ListView.builder(
-          controller: scrollController,
-          padding: const EdgeInsets.only(bottom: 24),
-          itemCount: users.length,
-          itemBuilder: (_, i) {
-            final u = users[i];
-            final bytes = decodeAvatarUrl(u.avatarUrl);
-            return ListTile(
-              leading: CircleAvatar(
-                radius: 20,
+
+    Widget body;
+    if (_error) {
+      body = const Center(child: Text('Could not load likes.'));
+    } else if (users == null) {
+      body = const Center(child: CircularProgressIndicator());
+    } else if (users.isEmpty) {
+      body = const Center(
+        child: Text('No likes yet.', style: TextStyle(color: Color(0xffb3b3b3))),
+      );
+    } else {
+      body = ListView.builder(
+        padding: const EdgeInsets.only(top: 8, bottom: 32),
+        itemCount: users.length,
+        itemBuilder: (_, i) {
+          final u = users[i];
+          final bytes = decodeAvatarUrl(u.avatarUrl);
+          final isSelf = u.username == widget.currentUsername;
+          final isFollowing = _following.contains(u.username);
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            leading: GestureDetector(
+              onTap: () => _openProfile(u.username),
+              child: CircleAvatar(
+                radius: 24,
                 backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
                 foregroundImage: bytes != null ? MemoryImage(bytes) : null,
                 child: bytes == null
-                    ? Text(u.username.isNotEmpty ? u.username[0].toUpperCase() : '?',
-                        style: const TextStyle(fontWeight: FontWeight.w600))
+                    ? Text(
+                        u.username.isNotEmpty ? u.username[0].toUpperCase() : '?',
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: textColor),
+                      )
                     : null,
               ),
-              title: Text(u.fullName.isNotEmpty ? u.fullName : u.username,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: u.fullName.isNotEmpty
-                  ? Text('@${u.username}', style: const TextStyle(color: Color(0xffb3b3b3)))
-                  : null,
-              onTap: () { Navigator.of(context).pop(); widget.onOpenUserProfile(u.username); },
-            );
-          },
-        );
-      },
+            ),
+            title: GestureDetector(
+              onTap: () => _openProfile(u.username),
+              child: Text(
+                u.fullName.isNotEmpty ? u.fullName : u.username,
+                style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+              ),
+            ),
+            subtitle: u.fullName.isNotEmpty
+                ? GestureDetector(
+                    onTap: () => _openProfile(u.username),
+                    child: Text('@${u.username}', style: const TextStyle(color: Color(0xffb3b3b3))),
+                  )
+                : null,
+            trailing: isSelf
+                ? null
+                : SizedBox(
+                    height: 34,
+                    child: OutlinedButton(
+                      onPressed: () => _toggleFollow(u.username),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        side: BorderSide(
+                          color: isFollowing
+                              ? (isLight ? const Color(0xffb0b0b0) : const Color(0xff555555))
+                              : (isLight ? Colors.black : Colors.white),
+                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        foregroundColor: isFollowing
+                            ? (isLight ? const Color(0xffb0b0b0) : const Color(0xff555555))
+                            : textColor,
+                        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      child: Text(isFollowing ? 'Following' : 'Follow'),
+                    ),
+                  ),
+          );
+        },
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: bg,
+      appBar: AppBar(
+        backgroundColor: bg,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new_rounded, color: textColor, size: 20),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text(
+          'Likes',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: textColor),
+        ),
+        centerTitle: true,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(
+            height: 1,
+            thickness: 1,
+            color: isLight ? const Color(0xffe0e0e0) : const Color(0xff242424),
+          ),
+        ),
+      ),
+      body: body,
     );
+  }
+}
+
+// ── _LikedByText ─────────────────────────────────────────────────────────────
+
+class _LikedByText extends StatelessWidget {
+  const _LikedByText({
+    required this.likedByFollowing,
+    required this.totalLikes,
+    required this.isLight,
+  });
+  final List<String> likedByFollowing;
+  final int totalLikes;
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    final boldStyle = TextStyle(
+      fontWeight: FontWeight.w700,
+      fontSize: 13,
+      color: isLight ? Colors.black : Colors.white,
+    );
+    final normalStyle = TextStyle(
+      fontSize: 13,
+      color: isLight ? const Color(0xff444444) : const Color(0xffb3b3b3),
+    );
+
+    final others = totalLikes - likedByFollowing.length;
+    final spans = <InlineSpan>[TextSpan(text: 'Liked by ', style: normalStyle)];
+
+    for (int i = 0; i < likedByFollowing.length; i++) {
+      if (i > 0) {
+        final isLast = i == likedByFollowing.length - 1 && others <= 0;
+        spans.add(TextSpan(text: isLast ? ' and ' : ', ', style: normalStyle));
+      }
+      spans.add(TextSpan(text: likedByFollowing[i], style: boldStyle));
+    }
+
+    if (others > 0) {
+      spans.add(TextSpan(text: ' and ', style: normalStyle));
+      spans.add(TextSpan(
+        text: '$others ${others == 1 ? "other" : "others"}',
+        style: boldStyle,
+      ));
+    }
+
+    return RichText(text: TextSpan(children: spans));
   }
 }
 
@@ -275,6 +946,11 @@ class FeedPostCard extends StatefulWidget {
     required this.onOpenUserProfile,
     this.onFollow,
     this.isFollowing = false,
+    this.followingAuthors = const {},
+    this.onFollowUser,
+    this.onUnfollowUser,
+    this.onHideNavBar,
+    this.onShowNavBar,
   });
 
   final FeedPost post;
@@ -289,6 +965,11 @@ class FeedPostCard extends StatefulWidget {
   final ValueChanged<String> onOpenUserProfile;
   final VoidCallback? onFollow;
   final bool isFollowing;
+  final Set<String> followingAuthors;
+  final Future<void> Function(String)? onFollowUser;
+  final Future<void> Function(String)? onUnfollowUser;
+  final VoidCallback? onHideNavBar;
+  final VoidCallback? onShowNavBar;
 
   @override
   State<FeedPostCard> createState() => _FeedPostCardState();
@@ -346,29 +1027,35 @@ class _FeedPostCardState extends State<FeedPostCard> {
     }
   }
 
-  void _openFullscreen(BuildContext context) {
+  void _openFullscreen(BuildContext context, {int initialIndex = 0}) {
+    widget.onHideNavBar?.call();
     Navigator.of(context).push(
       PageRouteBuilder(
         opaque: true,
-        pageBuilder: (_, _, _) => _FullscreenMediaViewer(url: widget.post.imageUrl),
+        pageBuilder: (_, _, _) => _FullscreenMediaViewer(
+          media: widget.post.media,
+          initialIndex: initialIndex,
+        ),
         transitionsBuilder: (_, animation, _, child) =>
             FadeTransition(opacity: animation, child: child),
       ),
-    );
+    ).whenComplete(() => widget.onShowNavBar?.call());
   }
 
   void _openLikers() {
     if (_likes == 0) return;
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
-      builder: (_) => _LikersSheet(
-        postId: widget.post.id,
-        token: widget.token,
-        onOpenUserProfile: widget.onOpenUserProfile,
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: false,
+        builder: (_) => _LikersSheet(
+          postId: widget.post.id,
+          token: widget.token,
+          currentUsername: widget.currentUser.username,
+          followingAuthors: widget.followingAuthors,
+          onFollow: widget.onFollowUser ?? (_) async {},
+          onUnfollow: widget.onUnfollowUser ?? (_) async {},
+          onOpenUserProfile: widget.onOpenUserProfile,
+        ),
       ),
     );
   }
@@ -468,18 +1155,12 @@ class _FeedPostCardState extends State<FeedPostCard> {
                   ),
                 ),
               ),
-            if (widget.post.imageUrl.isNotEmpty)
-              GestureDetector(
-                onTap: () => _openFullscreen(context),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: AspectRatio(
-                      aspectRatio: 1.08,
-                      child: _FeedMedia(url: widget.post.imageUrl),
-                    ),
-                  ),
+            if (widget.post.media.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _PostMediaCarousel(
+                  media: widget.post.media,
+                  onTap: (index) => _openFullscreen(context, initialIndex: index),
                 ),
               ),
             Padding(
@@ -516,6 +1197,18 @@ class _FeedPostCardState extends State<FeedPostCard> {
                 ],
               ),
             ),
+            if (widget.post.likedByFollowing.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                child: GestureDetector(
+                  onTap: _openLikers,
+                  child: _LikedByText(
+                    likedByFollowing: widget.post.likedByFollowing,
+                    totalLikes: _likes,
+                    isLight: isLight,
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Row(
@@ -523,7 +1216,7 @@ class _FeedPostCardState extends State<FeedPostCard> {
                   GestureDetector(
                     onTap: _openLikers,
                     child: Text(
-                      '$_likes likes',
+                      '$_likes ${_likes == 1 ? "like" : "likes"}',
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
                         color: isLight ? Colors.black : Colors.white,

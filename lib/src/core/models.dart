@@ -1,3 +1,12 @@
+class MediaItem {
+  const MediaItem({required this.type, required this.url, this.duration});
+  final String type; // 'image' or 'video'
+  final String url;
+  final double? duration;
+  bool get isVideo => type == 'video';
+  bool get isImage => type == 'image';
+}
+
 class AuthSession {
   const AuthSession({required this.token, required this.user});
   final String token;
@@ -59,10 +68,12 @@ class FeedPost {
     required this.city,
     required this.text,
     required this.imageUrl,
+    required this.media,
     required this.likes,
     required this.comments,
     required this.minutesAgo,
     required this.following,
+    required this.likedByFollowing,
   });
 
   final int id;
@@ -71,10 +82,12 @@ class FeedPost {
   final String city;
   final String text;
   final String imageUrl;
+  final List<MediaItem> media;
   int likes;
   final List<FeedComment> comments;
   final int minutesAgo;
   final bool following;
+  final List<String> likedByFollowing;
   bool liked = false;
   bool saved = false;
 
@@ -84,6 +97,30 @@ class FeedPost {
         .whereType<Map<String, dynamic>>()
         .map(FeedComment.fromJson)
         .toList();
+    final likedByFollowing = (json['likedByFollowing'] as List<dynamic>? ?? const [])
+        .whereType<String>()
+        .toList();
+
+    // Parse media array; fall back to legacy imageUrl for old posts
+    final rawMedia = json['media'];
+    List<MediaItem> media;
+    if (rawMedia is List && rawMedia.isNotEmpty) {
+      media = rawMedia
+          .whereType<Map<String, dynamic>>()
+          .map((m) => MediaItem(
+                type: m['type']?.toString() ?? 'image',
+                url: m['url']?.toString() ?? '',
+                duration: (m['duration'] as num?)?.toDouble(),
+              ))
+          .where((m) => m.url.isNotEmpty)
+          .toList();
+    } else {
+      final imageUrl = json['imageUrl']?.toString() ?? '';
+      media = imageUrl.isNotEmpty
+          ? [MediaItem(type: 'image', url: imageUrl)]
+          : [];
+    }
+
     final post = FeedPost(
       id: parseInt(json['id']),
       author: json['author']?.toString() ?? 'Anonymous',
@@ -91,10 +128,12 @@ class FeedPost {
       city: json['city']?.toString() ?? '',
       text: json['text']?.toString() ?? '',
       imageUrl: json['imageUrl']?.toString() ?? '',
+      media: media,
       likes: parseInt(json['likes']),
       comments: comments,
       minutesAgo: parseInt(json['minutesAgo']),
       following: json['following'] != false,
+      likedByFollowing: likedByFollowing,
     );
     post.liked = json['liked'] == true;
     post.saved = json['saved'] == true;

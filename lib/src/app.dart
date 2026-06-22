@@ -32,10 +32,9 @@ class _NeatAppState extends State<NeatApp> {
   }
 
   Future<void> _setTheme(ThemeMode mode) async {
+    if (mounted) setState(() => _themeMode = mode);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_themeKey, mode == ThemeMode.light ? 'light' : 'dark');
-    if (!mounted) return;
-    setState(() => _themeMode = mode);
   }
 
   ThemeData _darkTheme() {

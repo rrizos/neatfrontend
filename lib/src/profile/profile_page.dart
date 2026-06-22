@@ -26,6 +26,8 @@ class ProfilePage extends StatefulWidget {
     required this.onThemeModeChanged,
     this.initialPostId,
     this.onOpenProfileAtPost,
+    this.onHideNavBar,
+    this.onShowNavBar,
   });
   final String username;
   final UserProfile currentUser;
@@ -39,6 +41,8 @@ class ProfilePage extends StatefulWidget {
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final int? initialPostId;
+  final VoidCallback? onHideNavBar;
+  final VoidCallback? onShowNavBar;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -53,6 +57,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   late final TabController _tabController;
   List<FeedPost>? _savedPosts;
   bool _savedLoading = false;
+  final Set<String> _followingAuthors = {};
 
   @override
   void initState() {
@@ -60,6 +65,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_onTabChanged);
     _load();
+    _loadFollowingAuthors();
   }
 
   @override
@@ -110,6 +116,65 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
   }
 
+  Future<void> _loadFollowingAuthors() async {
+    try {
+      final res = await http.get(
+        followingEndpoint(widget.currentUser.username),
+        headers: authGetHeaders(widget.token),
+      );
+      if (res.statusCode != 200 || !mounted) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final usernames = (decoded['users'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((u) => u['username']?.toString() ?? '')
+          .where((u) => u.isNotEmpty)
+          .toSet();
+      setState(() {
+        _followingAuthors
+          ..clear()
+          ..addAll(usernames);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _followUser(String username) async {
+    setState(() => _followingAuthors.add(username));
+    final res = await http.post(
+      followEndpoint(username),
+      headers: authJsonHeaders(widget.token),
+      body: jsonEncode({'follow': true}),
+    );
+    if (res.statusCode == 401) {
+      setState(() => _followingAuthors.remove(username));
+      await widget.onLogout();
+      return;
+    }
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      if (mounted) setState(() => _followingAuthors.remove(username));
+    } else if (mounted) {
+      await _loadFollowingAuthors();
+    }
+  }
+
+  Future<void> _unfollowUser(String username) async {
+    setState(() => _followingAuthors.remove(username));
+    final res = await http.post(
+      followEndpoint(username),
+      headers: authJsonHeaders(widget.token),
+      body: jsonEncode({'follow': false}),
+    );
+    if (res.statusCode == 401) {
+      setState(() => _followingAuthors.add(username));
+      await widget.onLogout();
+      return;
+    }
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      if (mounted) setState(() => _followingAuthors.add(username));
+    } else if (mounted) {
+      await _loadFollowingAuthors();
+    }
+  }
+
   Future<void> _toggleFollow() async {
     final profile = _profile;
     if (profile == null) return;
@@ -156,6 +221,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       decoded['conversation'] as Map<String, dynamic>,
     );
     if (!mounted) return;
+    widget.onHideNavBar?.call();
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ConversationPage(
@@ -175,6 +241,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         ),
       ),
     );
+    widget.onShowNavBar?.call();
   }
 
   Future<bool> _likePost(FeedPost post) async {
@@ -206,6 +273,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _openMoreSheet(FeedPost post) {
+    widget.onHideNavBar?.call();
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
       context: context,
@@ -235,7 +303,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           ],
         ),
       ),
-    );
+    ).whenComplete(() => widget.onShowNavBar?.call());
   }
 
   Widget _buildPostCard(FeedPost post, {Key? key}) {
@@ -244,6 +312,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       post: post,
       token: widget.token,
       currentUser: widget.currentUser,
+      followingAuthors: _followingAuthors,
+      onFollowUser: _followUser,
+      onUnfollowUser: _unfollowUser,
       onLike: () => _likePost(post),
       onSave: () => _savePost(post),
       onShare: () => showShareSheet(
@@ -301,6 +372,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final profile = _profile;
     if (profile == null) return;
 
+    widget.onHideNavBar?.call();
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -324,6 +396,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         onThemeModeChanged: widget.onThemeModeChanged,
       ),
     );
+    widget.onShowNavBar?.call();
   }
 
   Future<void> _openUserList({
@@ -338,6 +411,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         .map(UserProfile.fromJson)
         .toList();
     if (!mounted) return;
+    widget.onHideNavBar?.call();
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => _UserListPage(
@@ -352,6 +426,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         ),
       ),
     );
+    widget.onShowNavBar?.call();
   }
 
   @override

@@ -42,6 +42,8 @@ dependencies:
   record: 4.4.4
   audioplayers: ^6.1.0
   path_provider: ^2.1.5
+  video_player: ^2.9.2
+  giphy_flutter_sdk: ^1.1.0
 
 dev_dependencies:
   flutter_test:

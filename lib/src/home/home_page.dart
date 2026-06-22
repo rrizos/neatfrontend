@@ -1,8 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:giphy_flutter_sdk/giphy_dialog.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_content_type.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_media.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_settings.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
@@ -36,6 +42,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  static final _kTabChannel = const MethodChannel('com.neat/tabbar');
+
   final TextEditingController _compose = TextEditingController();
   final ImagePicker _imagePicker = ImagePicker();
   final List<FeedPost> _posts = [];
@@ -45,49 +53,51 @@ class _HomePageState extends State<HomePage> {
   final ScrollController _feedScroll = ScrollController();
   int _nav = 0;
   int _selectedTab = 0;
-  int? _pendingEventsTab;
   final Set<int> _visitedTabs = <int>{0};
   bool _loading = true;
   String? _activeCity;
-  String _composeImageUrl = '';
+  final _composeMedia = <_ComposeMedia>[];
   bool _showInlineProfile = false;
   String _inlineProfileUsername = '';
   int? _inlinePostId;
+  bool _isIOS26 = false;
+
+  static bool _detectIOS26() {
+    if (!Platform.isIOS) return false;
+    final major = int.tryParse(
+        Platform.operatingSystemVersion.split('.').first) ?? 0;
+    return major >= 26;
+  }
+
   @override
   void initState() {
     super.initState();
+    _isIOS26 = _detectIOS26();
+    _setupNativeTabChannel();
     _load();
     _loadNotifications(silent: true);
   }
 
+  void _setupNativeTabChannel() {
+    _kTabChannel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'onTabTapped':
+          _onNavTap(call.arguments as int);
+        case 'nativeTabBarReady':
+          // Native iOS 26 tab bar is live — switch Flutter layout to placeholder.
+          if (!_isIOS26 && mounted) setState(() => _isIOS26 = true);
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _kTabChannel.setMethodCallHandler(null);
     _compose.dispose();
     _feedScroll.dispose();
     super.dispose();
   }
 
-  Uint8List? _dataUrlBytes(String value) {
-    if (!value.startsWith('data:')) return null;
-    final comma = value.indexOf(',');
-    if (comma < 0) return null;
-    try {
-      return base64Decode(value.substring(comma + 1));
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Widget _mediaPreview(String value, {BoxFit fit = BoxFit.cover}) {
-    final bytes = _dataUrlBytes(value);
-    if (bytes != null) {
-      return Image.memory(bytes, fit: fit);
-    }
-    if (value.isNotEmpty) {
-      return Image.network(value, fit: fit);
-    }
-    return const SizedBox.shrink();
-  }
 
   Future<void> _load() async {
     try {
@@ -217,37 +227,89 @@ class _HomePageState extends State<HomePage> {
     final text = _compose.text.trim();
     if (text.isEmpty) return;
     final body = <String, dynamic>{'text': text};
-    if (_composeImageUrl.isNotEmpty) body['imageUrl'] = _composeImageUrl;
-    final res = await http.post(
-      postsEndpoint(),
-      headers: authJsonHeaders(widget.session.token),
-      body: jsonEncode(body),
-    );
-    if (res.statusCode == 201) {
-      _compose.clear();
-      _composeImageUrl = '';
-      await _load();
-      if (mounted) Navigator.of(context).pop();
+    if (_composeMedia.isNotEmpty) {
+      body['media'] = _composeMedia
+          .map((m) => {'type': m.type, 'url': m.url})
+          .toList();
+      final firstImage = _composeMedia.firstWhere(
+        (m) => !m.isVideo,
+        orElse: () => _composeMedia.first,
+      );
+      if (!firstImage.isVideo) body['imageUrl'] = firstImage.url;
+    }
+    try {
+      final res = await http.post(
+        postsEndpoint(),
+        headers: authJsonHeaders(widget.session.token),
+        body: jsonEncode(body),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 201) {
+        _compose.clear();
+        setState(() => _composeMedia.clear());
+        Navigator.of(context).pop();
+        _load();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to post. Please try again.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Network error. Please try again.')),
+        );
+      }
     }
   }
 
-  Future<void> _pickComposeImage() async {
-    final picked = await _imagePicker.pickImage(
-      source: ImageSource.gallery,
+  Future<void> _pickComposeImages(StateSetter setPageState) async {
+    final remaining = 4 - _composeMedia.where((m) => !m.isVideo).length;
+    if (remaining <= 0) return;
+    final picked = await _imagePicker.pickMultiImage(
       imageQuality: 88,
       maxWidth: 1600,
     );
-    if (picked == null) return;
+    if (picked.isEmpty || !mounted) return;
+    final toAdd = picked.take(remaining);
+    final newItems = <_ComposeMedia>[];
+    for (final f in toAdd) {
+      final bytes = await f.readAsBytes();
+      final ext = f.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+      newItems.add(_ComposeMedia.image(
+        url: 'data:image/$ext;base64,${base64Encode(bytes)}',
+        imageBytes: bytes,
+      ));
+    }
+    if (!mounted) return;
+    setState(() {
+      _composeMedia.removeWhere((m) => m.isVideo);
+      _composeMedia.addAll(newItems);
+    });
+    setPageState(() {});
+  }
+
+  Future<void> _pickComposeVideo(StateSetter setPageState) async {
+    final picked = await _imagePicker.pickVideo(
+      source: ImageSource.gallery,
+      maxDuration: const Duration(seconds: 60),
+    );
+    if (picked == null || !mounted) return;
     final bytes = await picked.readAsBytes();
     if (!mounted) return;
     setState(() {
-      _composeImageUrl =
-          'data:image/${picked.name.toLowerCase().endsWith(".png") ? "png" : "jpeg"};base64,${base64Encode(bytes)}';
+      _composeMedia.clear();
+      _composeMedia.add(_ComposeMedia.video(
+        url: 'data:video/mp4;base64,${base64Encode(bytes)}',
+        videoPath: picked.path,
+      ));
     });
+    setPageState(() {});
   }
 
-  void _clearComposeImage() {
-    setState(() => _composeImageUrl = '');
+  void _removeComposeMedia(int index, StateSetter setPageState) {
+    setState(() => _composeMedia.removeAt(index));
+    setPageState(() {});
   }
 
   Future<bool> _likePost(FeedPost post) async {
@@ -372,13 +434,26 @@ class _HomePageState extends State<HomePage> {
     await _load();
   }
 
+  Future<void> _openEvents({int initialTab = 0}) async {
+    _hideNativeBar();
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EventsPage(
+          token: widget.session.token,
+          city: widget.session.user.city,
+          currentUser: widget.session.user,
+          onOpenUserProfile: _openProfile,
+          preferredTab: initialTab,
+        ),
+      ),
+    );
+    _showNativeBar();
+  }
+
   Future<void> _openNotificationTarget(NotificationItem item, {String? eventType}) async {
     if (item.targetType == 'event') {
       final tab = eventType == 'community' ? 1 : 0;
-      setState(() { _nav = 4; _visitedTabs.add(4); _pendingEventsTab = tab; });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) setState(() => _pendingEventsTab = null);
-      });
+      await _openEvents(initialTab: tab);
       return;
     }
     if (item.targetType == 'post' && item.targetId.isNotEmpty) {
@@ -402,6 +477,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openNotifications() {
+    _hideNativeBar();
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
       context: context,
@@ -424,10 +500,11 @@ class _HomePageState extends State<HomePage> {
           },
         ),
       ),
-    );
+    ).whenComplete(_showNativeBar);
   }
 
   void _openComments(FeedPost post) {
+    _hideNativeBar();
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
       context: context,
@@ -439,235 +516,473 @@ class _HomePageState extends State<HomePage> {
         session: widget.session,
         onRefresh: () {},
       ),
-    );
+    ).whenComplete(_showNativeBar);
   }
 
   void _openCreatePost() {
     _compose.clear();
-    _composeImageUrl = '';
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: false,
-      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff111111),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) {
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 8,
-              bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
-            ),
-            child: StatefulBuilder(
-              builder: (context, setSheetState) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          style: TextButton.styleFrom(
-                            foregroundColor: const Color(0xffa0a0a0),
-                            padding: EdgeInsets.zero,
-                          ),
-                          child: const Text('Cancel'),
+    _composeMedia.clear();
+    if (_isIOS26) _kTabChannel.invokeMethod('syncTab', _nav);
+    _hideNativeBar();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (pageContext) {
+          final isLight = Theme.of(pageContext).brightness == Brightness.light;
+          final dimColor = isLight ? Colors.black : Colors.white;
+          return StatefulBuilder(
+            builder: (pageContext, setPageState) {
+          // ── helper: single media cell with X button ──────────────────────
+          Widget mediaCell(_ComposeMedia item, int index, double size) {
+            Widget preview;
+            if (item.isVideo) {
+              preview = Container(
+                color: const Color(0xff1a1a1a),
+                child: const Center(
+                  child: Icon(Icons.videocam_rounded,
+                      color: Colors.white54, size: 36),
+                ),
+              );
+            } else if (item.imageBytes != null) {
+              preview = Image.memory(item.imageBytes!, fit: BoxFit.cover);
+            } else {
+              preview = Image.network(item.url, fit: BoxFit.cover);
+            }
+            return SizedBox(
+              width: size,
+              height: size,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: preview,
+                  ),
+                  Positioned(
+                    top: 5,
+                    right: 5,
+                    child: GestureDetector(
+                      onTap: () => _removeComposeMedia(index, setPageState),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
                         ),
-                        const Spacer(),
-                        Text(
-                          'New post',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            color: isLight ? Colors.black : Colors.white,
-                          ),
-                        ),
-                        const Spacer(),
-                        ValueListenableBuilder<TextEditingValue>(
-                          valueListenable: _compose,
-                          builder: (context, value, _) {
-                            final canPost = value.text.trim().isNotEmpty;
-                            return FilledButton(
-                              onPressed: canPost ? _createPost : null,
-                              style: FilledButton.styleFrom(
-                                backgroundColor: isLight ? Colors.black : Colors.white,
-                                foregroundColor: isLight ? Colors.white : Colors.black,
-                                disabledBackgroundColor:
-                                    isLight ? const Color(0xffd9dee6) : const Color(0xff2f2f2f),
-                                disabledForegroundColor:
-                                    isLight ? const Color(0xff8a8a8a) : const Color(0xff8a8a8a),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                              ),
-                              child: const Text('Post'),
-                            );
-                          },
-                        ),
-                      ],
+                        padding: const EdgeInsets.all(5),
+                        child: const Icon(Icons.close_rounded,
+                            color: Colors.white, size: 14),
+                      ),
                     ),
-                    const SizedBox(height: 16),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        CircleAvatar(
-                          radius: 20,
-                          backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                          child: Text(
-                            initialFor(widget.session.user.username),
-                            style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                          ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // ── helper: media grid (1→full-width, 2-4→grid) ─────────────────
+          Widget buildMediaGrid(double width) {
+            if (_composeMedia.isEmpty) return const SizedBox.shrink();
+            final gap = 6.0;
+            final half = (width - gap) / 2;
+
+            if (_composeMedia.length == 1) {
+              final item = _composeMedia.first;
+              Widget preview;
+              if (item.isVideo) {
+                preview = Container(
+                  color: const Color(0xff1a1a1a),
+                  child: const Center(
+                    child: Icon(Icons.videocam_rounded,
+                        color: Colors.white54, size: 48),
+                  ),
+                );
+              } else if (item.imageBytes != null) {
+                preview = Image.memory(item.imageBytes!, fit: BoxFit.cover);
+              } else {
+                preview = Image.network(item.url, fit: BoxFit.cover);
+              }
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Stack(children: [
+                  AspectRatio(aspectRatio: 1.15, child: preview),
+                  Positioned(
+                    top: 10, right: 10,
+                    child: GestureDetector(
+                      onTap: () => _removeComposeMedia(0, setPageState),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            controller: _compose,
-                            minLines: 5,
-                            maxLines: 10,
-                            style: TextStyle(
-                              color: isLight ? Colors.black : Colors.white,
-                              fontSize: 17,
-                              height: 1.4,
-                            ),
-                            cursorColor: isLight ? Colors.black : Colors.white,
-                            decoration: InputDecoration(
-                              hintText: "What's happening?",
-                              hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
-                              border: InputBorder.none,
-                            ),
-                          ),
-                        ),
-                      ],
+                        padding: const EdgeInsets.all(7),
+                        child: const Icon(Icons.close_rounded,
+                            color: Colors.white, size: 17),
+                      ),
                     ),
-                    if (_composeImageUrl.isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: Stack(
+                  ),
+                ]),
+              );
+            }
+
+            // 2-4 items: grid
+            final items = _composeMedia;
+            if (items.length == 2) {
+              return Row(
+                children: [
+                  mediaCell(items[0], 0, half),
+                  SizedBox(width: gap),
+                  mediaCell(items[1], 1, half),
+                ],
+              );
+            }
+            if (items.length == 3) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  mediaCell(items[0], 0, half),
+                  SizedBox(width: gap),
+                  Column(
+                    children: [
+                      mediaCell(items[1], 1, half),
+                      SizedBox(height: gap),
+                      mediaCell(items[2], 2, half),
+                    ],
+                  ),
+                ],
+              );
+            }
+            // 4 items: 2×2
+            return Column(
+              children: [
+                Row(children: [
+                  mediaCell(items[0], 0, half),
+                  SizedBox(width: gap),
+                  mediaCell(items[1], 1, half),
+                ]),
+                SizedBox(height: gap),
+                Row(children: [
+                  mediaCell(items[2], 2, half),
+                  SizedBox(width: gap),
+                  mediaCell(items[3], 3, half),
+                ]),
+              ],
+            );
+          }
+
+              return Scaffold(
+                backgroundColor:
+                    isLight ? Colors.white : const Color(0xff111111),
+                body: SafeArea(
+                  bottom: false,
+                  child: Column(
+                    children: [
+                      // ── top bar ──────────────────────────────────────────
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
+                        child: Row(
                           children: [
-                            AspectRatio(
-                              aspectRatio: 1.15,
-                              child: _mediaPreview(
-                                _composeImageUrl,
-                                fit: BoxFit.cover,
+                            TextButton(
+                              onPressed: () => Navigator.of(pageContext).pop(),
+                              style: TextButton.styleFrom(
+                                foregroundColor: const Color(0xff606060),
+                                padding: EdgeInsets.zero,
+                                textStyle: const TextStyle(fontSize: 16),
+                              ),
+                              child: const Text('Cancel'),
+                            ),
+                            const Spacer(),
+                            Text(
+                              'New post',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: dimColor,
                               ),
                             ),
-                            Positioned(
-                              top: 10,
-                              right: 10,
-                              child: GestureDetector(
-                                onTap: () {
-                                  _clearComposeImage();
-                                  setSheetState(() {});
-                                },
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: isLight ? Colors.black.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.65),
-                                    shape: BoxShape.circle,
+                            const Spacer(),
+                            ValueListenableBuilder<TextEditingValue>(
+                              valueListenable: _compose,
+                              builder: (_, value, _) {
+                                final canPost = value.text.trim().isNotEmpty;
+                                return FilledButton(
+                                  onPressed: canPost ? _createPost : null,
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: dimColor,
+                                    foregroundColor: isLight
+                                        ? Colors.white
+                                        : Colors.black,
+                                    disabledBackgroundColor: isLight
+                                        ? const Color(0xffd9dee6)
+                                        : const Color(0xff2f2f2f),
+                                    disabledForegroundColor:
+                                        const Color(0xff8a8a8a),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 18, vertical: 12),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(999),
+                                    ),
                                   ),
-                                  padding: const EdgeInsets.all(8),
-                                  child: Icon(
-                                    Icons.close_rounded,
-                                    size: 18,
-                                    color: isLight ? Colors.black : Colors.white,
-                                  ),
-                                ),
-                              ),
+                                  child: const Text('Post'),
+                                );
+                              },
                             ),
                           ],
                         ),
                       ),
+                      Divider(
+                        height: 1,
+                        color: isLight
+                            ? const Color(0xffd9dee6)
+                            : const Color(0xff242424),
+                      ),
+                      // ── scrollable compose area ──────────────────────────
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding:
+                              const EdgeInsets.fromLTRB(16, 20, 16, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  PostAvatar(
+                                    username:
+                                        widget.session.user.username,
+                                    avatarUrl:
+                                        widget.session.user.avatarUrl,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        TextField(
+                                          controller: _compose,
+                                          autofocus: true,
+                                          maxLines: null,
+                                          style: TextStyle(
+                                            color: dimColor,
+                                            fontSize: 17,
+                                            height: 1.4,
+                                          ),
+                                          cursorColor: dimColor,
+                                          decoration: InputDecoration(
+                                            hintText: "What's happening?",
+                                            hintStyle: TextStyle(
+                                              color: isLight
+                                                  ? const Color(0xff616161)
+                                                  : const Color(0xff8f8f8f),
+                                            ),
+                                            border: InputBorder.none,
+                                            contentPadding: EdgeInsets.zero,
+                                          ),
+                                        ),
+                                        // ── media grid preview ───────────
+                                        if (_composeMedia.isNotEmpty) ...[
+                                          const SizedBox(height: 14),
+                                          LayoutBuilder(
+                                            builder: (_, constraints) =>
+                                                buildMediaGrid(
+                                                    constraints.maxWidth),
+                                          ),
+                                        ],
+                                        // ── action row ───────────────────
+                                        const SizedBox(height: 14),
+                                        Row(
+                                          children: [
+                                            // Photos (max 4, disabled if video present)
+                                            if (!_composeMedia.any(
+                                                (m) => m.isVideo) &&
+                                                _composeMedia.length < 4)
+                                              _ComposeAction(
+                                                icon: Icons.image_outlined,
+                                                onTap: () =>
+                                                    _pickComposeImages(
+                                                        setPageState),
+                                              ),
+                                            // Video (disabled if any media present)
+                                            if (_composeMedia.isEmpty)
+                                              _ComposeAction(
+                                                icon: Icons
+                                                    .videocam_outlined,
+                                                onTap: () =>
+                                                    _pickComposeVideo(
+                                                        setPageState),
+                                              ),
+                                            // GIF (disabled if any media present)
+                                            if (_composeMedia.isEmpty)
+                                              _ComposeAction(
+                                                icon: Icons
+                                                    .gif_box_outlined,
+                                                onTap: () async {
+                                                  final completer =
+                                                      Completer<String?>();
+                                                  final listener =
+                                                      _GifPickerListener(
+                                                    onSelect:
+                                                        (GiphyMedia media) {
+                                                      final url = media
+                                                              .images
+                                                              .fixedWidth
+                                                              ?.gifUrl ??
+                                                          media.images
+                                                              .original
+                                                              ?.gifUrl ??
+                                                          '';
+                                                      if (!completer
+                                                          .isCompleted) {
+                                                        completer.complete(
+                                                          url.isNotEmpty
+                                                              ? url
+                                                              : null,
+                                                        );
+                                                      }
+                                                    },
+                                                    onDismissed: () {
+                                                      if (!completer
+                                                          .isCompleted) {
+                                                        completer
+                                                            .complete(null);
+                                                      }
+                                                    },
+                                                  );
+                                                  GiphyDialog.instance
+                                                      .addListener(listener);
+                                                  GiphyDialog.instance
+                                                      .configure(
+                                                    settings: GiphySettings(
+                                                      theme: GiphyTheme
+                                                          .automaticTheme,
+                                                      mediaTypeConfig: [
+                                                        GiphyContentType.gif,
+                                                        GiphyContentType
+                                                            .sticker,
+                                                      ],
+                                                      selectedContentType:
+                                                          GiphyContentType
+                                                              .gif,
+                                                      showSuggestionsBar:
+                                                          true,
+                                                      showConfirmationScreen:
+                                                          false,
+                                                    ),
+                                                  );
+                                                  GiphyDialog.instance
+                                                      .show();
+                                                  final url =
+                                                      await completer
+                                                          .future;
+                                                  GiphyDialog.instance
+                                                      .removeListener(
+                                                          listener);
+                                                  if (!mounted) return;
+                                                  if (url != null &&
+                                                      url.isNotEmpty) {
+                                                    setState(() {
+                                                      _composeMedia.clear();
+                                                      _composeMedia.add(
+                                                        _ComposeMedia.image(
+                                                          url: url,
+                                                          imageBytes: null,
+                                                        ),
+                                                      );
+                                                    });
+                                                    setPageState(() {});
+                                                  }
+                                                },
+                                              ),
+                                            const Spacer(),
+                                            ValueListenableBuilder<
+                                                TextEditingValue>(
+                                              valueListenable: _compose,
+                                              builder: (_, value, _) {
+                                                final count =
+                                                    value.text.length;
+                                                return AnimatedContainer(
+                                                  duration: const Duration(
+                                                      milliseconds: 180),
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 8),
+                                                  decoration: BoxDecoration(
+                                                    color: count > 240
+                                                        ? const Color(
+                                                            0xff301818)
+                                                        : (isLight
+                                                            ? const Color(
+                                                                0xffeef1f5)
+                                                            : const Color(
+                                                                0xff1a1a1a)),
+                                                    borderRadius:
+                                                        BorderRadius
+                                                            .circular(999),
+                                                    border: Border.all(
+                                                      color: count > 240
+                                                          ? const Color(
+                                                              0xff7a2f2f)
+                                                          : (isLight
+                                                              ? const Color(
+                                                                  0xffd9dee6)
+                                                              : const Color(
+                                                                  0xff2c2c2c)),
+                                                    ),
+                                                  ),
+                                                  child: Text(
+                                                    '$count/280',
+                                                    style: TextStyle(
+                                                      color: count > 240
+                                                          ? const Color(
+                                                              0xffff9a9a)
+                                                          : (isLight
+                                                              ? const Color(
+                                                                  0xff616161)
+                                                              : const Color(
+                                                                  0xff9a9a9a)),
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
-                    const SizedBox(height: 12),
-                    Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        _ComposeAction(
-                          icon: Icons.image_outlined,
-                          onTap: () async {
-                            await _pickComposeImage();
-                            setSheetState(() {});
-                          },
-                        ),
-                        _ComposeAction(
-                          icon: Icons.gif_box_outlined,
-                          onTap: () async {
-                            final url = await showModalBottomSheet<String>(
-                              context: context,
-                              isScrollControlled: true,
-                              showDragHandle: true,
-                              backgroundColor:
-                                  isLight ? Colors.white : const Color(0xff141414),
-                              builder: (_) => const _GifPickerSheet(),
-                            );
-                            if (url != null && url.isNotEmpty) {
-                              _composeImageUrl = url;
-                              setSheetState(() {});
-                            }
-                          },
-                        ),
-                        _ComposeAction(
-                          icon: Icons.poll_outlined,
-                          onTap: () {},
-                        ),
-                        const Spacer(),
-                        ValueListenableBuilder<TextEditingValue>(
-                          valueListenable: _compose,
-                          builder: (context, value, _) {
-                            final count = value.text.length;
-                            return AnimatedContainer(
-                              duration: const Duration(milliseconds: 180),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: count > 240
-                                    ? const Color(0xff301818)
-                                    : (isLight ? const Color(0xffeef1f5) : const Color(0xff1a1a1a)),
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(
-                                  color: count > 240
-                                      ? const Color(0xff7a2f2f)
-                                      : (isLight ? const Color(0xffd9dee6) : const Color(0xff2c2c2c)),
-                                ),
-                              ),
-                              child: Text(
-                                '$count/280',
-                                style: TextStyle(
-                                  color: count > 240
-                                      ? const Color(0xffff9a9a)
-                                      : (isLight ? const Color(0xff616161) : const Color(0xff9a9a9a)),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    ).whenComplete(_showNativeBar);
+  }
+
+  void _hideNativeBar() {
+    if (_isIOS26) _kTabChannel.invokeMethod('hideTabBar');
+  }
+
+  void _showNativeBar() {
+    if (_isIOS26 && mounted) _kTabChannel.invokeMethod('showTabBar');
   }
 
   void _openSheet({required String title, required Widget child}) {
+    _hideNativeBar();
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -696,7 +1011,7 @@ class _HomePageState extends State<HomePage> {
           ),
         );
       },
-    );
+    ).whenComplete(_showNativeBar);
   }
 
   @override
@@ -715,6 +1030,7 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+      extendBody: _isIOS26,
       body: SafeArea(
         child: Column(
           children: [
@@ -722,23 +1038,26 @@ class _HomePageState extends State<HomePage> {
               notifications: _notificationsList
                   .where((item) => !item.isRead)
                   .length,
-              userAvatarUrl: widget.session.user.avatarUrl,
-              onProfileTap: () => _openProfile(widget.session.user.username),
+              onEventsTap: () => _openEvents(),
               onNotificationsTap: _openNotifications,
-              onMessagesTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => MessagesPage(
-                    token: widget.session.token,
-                    currentUsername: widget.session.user.username,
-                    suggestedUsers: _followingProfiles,
-                    onLogout: widget.onLogout,
-                    onOpenPost: (author, postId) {
-                      Navigator.popUntil(context, (route) => route.isFirst);
-                      _openProfileAtPost(author, postId);
-                    },
+              onMessagesTap: () async {
+                _hideNativeBar();
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => MessagesPage(
+                      token: widget.session.token,
+                      currentUsername: widget.session.user.username,
+                      suggestedUsers: _followingProfiles,
+                      onLogout: widget.onLogout,
+                      onOpenPost: (author, postId) {
+                        Navigator.popUntil(context, (route) => route.isFirst);
+                        _openProfileAtPost(author, postId);
+                      },
+                    ),
                   ),
-                ),
-              ),
+                );
+                _showNativeBar();
+              },
             ),
             Divider(
               height: 1,
@@ -797,6 +1116,9 @@ class _HomePageState extends State<HomePage> {
                                       post: post,
                                       token: widget.session.token,
                                       currentUser: widget.session.user,
+                                      followingAuthors: _followingAuthors,
+                                      onFollowUser: _follow,
+                                      onUnfollowUser: _unfollow,
                                       onLike: () => _likePost(post),
                                       onSave: () => _savePost(post),
                                       onShare: () => showShareSheet(
@@ -845,6 +1167,8 @@ class _HomePageState extends State<HomePage> {
                                           ? () => _follow(post.author)
                                           : null,
                                       isFollowing: _followingAuthors.contains(post.author),
+                                      onHideNavBar: _hideNativeBar,
+                                      onShowNavBar: _showNativeBar,
                                     );
                                   },
                                 ),
@@ -864,22 +1188,16 @@ class _HomePageState extends State<HomePage> {
                         const SizedBox.shrink(),
                         // 3: Map — mounted lazily on first visit
                         _visitedTabs.contains(3)
-                            ? CityMapView(
-                                token: widget.session.token,
-                                onOpenUserProfile: _openProfile,
-                                onCitySelected: _openCityFeed,
+                            ? RepaintBoundary(
+                                child: CityMapView(
+                                  token: widget.session.token,
+                                  onOpenUserProfile: _openProfile,
+                                  onCitySelected: _openCityFeed,
+                                ),
                               )
                             : const SizedBox.shrink(),
-                        // 4: Events — mounted lazily on first visit
-                        _visitedTabs.contains(4)
-                            ? EventsPage(
-                                token: widget.session.token,
-                                city: widget.session.user.city,
-                                currentUser: widget.session.user,
-                                onOpenUserProfile: _openProfile,
-                                preferredTab: _pendingEventsTab,
-                              )
-                            : const SizedBox.shrink(),
+                        // 4: Profile (intercepted — shown as inline overlay)
+                        const SizedBox.shrink(),
                       ],
                     ),
                   ),
@@ -901,6 +1219,8 @@ class _HomePageState extends State<HomePage> {
                         initialPostId: _inlinePostId,
                         themeMode: widget.themeMode,
                         onThemeModeChanged: widget.onThemeModeChanged,
+                        onHideNavBar: _hideNativeBar,
+                        onShowNavBar: _showNativeBar,
                       ),
                     ),
                 ],
@@ -909,83 +1229,142 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(26),
-          child: BottomNavigationBar(
-            currentIndex: _nav,
-            type: BottomNavigationBarType.fixed,
-            showSelectedLabels: false,
-            showUnselectedLabels: false,
-            selectedItemColor: isLight ? Colors.black : Colors.white,
-            unselectedItemColor:
-                isLight ? const Color(0xff6d6d6d) : const Color(0xff8c8c8c),
-            elevation: 0,
-            backgroundColor: isLight ? Colors.white : const Color(0xff151515),
-            iconSize: 26,
-            selectedFontSize: 0,
-            unselectedFontSize: 0,
-            onTap: (i) {
-              if (i == 2) {
-                _openCreatePost();
-                return;
-              }
-              if (i == 0) {
-                _goHome();
-                return;
-              }
-              setState(() {
-                _nav = i;
-                _visitedTabs.add(i);
-                _showInlineProfile = false;
-              });
-            },
-            items: const [
-              BottomNavigationBarItem(
-                icon: Icon(Icons.home_outlined),
-                activeIcon: Icon(Icons.home_rounded),
-                label: 'Home',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.search_outlined),
-                activeIcon: Icon(Icons.search_rounded),
-                label: 'Search',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.add_circle_outline_rounded),
-                activeIcon: Icon(Icons.add_circle_rounded),
-                label: 'Create',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.map_outlined),
-                activeIcon: Icon(Icons.map_rounded),
-                label: 'Map',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.event_note_outlined),
-                activeIcon: Icon(Icons.event_note_rounded),
-                label: 'Events',
-              ),
-            ],
-          ),
+      // iOS 26: native UITabBar is added as a subview in SceneDelegate.
+      // A transparent SizedBox(49) tells Flutter's layout how much bottom
+      // space to reserve so SafeArea pads content correctly.
+      bottomNavigationBar: _isIOS26
+          ? SizedBox(height: 49 + MediaQuery.of(context).viewPadding.bottom)
+          : _buildLegacyNavBar(isLight),
+    );
+  }
+
+  // ── iOS legacy nav bar ─────────────────────────────────────────────────────
+
+  Widget _buildLegacyNavBar(bool isLight) {
+    final avatarBytes   = decodeAvatarUrl(widget.session.user.avatarUrl);
+    final activeColor   = isLight ? Colors.black : Colors.white;
+    final imageProvider = avatarBytes != null ? MemoryImage(avatarBytes) : null;
+
+    Widget profileIcon({required bool active}) {
+      if (!active) {
+        return CircleAvatar(
+          radius: 13,
+          backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+          foregroundImage: imageProvider,
+          child: imageProvider == null
+              ? Icon(Icons.person_rounded, size: 15,
+                  color: isLight ? const Color(0xff6d6d6d) : const Color(0xff8c8c8c))
+              : null,
+        );
+      }
+      return Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: activeColor, width: 2),
+        ),
+        alignment: Alignment.center,
+        child: CircleAvatar(
+          radius: 12,
+          backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+          foregroundImage: imageProvider,
+          child: imageProvider == null
+              ? Icon(Icons.person_rounded, size: 13, color: activeColor)
+              : null,
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(26),
+        child: BottomNavigationBar(
+          currentIndex: _nav,
+          type: BottomNavigationBarType.fixed,
+          showSelectedLabels: false,
+          showUnselectedLabels: false,
+          selectedItemColor: activeColor,
+          unselectedItemColor:
+              isLight ? const Color(0xff6d6d6d) : const Color(0xff8c8c8c),
+          elevation: 0,
+          backgroundColor: isLight ? Colors.white : const Color(0xff151515),
+          iconSize: 26,
+          selectedFontSize: 0,
+          unselectedFontSize: 0,
+          onTap: _onNavTap,
+          items: [
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.home_outlined),
+              activeIcon: Icon(Icons.home_rounded),
+              label: 'Home',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.search_outlined),
+              activeIcon: Icon(Icons.search_rounded),
+              label: 'Search',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.add_circle_outline_rounded),
+              activeIcon: Icon(Icons.add_circle_rounded),
+              label: 'Create',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.map_outlined),
+              activeIcon: Icon(Icons.map_rounded),
+              label: 'Map',
+            ),
+            BottomNavigationBarItem(
+              icon: profileIcon(active: false),
+              activeIcon: profileIcon(active: true),
+              label: 'Profile',
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  void _onNavTap(int i) {
+    if (i == 2) {
+      _openCreatePost();
+      return;
+    }
+    if (i == 4) {
+      setState(() {
+        _nav = 4;
+        _visitedTabs.add(4);
+        _inlineProfileUsername = widget.session.user.username;
+        _inlinePostId = null;
+        _showInlineProfile = true;
+      });
+      if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 4);
+      return;
+    }
+    if (i == 0) {
+      _goHome();
+      if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 0);
+      return;
+    }
+    setState(() {
+      _nav = i;
+      _visitedTabs.add(i);
+      _showInlineProfile = false;
+    });
+    if (_isIOS26) _kTabChannel.invokeMethod('syncTab', i);
   }
 }
 
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.notifications,
-    required this.userAvatarUrl,
-    required this.onProfileTap,
+    required this.onEventsTap,
     required this.onNotificationsTap,
     required this.onMessagesTap,
   });
   final int notifications;
-  final String userAvatarUrl;
-  final VoidCallback onProfileTap;
+  final VoidCallback onEventsTap;
   final VoidCallback onNotificationsTap;
   final VoidCallback onMessagesTap;
   @override
@@ -1000,8 +1379,18 @@ class _TopBar extends StatelessWidget {
             const _LogoMark(),
             const Spacer(),
             GestureDetector(
-              onTap: onProfileTap,
-              child: _TopBarAvatar(url: userAvatarUrl),
+              onTap: onEventsTap,
+              child: SizedBox(
+                width: 40,
+                height: 40,
+                child: Center(
+                  child: Icon(
+                    Icons.event_note_outlined,
+                    color: isLight ? Colors.black : Colors.white,
+                    size: 26,
+                  ),
+                ),
+              ),
             ),
             const SizedBox(width: 8),
             Stack(
@@ -1230,31 +1619,6 @@ class _LogoMark extends StatelessWidget {
         color: isLight ? Colors.black : Colors.white,
         colorBlendMode: BlendMode.srcIn,
       ),
-    );
-  }
-}
-
-class _TopBarAvatar extends StatelessWidget {
-  const _TopBarAvatar({required this.url});
-
-  final String url;
-
-  @override
-  Widget build(BuildContext context) {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    Uint8List? bytes;
-    if (url.startsWith('data:')) {
-      final comma = url.indexOf(',');
-      if (comma > -1) {
-        try {
-          bytes = base64Decode(url.substring(comma + 1));
-        } catch (_) {}
-      }
-    }
-    return CircleAvatar(
-      radius: 15,
-      backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-      foregroundImage: bytes != null ? MemoryImage(bytes) : null,
     );
   }
 }
@@ -1998,6 +2362,24 @@ class _ComposeAction extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── Compose media item ───────────────────────────────────────────────────────
+
+class _ComposeMedia {
+  _ComposeMedia.image({required this.url, required this.imageBytes})
+      : type = 'image',
+        videoPath = null;
+  _ComposeMedia.video({required this.url, required this.videoPath})
+      : type = 'video',
+        imageBytes = null;
+
+  final String type; // 'image' or 'video'
+  final String url; // data: URL sent to backend
+  final Uint8List? imageBytes; // pre-decoded bytes for fast preview (images)
+  final String? videoPath; // local file path for video preview
+
+  bool get isVideo => type == 'video';
 }
 
 // ── Notifications sheet ─────────────────────────────────────────────────────
@@ -2839,278 +3221,17 @@ String _timeAgo(DateTime created) {
   return '${diff.inDays}d ago';
 }
 
-// ── GIF picker ────────────────────────────────────────────────────────────────
+// ── GIF picker listener ───────────────────────────────────────────────────────
 
-class _GifResult {
-  const _GifResult({required this.previewUrl, required this.fullUrl});
-  final String previewUrl;
-  final String fullUrl;
+class _GifPickerListener implements GiphyMediaSelectionListener {
+  _GifPickerListener({required this.onSelect, required this.onDismissed});
+  final void Function(GiphyMedia media) onSelect;
+  final VoidCallback onDismissed;
+
+  @override
+  void onMediaSelect(GiphyMedia media) => onSelect(media);
+
+  @override
+  void onDismiss() => onDismissed();
 }
 
-class _GifPickerSheet extends StatefulWidget {
-  const _GifPickerSheet();
-
-  @override
-  State<_GifPickerSheet> createState() => _GifPickerSheetState();
-}
-
-class _GifPickerSheetState extends State<_GifPickerSheet> {
-  // Replace with your own GIPHY API key from developers.giphy.com
-  static const _apiKey = 'dc6zaTOxFJmzC';
-  static const _limit = 24;
-
-  static const _categories = [
-    ('🔥 Trending', null),
-    ('😂 Reactions', 'reactions'),
-    ('❤️ Love', 'love'),
-    ('😂 LOL', 'lol'),
-    ('😢 Sad', 'sad'),
-    ('🎉 Celebrate', 'celebrate'),
-    ('😤 Angry', 'angry'),
-    ('👋 Hello', 'hello'),
-    ('🙏 Thanks', 'thank you'),
-    ('💪 Motivation', 'motivation'),
-    ('😴 Tired', 'tired'),
-    ('🤔 Thinking', 'thinking'),
-  ];
-
-  final _search = TextEditingController();
-  Timer? _debounce;
-  List<_GifResult> _gifs = const [];
-  bool _loading = true;
-  int _selectedCategory = 0;
-  bool _isSearching = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchCategory(0);
-  }
-
-  @override
-  void dispose() {
-    _search.dispose();
-    _debounce?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _fetchCategory(int index) async {
-    final query = _categories[index].$2;
-    if (mounted) setState(() { _loading = true; _selectedCategory = index; });
-    try {
-      final uri = query == null
-          ? Uri.parse(
-              'https://api.giphy.com/v1/gifs/trending?api_key=$_apiKey&limit=$_limit&rating=g',
-            )
-          : Uri.parse(
-              'https://api.giphy.com/v1/gifs/search'
-              '?api_key=$_apiKey&q=${Uri.encodeComponent(query)}&limit=$_limit&rating=g',
-            );
-      await _loadFrom(uri);
-    } catch (_) {} finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _fetchSearch(String query) async {
-    if (mounted) setState(() => _loading = true);
-    try {
-      final uri = Uri.parse(
-        'https://api.giphy.com/v1/gifs/search'
-        '?api_key=$_apiKey&q=${Uri.encodeComponent(query)}&limit=$_limit&rating=g',
-      );
-      await _loadFrom(uri);
-    } catch (_) {} finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _loadFrom(Uri uri) async {
-    final res = await http.get(uri);
-    if (!mounted) return;
-    if (res.statusCode == 200) {
-      final data =
-          (jsonDecode(res.body) as Map<String, dynamic>)['data'] as List<dynamic>? ??
-              const [];
-      setState(() {
-        _gifs = data.whereType<Map<String, dynamic>>().map((item) {
-          final images = item['images'] as Map<String, dynamic>? ?? {};
-          final preview =
-              (images['fixed_width'] as Map<String, dynamic>? ?? {})['url']
-                  ?.toString() ??
-                  '';
-          final full =
-              (images['original'] as Map<String, dynamic>? ?? {})['url']
-                  ?.toString() ??
-                  '';
-          return _GifResult(previewUrl: preview, fullUrl: full);
-        }).where((g) => g.previewUrl.isNotEmpty).toList();
-      });
-    }
-  }
-
-  void _onSearchChanged(String v) {
-    final trimmed = v.trim();
-    setState(() => _isSearching = trimmed.isNotEmpty);
-    _debounce?.cancel();
-    if (trimmed.isEmpty) {
-      _fetchCategory(_selectedCategory);
-      return;
-    }
-    _debounce = Timer(
-      const Duration(milliseconds: 400),
-      () => _fetchSearch(trimmed),
-    );
-  }
-
-  void _onCategoryTap(int index) {
-    if (_isSearching || _search.text.isNotEmpty) {
-      _search.clear();
-      setState(() => _isSearching = false);
-    }
-    _fetchCategory(index);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    final screenH = MediaQuery.sizeOf(context).height;
-    final chipBg = isLight ? const Color(0xffeef1f5) : const Color(0xff1e1e1e);
-    final chipSelectedBg = isLight ? Colors.black : Colors.white;
-    final chipSelectedText = isLight ? Colors.white : Colors.black;
-    final chipText = isLight ? const Color(0xff444444) : const Color(0xffcccccc);
-
-    return SizedBox(
-      height: screenH * 0.75,
-      child: Column(
-        children: [
-          // search bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
-            child: TextField(
-              controller: _search,
-              onChanged: _onSearchChanged,
-              autofocus: false,
-              style: TextStyle(color: isLight ? Colors.black : Colors.white),
-              cursorColor: isLight ? Colors.black : Colors.white,
-              decoration: InputDecoration(
-                hintText: 'Search GIFs',
-                hintStyle: TextStyle(
-                  color: isLight ? const Color(0xff8b95a3) : const Color(0xff8f8f8f),
-                ),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: isLight ? const Color(0xff8b95a3) : const Color(0xffa6a6a6),
-                ),
-                filled: true,
-                fillColor: chipBg,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-              ),
-            ),
-          ),
-          // category chips — hidden while typing
-          if (!_isSearching)
-            SizedBox(
-              height: 36,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                itemCount: _categories.length,
-                separatorBuilder: (_, index) => const SizedBox(width: 8),
-                itemBuilder: (context, i) {
-                  final selected = i == _selectedCategory;
-                  return GestureDetector(
-                    onTap: () => _onCategoryTap(i),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: selected ? chipSelectedBg : chipBg,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        _categories[i].$1,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                          color: selected ? chipSelectedText : chipText,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          const SizedBox(height: 8),
-          // gif grid
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _gifs.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No GIFs found',
-                          style: TextStyle(
-                            color: isLight
-                                ? const Color(0xff616161)
-                                : const Color(0xffb3b3b3),
-                          ),
-                        ),
-                      )
-                    : GridView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 6,
-                          crossAxisSpacing: 6,
-                          childAspectRatio: 1.5,
-                        ),
-                        itemCount: _gifs.length,
-                        itemBuilder: (context, i) {
-                          final gif = _gifs[i];
-                          return GestureDetector(
-                            onTap: () => Navigator.of(context).pop(gif.fullUrl),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: Image.network(
-                                gif.previewUrl,
-                                fit: BoxFit.cover,
-                                loadingBuilder: (_, child, progress) =>
-                                    progress == null
-                                        ? child
-                                        : ColoredBox(
-                                            color: isLight
-                                                ? const Color(0xffe0e0e0)
-                                                : const Color(0xff222222),
-                                          ),
-                                errorBuilder: (_, err, stack) => ColoredBox(
-                                  color: isLight
-                                      ? const Color(0xffe0e0e0)
-                                      : const Color(0xff222222),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              'Powered by GIPHY',
-              style: TextStyle(
-                fontSize: 11,
-                color: isLight ? const Color(0xffaaaaaa) : const Color(0xff666666),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
