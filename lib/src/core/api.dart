@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 
 const String apiBaseUrl = String.fromEnvironment(
   'NEAT_API_BASE_URL',
-  defaultValue: 'https://neatbackendv1.onrender.com',
+  defaultValue: 'http://63.181.201.175',
 );
 
 Uri postsEndpoint({bool fresh = false, String? city}) {
