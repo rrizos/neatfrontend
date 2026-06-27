@@ -221,6 +221,8 @@ backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
 body: SafeArea(
 child: CityMapView(
 token: token,
+homeCity: '',
+isSignUp: true,
 onOpenUserProfile: (_) {},
 onCitySelected: (city) {
 Navigator.of(context).pop(city);

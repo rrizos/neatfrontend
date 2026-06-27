@@ -25,13 +25,17 @@ class CityMapView extends StatefulWidget {
   const CityMapView({
     super.key,
     required this.token,
+    required this.homeCity,
     required this.onOpenUserProfile,
     required this.onCitySelected,
+    this.isSignUp = false,
   });
 
   final String token;
+  final String homeCity;
   final ValueChanged<String> onOpenUserProfile;
   final ValueChanged<String> onCitySelected;
+  final bool isSignUp;
 
   @override
   State<CityMapView> createState() => _CityMapViewState();
@@ -101,8 +105,10 @@ class _CityMapViewState extends State<CityMapView> {
   }
 
   void _buildWebView() {
+    final homeCity = widget.homeCity.trim().toLowerCase();
     final citiesJson = jsonEncode(
       greeceCities
+          .where((c) => c.name.trim().toLowerCase() != homeCity)
           .map((c) => {'name': c.name, 'lat': c.latitude, 'lng': c.longitude})
           .toList(),
     );
@@ -171,7 +177,7 @@ class _CityMapViewState extends State<CityMapView> {
     final city = _activeCity;
     return Stack(
       children: [
-        Positioned.fill(child: _MapLayer(webCtrl: _webCtrl)),
+        Positioned.fill(child: _MapLayer(webCtrl: _webCtrl, homeCity: widget.homeCity)),
 
         if (city != null)
           Positioned.fill(
@@ -188,6 +194,7 @@ class _CityMapViewState extends State<CityMapView> {
                       imageUrl: city.imageUrl,
                       onClose: _closeCard,
                       onJoin: _joinCity,
+                      isSignUp: widget.isSignUp,
                     ),
                   ),
                 ),
@@ -344,8 +351,9 @@ String _mapHtml(String citiesJson, {String? inlineJs}) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MapLayer extends StatelessWidget {
-  const _MapLayer({this.webCtrl});
+  const _MapLayer({this.webCtrl, required this.homeCity});
   final WebViewController? webCtrl;
+  final String homeCity;
 
   @override
   Widget build(BuildContext context) {
@@ -362,10 +370,12 @@ class _MapLayer extends StatelessWidget {
     }
 
     if (Platform.isIOS) {
+      final homeCity = this.homeCity.trim().toLowerCase();
       return UiKitView(
         viewType: 'neat/native_city_map',
         creationParams: {
           'cities': greeceCities
+              .where((c) => c.name.trim().toLowerCase() != homeCity)
               .map((c) => {
                     'name': c.name,
                     'latitude': c.latitude,
@@ -394,12 +404,14 @@ class _CityCard extends StatelessWidget {
     required this.onClose,
     required this.onJoin,
     this.imageUrl,
+    this.isSignUp = false,
   });
 
   final GreeceCity city;
   final VoidCallback onClose;
   final VoidCallback onJoin;
   final String? imageUrl;
+  final bool isSignUp;
 
   @override
   Widget build(BuildContext context) {
@@ -464,19 +476,20 @@ class _CityCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // Text
-              const Padding(
-                padding: EdgeInsets.fromLTRB(22, 18, 22, 0),
-                child: Text(
-                  'Επιλέξτε προσεκτικά την πόλη σας! Μπορείτε να αλλάξετε πόλη μετά από 6 μήνες.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    height: 1.5,
+              // Description text — sign-up only
+              if (isSignUp)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(22, 18, 22, 0),
+                  child: Text(
+                    'Επιλέξτε προσεκτικά την πόλη σας! Μπορείτε να αλλάξετε πόλη μετά από 6 μήνες.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      height: 1.5,
+                    ),
                   ),
                 ),
-              ),
               // Button
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
@@ -493,7 +506,7 @@ class _CityCard extends StatelessWidget {
                       ),
                     ),
                     child: Text(
-                      'Συνδέσου ${city.name}',
+                      isSignUp ? 'Συνδέσου ${city.name}' : 'Παρακολούθησε ${city.name}',
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 16,

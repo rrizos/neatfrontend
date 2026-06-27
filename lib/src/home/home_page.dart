@@ -442,10 +442,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openCityFeed(String city) async {
-    if (city.trim().toLowerCase() == widget.session.user.city.trim().toLowerCase()) {
-      setState(() { _nav = 0; });
-      return;
-    }
     setState(() {
       _activeCity = city.trim();
       _selectedTab = 0;
@@ -1251,6 +1247,7 @@ class _HomePageState extends State<HomePage> {
                             ? RepaintBoundary(
                                 child: CityMapView(
                                   token: widget.session.token,
+                                  homeCity: widget.session.user.city,
                                   onOpenUserProfile: _pushProfileRoute,
                                   onCitySelected: _openCityFeed,
                                 ),
