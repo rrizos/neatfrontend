@@ -428,6 +428,7 @@ class _HomePageState extends State<HomePage> {
           onThemeModeChanged: widget.onThemeModeChanged,
           onHideNavBar: _hideNativeBar,
           onShowNavBar: _showNativeBar,
+          followEnabled: _activeCity == null,
         ),
       ),
     ).then((_) {
@@ -441,8 +442,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openCityFeed(String city) async {
+    if (city.trim().toLowerCase() == widget.session.user.city.trim().toLowerCase()) {
+      setState(() { _nav = 0; });
+      return;
+    }
     setState(() {
       _activeCity = city.trim();
+      _selectedTab = 0;
       _nav = 0;
       _loading = true;
     });
@@ -479,6 +485,7 @@ class _HomePageState extends State<HomePage> {
           currentUser: widget.session.user,
           onOpenUserProfile: _pushProfileRoute,
           preferredTab: initialTab,
+          attendEnabled: _activeCity == null,
         ),
       ),
     );
@@ -1131,6 +1138,7 @@ class _HomePageState extends State<HomePage> {
                                 delegate: _TabsHeader(
                                   selectedTab: _selectedTab,
                                   city: _activeCity ?? widget.session.user.city,
+                                  showFollowing: _activeCity == null,
                                   onTabChanged: (value) {
                                     setState(() => _selectedTab = value);
                                     if (_feedScroll.hasClients) {
@@ -1164,8 +1172,8 @@ class _HomePageState extends State<HomePage> {
                                       token: widget.session.token,
                                       currentUser: widget.session.user,
                                       followingAuthors: _followingAuthors,
-                                      onFollowUser: _follow,
-                                      onUnfollowUser: _unfollow,
+                                      onFollowUser: _activeCity == null ? _follow : null,
+                                      onUnfollowUser: _activeCity == null ? _unfollow : null,
                                       likingEnabled: _activeCity == null,
                                       onLike: () => _likePost(post),
                                       onSave: () => _savePost(post),
@@ -1214,7 +1222,7 @@ class _HomePageState extends State<HomePage> {
                                       onComment: () => _openComments(post),
                                       onProfileTap: () => _pushProfileRoute(post.author),
                                       onOpenUserProfile: _pushProfileRoute,
-                                      onFollow: post.author != widget.session.user.username
+                                      onFollow: (post.author != widget.session.user.username && _activeCity == null)
                                           ? () => _follow(post.author)
                                           : null,
                                       isFollowing: _followingAuthors.contains(post.author),
@@ -1273,6 +1281,7 @@ class _HomePageState extends State<HomePage> {
                         onThemeModeChanged: widget.onThemeModeChanged,
                         onHideNavBar: _hideNativeBar,
                         onShowNavBar: _showNativeBar,
+                        followEnabled: _activeCity == null,
                       ),
                     ),
                 ],
@@ -1379,8 +1388,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onNavTap(int i) {
+    if (_activeCity != null && (i == 1 || i == 2 || i == 4)) return;
     if (i == 2) {
-      if (_activeCity != null) return;
       _openCreatePost();
       return;
     }
@@ -1474,7 +1483,21 @@ class _TopBar extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: onEventsTap,
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Center(
+                    child: Icon(
+                      Icons.event_note_outlined,
+                      color: isLight ? Colors.black : Colors.white,
+                      size: 26,
+                    ),
+                  ),
+                ),
+              ),
             ],
             if (activeCity == null) ...[
               GestureDetector(
@@ -1558,26 +1581,28 @@ class _TopBar extends StatelessWidget {
 }
 
 class _TabsHeader extends SliverPersistentHeaderDelegate {
-  const _TabsHeader({required this.selectedTab, required this.city, required this.onTabChanged});
+  const _TabsHeader({required this.selectedTab, required this.city, required this.onTabChanged, required this.showFollowing});
   final int selectedTab;
   final String city;
+  final bool showFollowing;
   final ValueChanged<int> onTabChanged;
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return _TabsHeaderContent(selectedTab: selectedTab, city: city, onTabChanged: onTabChanged);
+    return _TabsHeaderContent(selectedTab: selectedTab, city: city, onTabChanged: onTabChanged, showFollowing: showFollowing);
   }
   @override
   double get maxExtent => 52;
   @override
   double get minExtent => 52;
   @override
-  bool shouldRebuild(covariant _TabsHeader old) => old.selectedTab != selectedTab || old.city != city;
+  bool shouldRebuild(covariant _TabsHeader old) => old.selectedTab != selectedTab || old.city != city || old.showFollowing != showFollowing;
 }
 
 class _TabsHeaderContent extends StatefulWidget {
-  const _TabsHeaderContent({required this.selectedTab, required this.city, required this.onTabChanged});
+  const _TabsHeaderContent({required this.selectedTab, required this.city, required this.onTabChanged, required this.showFollowing});
   final int selectedTab;
   final String city;
+  final bool showFollowing;
   final ValueChanged<int> onTabChanged;
 
   @override
@@ -1620,27 +1645,40 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final activeClr   = isLight ? Colors.black       : Colors.white;
+    final activeClr   = isLight ? Colors.black   : Colors.white;
     final inactiveClr = isLight ? const Color(0xff888888) : Colors.white38;
+    final bg = isLight ? const Color(0xfff3f4f6) : const Color(0xff121212);
+
+    // Spectating: single centered city tab, no indicator
+    if (!widget.showFollowing) {
+      return Container(
+        color: bg,
+        height: 52,
+        alignment: Alignment.center,
+        child: Text(
+          widget.city,
+          style: TextStyle(color: activeClr, fontSize: 17, fontWeight: FontWeight.w800),
+        ),
+      );
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final tabW    = constraints.maxWidth / 2;
-        final fromX   = (tabW - _indicatorW) / 2;
-        final toX     = tabW + fromX;
+        final tabW  = constraints.maxWidth / 2;
+        final fromX = (tabW - _indicatorW) / 2;
+        final toX   = tabW + fromX;
 
         return AnimatedBuilder(
           animation: _curved,
           builder: (context, _) {
-            final t    = _curved.value;          // 0 = For You, 1 = Following
+            final t    = _curved.value;
             final left = fromX + (toX - fromX) * t;
 
-            // Smoothly interpolate label colours
             final forYouClr    = Color.lerp(activeClr,   inactiveClr, t)!;
             final followingClr = Color.lerp(inactiveClr, activeClr,   t)!;
 
             return Container(
-              color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+              color: bg,
               child: Stack(
                 children: [
                   Row(

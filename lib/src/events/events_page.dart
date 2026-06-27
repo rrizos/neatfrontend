@@ -16,6 +16,7 @@ class EventsPage extends StatefulWidget {
     required this.currentUser,
     required this.onOpenUserProfile,
     this.preferredTab,
+    this.attendEnabled = true,
   });
 
   final String token;
@@ -23,6 +24,7 @@ class EventsPage extends StatefulWidget {
   final UserProfile currentUser;
   final ValueChanged<String> onOpenUserProfile;
   final int? preferredTab;
+  final bool attendEnabled;
 
   @override
   State<EventsPage> createState() => _EventsPageState();
@@ -260,6 +262,7 @@ class _EventsPageState extends State<EventsPage> {
           Navigator.of(context).pop();
           _deleteEvent(event);
         },
+        attendEnabled: widget.attendEnabled,
       ),
     );
   }
@@ -304,10 +307,11 @@ class _EventsPageState extends State<EventsPage> {
           ],
         ),
         actions: [
-          IconButton(
-            onPressed: _createEvent,
-            icon: const Icon(Icons.add_rounded),
-          ),
+          if (widget.attendEnabled)
+            IconButton(
+              onPressed: _createEvent,
+              icon: const Icon(Icons.add_rounded),
+            ),
         ],
       ),
       body: Column(
@@ -412,6 +416,7 @@ class _EventsPageState extends State<EventsPage> {
                                   onAttend: () => _attend(event),
                                   onDelete: () => _deleteEvent(event),
                                   onTap: () => _showEventDetail(event),
+                                  attendEnabled: widget.attendEnabled,
                                 ),
                               ),
                             ),
@@ -509,6 +514,7 @@ class _EventCard extends StatelessWidget {
     required this.onAttend,
     required this.onDelete,
     required this.onTap,
+    this.attendEnabled = true,
   });
 
   final EventItem event;
@@ -516,6 +522,7 @@ class _EventCard extends StatelessWidget {
   final VoidCallback onAttend;
   final VoidCallback onDelete;
   final VoidCallback onTap;
+  final bool attendEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -776,7 +783,7 @@ class _EventCard extends StatelessWidget {
                     Expanded(
                       child: event.isAttending
                           ? OutlinedButton(
-                              onPressed: onAttend,
+                              onPressed: attendEnabled ? onAttend : null,
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: isLight ? Colors.black : Colors.white,
                                 side: BorderSide(
@@ -790,7 +797,7 @@ class _EventCard extends StatelessWidget {
                               child: const Text("Don't Attend"),
                             )
                           : FilledButton(
-                              onPressed: onAttend,
+                              onPressed: attendEnabled ? onAttend : null,
                               style: FilledButton.styleFrom(
                                 backgroundColor: isLight ? Colors.black : Colors.white,
                                 foregroundColor: isLight ? Colors.white : Colors.black,
@@ -1246,12 +1253,14 @@ class _EventDetailSheet extends StatefulWidget {
     required this.currentUsername,
     required this.onAttend,
     required this.onDelete,
+    this.attendEnabled = true,
   });
 
   final EventItem event;
   final String currentUsername;
   final VoidCallback onAttend;
   final VoidCallback onDelete;
+  final bool attendEnabled;
 
   @override
   State<_EventDetailSheet> createState() => _EventDetailSheetState();
@@ -1403,10 +1412,10 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                           Expanded(
                             child: _isAttending
                                 ? OutlinedButton(
-                                    onPressed: () {
+                                    onPressed: widget.attendEnabled ? () {
                                       setState(() { _isAttending = false; _attendees--; });
                                       widget.onAttend();
-                                    },
+                                    } : null,
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: isLight ? Colors.black : Colors.white,
                                       side: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
@@ -1416,10 +1425,10 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                     child: const Text("Don't Attend"),
                                   )
                                 : FilledButton(
-                                    onPressed: () {
+                                    onPressed: widget.attendEnabled ? () {
                                       setState(() { _isAttending = true; _attendees++; });
                                       widget.onAttend();
-                                    },
+                                    } : null,
                                     style: FilledButton.styleFrom(
                                       backgroundColor: isLight ? Colors.black : Colors.white,
                                       foregroundColor: isLight ? Colors.white : Colors.black,

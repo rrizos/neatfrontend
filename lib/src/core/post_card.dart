@@ -702,7 +702,7 @@ class _LikersSheet extends StatefulWidget {
     required this.token,
     required this.currentUsername,
     required this.followingAuthors,
-    required this.onFollow,
+    this.onFollow,
     required this.onUnfollow,
     required this.onOpenUserProfile,
   });
@@ -710,7 +710,7 @@ class _LikersSheet extends StatefulWidget {
   final String token;
   final String currentUsername;
   final Set<String> followingAuthors;
-  final Future<void> Function(String) onFollow;
+  final Future<void> Function(String)? onFollow;
   final Future<void> Function(String) onUnfollow;
   final ValueChanged<String> onOpenUserProfile;
 
@@ -754,12 +754,13 @@ class _LikersSheetState extends State<_LikersSheet> {
   }
 
   void _toggleFollow(String username) {
+    if (widget.onFollow == null) return;
     if (_following.contains(username)) {
       setState(() => _following.remove(username));
       widget.onUnfollow(username);
     } else {
       setState(() => _following.add(username));
-      widget.onFollow(username);
+      widget.onFollow!(username);
     }
   }
 
@@ -821,7 +822,7 @@ class _LikersSheetState extends State<_LikersSheet> {
                     child: Text('@${u.username}', style: const TextStyle(color: Color(0xffb3b3b3))),
                   )
                 : null,
-            trailing: isSelf
+            trailing: (isSelf || widget.onFollow == null)
                 ? null
                 : SizedBox(
                     height: 34,
@@ -1050,7 +1051,7 @@ class _FeedPostCardState extends State<FeedPostCard> {
           token: widget.token,
           currentUsername: widget.currentUser.username,
           followingAuthors: widget.followingAuthors,
-          onFollow: widget.onFollowUser ?? (_) async {},
+          onFollow: widget.onFollowUser,
           onUnfollow: widget.onUnfollowUser ?? (_) async {},
           onOpenUserProfile: widget.onOpenUserProfile,
         ),

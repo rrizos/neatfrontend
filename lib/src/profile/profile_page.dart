@@ -28,6 +28,7 @@ class ProfilePage extends StatefulWidget {
     this.onOpenProfileAtPost,
     this.onHideNavBar,
     this.onShowNavBar,
+    this.followEnabled = true,
   });
   final String username;
   final UserProfile currentUser;
@@ -43,6 +44,7 @@ class ProfilePage extends StatefulWidget {
   final int? initialPostId;
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
+  final bool followEnabled;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -625,7 +627,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                       Expanded(
                         child: profile.isFollowing
                             ? OutlinedButton(
-                                onPressed: _toggleFollow,
+                                onPressed: widget.followEnabled ? _toggleFollow : null,
                                 style: OutlinedButton.styleFrom(
                                   side: BorderSide(color: isLight ? Colors.black : Colors.white),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -633,7 +635,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                 ),
                                 child: const Text('Following', style: TextStyle(fontWeight: FontWeight.w600)),
                               )
-                            : FilledButton(onPressed: _toggleFollow, child: const Text('Follow')),
+                            : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: const Text('Follow')),
                       ),
                       const SizedBox(width: 12),
                       SizedBox(
