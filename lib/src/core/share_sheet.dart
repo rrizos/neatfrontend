@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -245,18 +244,29 @@ class _ShareSheetState extends State<_ShareSheet> {
     return '@${widget.post.author} on Neat: "$snippet"';
   }
 
+  String get _shareLink => '$apiBaseUrl/posts/${widget.post.id}';
+
   Future<void> _launch(String url) async {
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   Future<void> _copyLink() async {
-    final text = '$_shareText\n$apiBaseUrl/posts/${widget.post.id}';
+    final text = '$_shareText\n$_shareLink';
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
     );
+  }
+
+  static const _shareChannel = MethodChannel('com.neat/share');
+
+  Future<void> _nativeShare() async {
+    final text = '$_shareText\n$_shareLink';
+    try {
+      await _shareChannel.invokeMethod<void>('share', {'text': text});
+    } catch (_) {}
   }
 
   // ── build ───────────────────────────────────────────────────────────────────
@@ -400,15 +410,15 @@ class _ShareSheetState extends State<_ShareSheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    _ExtBtn(label: 'Instagram', onTap: () => _launch('https://instagram.com'), child: const _IgIcon()),
+                    _ExtBtn(label: 'Instagram', onTap: _nativeShare, child: const _IgIcon()),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'WhatsApp', onTap: () => _launch('https://wa.me/?text=${Uri.encodeComponent(_shareText)}'), child: const _WhatsAppIcon()),
+                    _ExtBtn(label: 'WhatsApp', onTap: () => _launch('https://wa.me/?text=${Uri.encodeComponent('$_shareText\n$_shareLink')}'), child: const _WhatsAppIcon()),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'X (Twitter)', onTap: () => _launch('https://x.com/intent/tweet?text=${Uri.encodeComponent(_shareText)}'), child: const _XIcon()),
+                    _ExtBtn(label: 'X (Twitter)', onTap: () => _launch('https://x.com/intent/tweet?text=${Uri.encodeComponent('$_shareText\n$_shareLink')}'), child: const _XIcon()),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'Telegram', onTap: () => _launch('https://t.me/share/url?url=${Uri.encodeComponent('$apiBaseUrl/posts/${widget.post.id}')}&text=${Uri.encodeComponent(_shareText)}'), child: const _TelegramIcon()),
+                    _ExtBtn(label: 'Telegram', onTap: () => _launch('https://t.me/share/url?url=${Uri.encodeComponent(_shareLink)}&text=${Uri.encodeComponent(_shareText)}'), child: const _TelegramIcon()),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'Facebook', onTap: () => _launch('https://facebook.com'), child: const _FbIcon()),
+                    _ExtBtn(label: 'Facebook', onTap: () => _launch('https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(_shareLink)}'), child: const _FbIcon()),
                     const SizedBox(width: 16),
                     _ExtBtn(label: 'Copy link', onTap: _copyLink, child: _LinkIcon(isLight: isLight)),
                   ],

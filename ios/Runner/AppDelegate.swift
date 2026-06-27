@@ -19,10 +19,62 @@ import UIKit
     func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
         GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
         registerNativeCityMap(with: engineBridge.pluginRegistry)
+        registerShareChannel(with: engineBridge.pluginRegistry)
 
         if #available(iOS 26, *) {
             setupNativeTabBar(with: engineBridge.pluginRegistry)
         }
+    }
+
+    // MARK: - Native share sheet
+
+    private func registerShareChannel(with registry: FlutterPluginRegistry) {
+        guard let r = registry.registrar(forPlugin: "NeatShare") else { return }
+        let channel = FlutterMethodChannel(name: "com.neat/share",
+                                           binaryMessenger: r.messenger())
+        channel.setMethodCallHandler { [weak self] call, result in
+            guard call.method == "share" else {
+                result(FlutterMethodNotImplemented)
+                return
+            }
+            let args = call.arguments as? [String: Any]
+            let text = args?["text"] as? String ?? ""
+            let imageTypedData = args?["imageBytes"] as? FlutterStandardTypedData
+            let imageData = imageTypedData?.data
+
+            DispatchQueue.main.async {
+                self?.presentNativeShareSheet(text: text, imageData: imageData, result: result)
+            }
+        }
+    }
+
+    private func presentNativeShareSheet(text: String, imageData: Data?, result: @escaping FlutterResult) {
+        var items: [Any] = []
+        if let data = imageData, let image = UIImage(data: data) {
+            items.append(image)
+        }
+        if !text.isEmpty { items.append(text) }
+        guard !items.isEmpty else { result(nil); return }
+
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        vc.completionWithItemsHandler = { _, _, _, _ in result(nil) }
+
+        // Walk to the topmost presented view controller so we always have
+        // a valid presenter regardless of what Flutter modals are showing.
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        var presenter = scene?.windows.first(where: { $0.isKeyWindow })?.rootViewController
+        while let next = presenter?.presentedViewController { presenter = next }
+
+        // iPad/Mac popover anchor — centre of the screen
+        if let pop = vc.popoverPresentationController, let view = presenter?.view {
+            pop.sourceView = view
+            pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+            pop.permittedArrowDirections = []
+        }
+
+        presenter?.present(vc, animated: true)
     }
 
     // MARK: - NativeCityMap plugin
