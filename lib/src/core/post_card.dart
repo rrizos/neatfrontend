@@ -120,8 +120,9 @@ class PostAvatar extends StatelessWidget {
 final _videoTempCache = <int, String>{};
 
 class _FeedMedia extends StatelessWidget {
-  const _FeedMedia({required this.url});
+  const _FeedMedia({required this.url, this.fit = BoxFit.cover});
   final String url;
+  final BoxFit fit;
 
   @override
   Widget build(BuildContext context) {
@@ -131,7 +132,7 @@ class _FeedMedia extends StatelessWidget {
         try {
           return Image.memory(
             base64Decode(url.substring(comma + 1)),
-            fit: BoxFit.cover,
+            fit: fit,
             width: double.infinity,
             height: double.infinity,
           );
@@ -140,7 +141,7 @@ class _FeedMedia extends StatelessWidget {
     }
     return Image.network(
       url,
-      fit: BoxFit.cover,
+      fit: fit,
       width: double.infinity,
       height: double.infinity,
     );
@@ -631,7 +632,7 @@ class _FullscreenMediaViewerState extends State<_FullscreenMediaViewer> {
               return InteractiveViewer(
                 minScale: 0.5,
                 maxScale: 4.0,
-                child: Center(child: _FeedMedia(url: item.url)),
+                child: Center(child: _FeedMedia(url: item.url, fit: BoxFit.contain)),
               );
             },
           ),
