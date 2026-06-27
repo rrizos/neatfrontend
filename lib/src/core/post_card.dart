@@ -946,6 +946,7 @@ class FeedPostCard extends StatefulWidget {
     this.onUnfollowUser,
     this.onHideNavBar,
     this.onShowNavBar,
+    this.likingEnabled = true,
   });
 
   final FeedPost post;
@@ -965,6 +966,7 @@ class FeedPostCard extends StatefulWidget {
   final Future<void> Function(String)? onUnfollowUser;
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
+  final bool likingEnabled;
 
   @override
   State<FeedPostCard> createState() => _FeedPostCardState();
@@ -994,6 +996,7 @@ class _FeedPostCardState extends State<FeedPostCard> {
   }
 
   Future<void> _handleLike() async {
+    if (!widget.likingEnabled) return;
     final wasLiked = _liked;
     final wasLikes = _likes;
     setState(() {
@@ -1162,14 +1165,39 @@ class _FeedPostCardState extends State<FeedPostCard> {
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
               child: Row(
                 children: [
-                  IconButton(
-                    onPressed: _handleLike,
-                    icon: Icon(
-                      _liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                      color: _liked ? Colors.red : (isLight ? Colors.black : Colors.white),
-                      size: 28,
+                  if (widget.likingEnabled)
+                    IconButton(
+                      onPressed: _handleLike,
+                      icon: Icon(
+                        _liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                        color: _liked ? Colors.red : (isLight ? Colors.black : Colors.white),
+                        size: 28,
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Icon(
+                              Icons.favorite_border_rounded,
+                              color: isLight ? Colors.black : Colors.white,
+                              size: 28,
+                            ),
+                            CustomPaint(
+                              size: const Size(28, 28),
+                              painter: _SlashPainter(
+                                color: const Color(0xfff66c6c),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
                   IconButton(
                     onPressed: widget.onComment,
                     icon: CommentBubbleIcon(color: isLight ? Colors.black : Colors.white, size: 25),
@@ -1236,4 +1264,22 @@ class _FeedPostCardState extends State<FeedPostCard> {
       ),
     );
   }
+}
+
+class _SlashPainter extends CustomPainter {
+  const _SlashPainter({required this.color});
+  final Color color;
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawLine(
+      Offset(size.width * 0.72, size.height * 0.04),
+      Offset(size.width * 0.28, size.height * 0.96),
+      Paint()
+        ..color = color
+        ..strokeWidth = 2.2
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+  @override
+  bool shouldRepaint(_SlashPainter old) => old.color != color;
 }

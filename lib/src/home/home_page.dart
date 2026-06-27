@@ -55,6 +55,7 @@ class _HomePageState extends State<HomePage> {
   int _nav = 0;
   int _selectedTab = 0;
   final Set<int> _visitedTabs = <int>{0};
+  final _searchViewKey = GlobalKey<_SearchViewState>();
   bool _loading = true;
   String? _activeCity;
   final _composeMedia = <_ComposeMedia>[];
@@ -445,6 +446,7 @@ class _HomePageState extends State<HomePage> {
       _nav = 0;
       _loading = true;
     });
+    if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 0);
     await _load();
   }
 
@@ -473,7 +475,7 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute<void>(
         builder: (_) => EventsPage(
           token: widget.session.token,
-          city: widget.session.user.city,
+          city: _activeCity ?? widget.session.user.city,
           currentUser: widget.session.user,
           onOpenUserProfile: _pushProfileRoute,
           preferredTab: initialTab,
@@ -550,6 +552,7 @@ class _HomePageState extends State<HomePage> {
         session: widget.session,
         onRefresh: () {},
         onOpenUserProfile: _pushProfileRoute,
+        likingEnabled: _activeCity == null,
       ),
     ).whenComplete(_showNativeBar);
   }
@@ -1077,6 +1080,9 @@ class _HomePageState extends State<HomePage> {
               notifications: _notificationsList
                   .where((item) => !item.isRead)
                   .length,
+              activeCity: _activeCity,
+              homeCity: widget.session.user.city,
+              onReturnHome: _goHome,
               onEventsTap: () => _openEvents(),
               onNotificationsTap: _openNotifications,
               onMessagesTap: () async {
@@ -1124,6 +1130,7 @@ class _HomePageState extends State<HomePage> {
                                 pinned: true,
                                 delegate: _TabsHeader(
                                   selectedTab: _selectedTab,
+                                  city: _activeCity ?? widget.session.user.city,
                                   onTabChanged: (value) {
                                     setState(() => _selectedTab = value);
                                     if (_feedScroll.hasClients) {
@@ -1159,6 +1166,7 @@ class _HomePageState extends State<HomePage> {
                                       followingAuthors: _followingAuthors,
                                       onFollowUser: _follow,
                                       onUnfollowUser: _unfollow,
+                                      likingEnabled: _activeCity == null,
                                       onLike: () => _likePost(post),
                                       onSave: () => _savePost(post),
                                       onShare: () {
@@ -1221,6 +1229,7 @@ class _HomePageState extends State<HomePage> {
                         // 1: Search — mounted lazily on first visit
                         _visitedTabs.contains(1)
                             ? _SearchView(
+                                key: _searchViewKey,
                                 token: widget.session.token,
                                 currentUser: widget.session.user,
                                 onOpenUserProfile: _pushProfileRoute,
@@ -1371,6 +1380,7 @@ class _HomePageState extends State<HomePage> {
 
   void _onNavTap(int i) {
     if (i == 2) {
+      if (_activeCity != null) return;
       _openCreatePost();
       return;
     }
@@ -1386,7 +1396,11 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     if (i == 0) {
-      _goHome();
+      setState(() {
+        _nav = 0;
+        _showInlineProfile = false;
+        _inlinePostId = null;
+      });
       if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 0);
       return;
     }
@@ -1395,6 +1409,7 @@ class _HomePageState extends State<HomePage> {
       _visitedTabs.add(i);
       _showInlineProfile = false;
     });
+    if (i == 1) _searchViewKey.currentState?._refreshFollowState();
     if (_isIOS26) _kTabChannel.invokeMethod('syncTab', i);
   }
 }
@@ -1405,11 +1420,17 @@ class _TopBar extends StatelessWidget {
     required this.onEventsTap,
     required this.onNotificationsTap,
     required this.onMessagesTap,
+    this.activeCity,
+    this.homeCity,
+    this.onReturnHome,
   });
   final int notifications;
   final VoidCallback onEventsTap;
   final VoidCallback onNotificationsTap;
   final VoidCallback onMessagesTap;
+  final String? activeCity;
+  final String? homeCity;
+  final VoidCallback? onReturnHome;
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
@@ -1421,79 +1442,114 @@ class _TopBar extends StatelessWidget {
           children: [
             const _LogoMark(),
             const Spacer(),
-            GestureDetector(
-              onTap: onEventsTap,
-              child: SizedBox(
-                width: 40,
-                height: 40,
-                child: Center(
-                  child: Icon(
-                    Icons.event_note_outlined,
-                    color: isLight ? Colors.black : Colors.white,
-                    size: 26,
+            if (activeCity != null) ...[
+              GestureDetector(
+                onTap: onReturnHome,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isLight ? const Color(0xffe0e3e8) : const Color(0xff2a2a2a),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.arrow_back_rounded, size: 14,
+                          color: isLight ? Colors.black : Colors.white),
+                      const SizedBox(width: 5),
+                      Text(
+                        (homeCity != null && homeCity!.isNotEmpty)
+                            ? homeCity!
+                            : 'Home',
+                        style: TextStyle(
+                          color: isLight ? Colors.black : Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                GestureDetector(
-                  onTap: onNotificationsTap,
-                  child: SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: Center(
-                      child: Icon(
-                        Icons.favorite_border_rounded,
-                        color: isLight ? Colors.black : Colors.white,
-                        size: 26,
-                      ),
+              const SizedBox(width: 8),
+            ],
+            if (activeCity == null) ...[
+              GestureDetector(
+                onTap: onEventsTap,
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Center(
+                    child: Icon(
+                      Icons.event_note_outlined,
+                      color: isLight ? Colors.black : Colors.white,
+                      size: 26,
                     ),
-                  ),
-                ),
-                if (notifications > 0)
-                  Positioned(
-                    right: 2,
-                    top: 2,
-                    child: Container(
-                      width: 16,
-                      height: 16,
-                      decoration: BoxDecoration(
-                        color: const Color(0xfff66c6c),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: isLight ? Colors.white : const Color(0xff121212),
-                          width: 1.5,
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        notifications > 9 ? '9+' : '$notifications',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            GestureDetector(
-              onTap: onMessagesTap,
-              child: SizedBox(
-                width: 40,
-                height: 40,
-                child: Center(
-                  child: PostShareIcon(
-                    color: isLight ? Colors.black : Colors.white,
-                    size: 26,
                   ),
                 ),
               ),
-            ),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  GestureDetector(
+                    onTap: onNotificationsTap,
+                    child: SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: Center(
+                        child: Icon(
+                          Icons.favorite_border_rounded,
+                          color: isLight ? Colors.black : Colors.white,
+                          size: 26,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (notifications > 0)
+                    Positioned(
+                      right: 2,
+                      top: 2,
+                      child: Container(
+                        width: 16,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: const Color(0xfff66c6c),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: isLight ? Colors.white : const Color(0xff121212),
+                            width: 1.5,
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          notifications > 9 ? '9+' : '$notifications',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              GestureDetector(
+                onTap: onMessagesTap,
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Center(
+                    child: PostShareIcon(
+                      color: isLight ? Colors.black : Colors.white,
+                      size: 26,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1502,24 +1558,26 @@ class _TopBar extends StatelessWidget {
 }
 
 class _TabsHeader extends SliverPersistentHeaderDelegate {
-  const _TabsHeader({required this.selectedTab, required this.onTabChanged});
+  const _TabsHeader({required this.selectedTab, required this.city, required this.onTabChanged});
   final int selectedTab;
+  final String city;
   final ValueChanged<int> onTabChanged;
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return _TabsHeaderContent(selectedTab: selectedTab, onTabChanged: onTabChanged);
+    return _TabsHeaderContent(selectedTab: selectedTab, city: city, onTabChanged: onTabChanged);
   }
   @override
   double get maxExtent => 52;
   @override
   double get minExtent => 52;
   @override
-  bool shouldRebuild(covariant _TabsHeader old) => old.selectedTab != selectedTab;
+  bool shouldRebuild(covariant _TabsHeader old) => old.selectedTab != selectedTab || old.city != city;
 }
 
 class _TabsHeaderContent extends StatefulWidget {
-  const _TabsHeaderContent({required this.selectedTab, required this.onTabChanged});
+  const _TabsHeaderContent({required this.selectedTab, required this.city, required this.onTabChanged});
   final int selectedTab;
+  final String city;
   final ValueChanged<int> onTabChanged;
 
   @override
@@ -1594,7 +1652,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
                             height: 52,
                             child: Center(
                               child: Text(
-                                'For you',
+                                widget.city,
                                 style: TextStyle(
                                   color: forYouClr,
                                   fontSize: 17,
@@ -1667,7 +1725,8 @@ class _LogoMark extends StatelessWidget {
 }
 
 class _SearchView extends StatefulWidget {
-  const _SearchView({
+  _SearchView({
+    super.key,
     required this.token,
     required this.currentUser,
     required this.onOpenUserProfile,
@@ -1695,6 +1754,7 @@ class _SearchViewState extends State<_SearchView> {
   bool _loadingSuggestions = true;
   bool _loadingTop = true;
   int _section = 0;
+  final Set<String> _followingAuthors = {};
 
   @override
   void initState() {
@@ -1704,6 +1764,7 @@ class _SearchViewState extends State<_SearchView> {
     _loadCityPosts();
     _load('');
     _loadRecentQueries();
+    _loadFollowingAuthors();
   }
 
   @override
@@ -1821,6 +1882,64 @@ class _SearchViewState extends State<_SearchView> {
     } catch (_) {}
   }
 
+  void _refreshFollowState() => _loadFollowingAuthors();
+
+  Future<void> _loadFollowingAuthors() async {
+    try {
+      final res = await http.get(
+        followingEndpoint(widget.currentUser.username),
+        headers: authGetHeaders(widget.token),
+      );
+      if (res.statusCode != 200 || !mounted) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final usernames = (decoded['users'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((u) => u['username']?.toString() ?? '')
+          .where((u) => u.isNotEmpty)
+          .toSet();
+      setState(() {
+        _followingAuthors..clear()..addAll(usernames);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleFollow(UserProfile user) async {
+    final isFollowing = _followingAuthors.contains(user.username);
+    setState(() {
+      if (isFollowing) {
+        _followingAuthors.remove(user.username);
+      } else {
+        _followingAuthors.add(user.username);
+      }
+    });
+    try {
+      final res = await http.post(
+        followEndpoint(user.username),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'follow': !isFollowing}),
+      );
+      if (res.statusCode == 401 && mounted) {
+        setState(() {
+          if (isFollowing) {
+            _followingAuthors.add(user.username);
+          } else {
+            _followingAuthors.remove(user.username);
+          }
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          if (isFollowing) {
+            _followingAuthors.add(user.username);
+          } else {
+            _followingAuthors.remove(user.username);
+          }
+        });
+      }
+    }
+  }
+
   Future<void> _loadTopUsers() async {
     if (_loadingTop) {
       // no-op; this keeps top users lazy but avoids duplicate network calls.
@@ -1907,12 +2026,21 @@ class _SearchViewState extends State<_SearchView> {
 
   Widget _buildSearchBar(bool isLight, String query) {
     return Container(
-      color: isLight ? Colors.white : const Color(0xff000000),
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      decoration: BoxDecoration(
+        color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+        border: Border(
+          bottom: BorderSide(
+            color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
+            width: 0.5,
+          ),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: TextField(
         controller: _controller,
         onChanged: _onChanged,
         onSubmitted: (_) => _onSearchSubmitted(),
+        onTapOutside: (_) => FocusScope.of(context).unfocus(),
         style: TextStyle(
           color: isLight ? Colors.black : Colors.white,
           fontSize: 16,
@@ -1921,7 +2049,7 @@ class _SearchViewState extends State<_SearchView> {
         decoration: InputDecoration(
           prefixIcon: Icon(
             Icons.search_rounded,
-            color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
             size: 20,
           ),
           suffixIcon: query.isNotEmpty
@@ -1934,28 +2062,30 @@ class _SearchViewState extends State<_SearchView> {
                   child: Icon(
                     Icons.close_rounded,
                     size: 18,
-                    color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                    color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
                   ),
                 )
               : null,
           hintText: 'Search',
           hintStyle: TextStyle(
-            color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
             fontSize: 16,
           ),
           filled: true,
-          fillColor: isLight ? const Color(0xffeff3f4) : const Color(0xff202327),
+          fillColor: isLight ? const Color(0xfff4f6f8) : const Color(0xff161616),
           contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(9999),
+            borderRadius: BorderRadius.circular(14),
             borderSide: BorderSide.none,
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(9999),
-            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(
+              color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
+            ),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(9999),
+            borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: Color(0xff1d9bf0), width: 1.5),
           ),
         ),
@@ -1973,7 +2103,7 @@ class _SearchViewState extends State<_SearchView> {
       children: [
         if (_recentQueries.isNotEmpty) ...[
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+            padding: const EdgeInsets.fromLTRB(16, 20, 8, 10),
             child: Row(
               children: [
                 Expanded(
@@ -1981,8 +2111,9 @@ class _SearchViewState extends State<_SearchView> {
                     'Recent searches',
                     style: TextStyle(
                       color: isLight ? Colors.black : Colors.white,
-                      fontSize: 20,
+                      fontSize: 18,
                       fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
                     ),
                   ),
                 ),
@@ -1991,61 +2122,28 @@ class _SearchViewState extends State<_SearchView> {
                   child: Text(
                     'Clear all',
                     style: TextStyle(
-                      color: isLight ? Colors.black : Colors.white,
+                      color: isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af),
+                      fontSize: 14,
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          ..._recentQueries.map(
-            (q) => InkWell(
-              onTap: () {
-                _controller.text = q;
-                _controller.selection = TextSelection.collapsed(offset: q.length);
-                _onChanged(q);
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.history_rounded,
-                      color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
-                      size: 20,
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Text(
-                        q,
-                        style: TextStyle(
-                          color: isLight ? Colors.black : Colors.white,
-                          fontSize: 15,
-                        ),
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        setState(() => _recentQueries.remove(q));
-                        http.delete(
-                          searchHistoryItemEndpoint(q),
-                          headers: authGetHeaders(widget.token),
-                        );
-                      },
-                      child: Icon(
-                        Icons.close_rounded,
-                        size: 16,
-                        color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          SizedBox(
+            height: 40,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _recentQueries.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (_, i) => _buildRecentChip(_recentQueries[i], isLight),
             ),
           ),
+          const SizedBox(height: 16),
           Divider(
             height: 1,
-            color: isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336),
+            color: isLight ? const Color(0xffe8eaed) : const Color(0xff1f1f1f),
           ),
         ],
         if (trends.isNotEmpty) ...[
@@ -2055,33 +2153,188 @@ class _SearchViewState extends State<_SearchView> {
               'Trends for you',
               style: TextStyle(
                 color: isLight ? Colors.black : Colors.white,
-                fontSize: 20,
+                fontSize: 18,
                 fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
               ),
             ),
           ),
-          ...trends.map((post) => _buildTrendingRow(post, isLight)),
+          ...trends.asMap().entries.map(
+            (e) => _buildTrendingRow(e.value, isLight, rank: e.key + 1),
+          ),
           Divider(
             height: 1,
-            color: isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336),
+            color: isLight ? const Color(0xffe8eaed) : const Color(0xff1f1f1f),
           ),
         ],
         if (suggestions.isNotEmpty) ...[
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
             child: Text(
               'Who to follow',
               style: TextStyle(
                 color: isLight ? Colors.black : Colors.white,
-                fontSize: 20,
+                fontSize: 18,
                 fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
               ),
             ),
           ),
-          ...suggestions.map((user) => _buildPersonRow(user, isLight, showBio: true)),
+          SizedBox(
+            height: 169,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: suggestions.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (_, i) => _buildSuggestionCard(suggestions[i], isLight),
+            ),
+          ),
+          const SizedBox(height: 16),
         ],
         const SizedBox(height: 32),
       ],
+    );
+  }
+
+  Widget _buildRecentChip(String q, bool isLight) {
+    return GestureDetector(
+      onTap: () {
+        _controller.text = q;
+        _controller.selection = TextSelection.collapsed(offset: q.length);
+        _onChanged(q);
+      },
+      child: Container(
+        alignment: Alignment.center,
+        padding: const EdgeInsets.fromLTRB(10, 0, 8, 0),
+        decoration: BoxDecoration(
+          color: isLight ? const Color(0xfff4f6f8) : const Color(0xff1a1a1a),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.history_rounded,
+              size: 13,
+              color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              q,
+              style: TextStyle(
+                color: isLight ? Colors.black : Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () {
+                setState(() => _recentQueries.remove(q));
+                http.delete(
+                  searchHistoryItemEndpoint(q),
+                  headers: authGetHeaders(widget.token),
+                );
+              },
+              child: Icon(
+                Icons.close_rounded,
+                size: 12,
+                color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSuggestionCard(UserProfile user, bool isLight) {
+    final bytes = decodeAvatarUrl(user.avatarUrl);
+    final displayName = user.fullName.isNotEmpty ? user.fullName : user.username;
+    return GestureDetector(
+      onTap: () => _openProfileAndRemember(user),
+      child: Container(
+        width: 136,
+        padding: const EdgeInsets.fromLTRB(12, 16, 12, 11),
+        decoration: BoxDecoration(
+          color: isLight ? Colors.white : const Color(0xff131313),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isLight ? const Color(0xffe8eaed) : const Color(0xff242424),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 26,
+              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+              child: bytes == null
+                  ? Text(
+                      initialFor(user.username),
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isLight ? Colors.black : Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              '@${user.username}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => _toggleFollow(user),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: isLight ? Colors.black : Colors.white,
+                  side: BorderSide(
+                    color: _followingAuthors.contains(user.username)
+                        ? (isLight ? const Color(0xffb8c0cc) : const Color(0xff3a3a3a))
+                        : (isLight ? Colors.black : Colors.white),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 7),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                child: Text(
+                  _followingAuthors.contains(user.username) ? 'Following' : 'Follow',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2089,20 +2342,23 @@ class _SearchViewState extends State<_SearchView> {
     return Column(
       children: [
         Container(
-          decoration: BoxDecoration(
-            color: isLight ? Colors.white : const Color(0xff000000),
-            border: Border(
-              bottom: BorderSide(
-                color: isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336),
+          color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Container(
+            decoration: BoxDecoration(
+              color: isLight ? const Color(0xffe8eaed) : const Color(0xff1e1e1e),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
               ),
             ),
-          ),
-          child: Row(
-            children: [
-              Expanded(child: _SearchSegment(label: 'Top', selected: _section == 0, onTap: () => setState(() => _section = 0))),
-              Expanded(child: _SearchSegment(label: 'People', selected: _section == 1, onTap: () => setState(() => _section = 1))),
-              Expanded(child: _SearchSegment(label: 'Posts', selected: _section == 2, onTap: () => setState(() => _section = 2))),
-            ],
+            child: Row(
+              children: [
+                Expanded(child: _SearchSegment(label: 'Top', selected: _section == 0, onTap: () => setState(() => _section = 0))),
+                Expanded(child: _SearchSegment(label: 'People', selected: _section == 1, onTap: () => setState(() => _section = 1))),
+                Expanded(child: _SearchSegment(label: 'Posts', selected: _section == 2, onTap: () => setState(() => _section = 2))),
+              ],
+            ),
           ),
         ),
         Expanded(
@@ -2260,17 +2516,30 @@ class _SearchViewState extends State<_SearchView> {
     );
   }
 
-  Widget _buildTrendingRow(FeedPost post, bool isLight) {
+  Widget _buildTrendingRow(FeedPost post, bool isLight, {int? rank}) {
     final text = post.text;
     final snippet = text.length > 70 ? '${text.substring(0, 70)}…' : text;
     final city = post.city.trim().isEmpty ? 'Trending' : post.city;
     return InkWell(
       onTap: () => widget.onOpenPost(post.author, post.id),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (rank != null) ...[
+              SizedBox(
+                width: 30,
+                child: Text(
+                  '$rank',
+                  style: TextStyle(
+                    color: isLight ? const Color(0xffb8c0cc) : const Color(0xff3a4a5a),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2278,8 +2547,8 @@ class _SearchViewState extends State<_SearchView> {
                   Text(
                     '$city · Trending',
                     style: TextStyle(
-                      color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
-                      fontSize: 13,
+                      color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
+                      fontSize: 12,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -2295,18 +2564,12 @@ class _SearchViewState extends State<_SearchView> {
                   Text(
                     post.likes > 0 ? '${post.likes} posts' : 'Trending',
                     style: TextStyle(
-                      color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
-                      fontSize: 13,
+                      color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
+                      fontSize: 12,
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(width: 8),
-            Icon(
-              Icons.more_horiz_rounded,
-              color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
-              size: 20,
             ),
           ],
         ),
@@ -2349,33 +2612,37 @@ class _SearchSegment extends StatelessWidget {
     final isLight = Theme.of(context).brightness == Brightness.light;
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: selected
-                    ? (isLight ? Colors.black : Colors.white)
-                    : (isLight ? const Color(0xff536471) : const Color(0xff71767b)),
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
-                fontSize: 15,
-              ),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        margin: const EdgeInsets.all(4),
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        decoration: BoxDecoration(
+          color: selected
+              ? (isLight ? Colors.white : const Color(0xff2a2a2a))
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isLight ? 0.07 : 0.4),
+                    blurRadius: 6,
+                    offset: const Offset(0, 1),
+                  ),
+                ]
+              : null,
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected
+                  ? (isLight ? Colors.black : Colors.white)
+                  : (isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              fontSize: 14,
             ),
           ),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            height: 3,
-            width: selected ? 32.0 : 0,
-            decoration: BoxDecoration(
-              color: isLight ? Colors.black : Colors.white,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2785,11 +3052,13 @@ class _CommentSheet extends StatefulWidget {
     required this.session,
     required this.onRefresh,
     required this.onOpenUserProfile,
+    this.likingEnabled = true,
   });
   final FeedPost post;
   final AuthSession session;
   final VoidCallback onRefresh;
   final ValueChanged<String> onOpenUserProfile;
+  final bool likingEnabled;
 
   @override
   State<_CommentSheet> createState() => _CommentSheetState();
@@ -3013,17 +3282,41 @@ class _CommentSheetState extends State<_CommentSheet> {
           ),
           const SizedBox(width: 8),
           GestureDetector(
-            onTap: () => _toggleLike(c),
+            onTap: widget.likingEnabled ? () => _toggleLike(c) : null,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                  size: 18,
-                  color: isLiked
-                      ? const Color(0xfff66c6c)
-                      : (isLight ? const Color(0xffa0a0a0) : const Color(0xff6a6a6a)),
-                ),
+                if (widget.likingEnabled)
+                  Icon(
+                    isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                    size: 18,
+                    color: isLiked
+                        ? const Color(0xfff66c6c)
+                        : (isLight ? const Color(0xffa0a0a0) : const Color(0xff6a6a6a)),
+                  )
+                else
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Icon(
+                          Icons.favorite_border_rounded,
+                          size: 18,
+                          color: isLight
+                              ? const Color(0xffa0a0a0)
+                              : const Color(0xff6a6a6a),
+                        ),
+                        CustomPaint(
+                          size: const Size(18, 18),
+                          painter: _SlashPainterSmall(
+                            color: const Color(0xfff66c6c),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 if (likeCount > 0)
                   Text(
                     '$likeCount',
@@ -3294,3 +3587,21 @@ class _GifPickerListener implements GiphyMediaSelectionListener {
   void onDismiss() => onDismissed();
 }
 
+
+class _SlashPainterSmall extends CustomPainter {
+  const _SlashPainterSmall({required this.color});
+  final Color color;
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawLine(
+      Offset(size.width * 0.72, size.height * 0.04),
+      Offset(size.width * 0.28, size.height * 0.96),
+      Paint()
+        ..color = color
+        ..strokeWidth = 1.6
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+  @override
+  bool shouldRepaint(_SlashPainterSmall old) => old.color != color;
+}

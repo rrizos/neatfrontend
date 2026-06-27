@@ -174,7 +174,7 @@ class _EventsPageState extends State<EventsPage> {
     final res = await http.post(
       eventsEndpoint(),
       headers: authJsonHeaders(widget.token),
-      body: jsonEncode(result),
+      body: jsonEncode({...result, 'city': widget.city}),
     );
     if (res.statusCode == 201) {
       final category = result['category'] as String?;

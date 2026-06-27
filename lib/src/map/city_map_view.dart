@@ -404,142 +404,138 @@ class _CityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 320),
+      constraints: const BoxConstraints(maxWidth: 340),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: DecoratedBox(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Container(
           decoration: BoxDecoration(
-            color: const Color(0xff101010),
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: const Color(0xff2a2a2a)),
+            color: const Color(0xff0d0e12),
+            borderRadius: BorderRadius.circular(22),
             boxShadow: const [
-              BoxShadow(
-                  color: Colors.black54, blurRadius: 24, offset: Offset(0, 14)),
+              BoxShadow(color: Colors.black54, blurRadius: 32, offset: Offset(0, 16)),
             ],
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Stack(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Image with white border frame — X button inside image at top-right
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 22, 22, 0),
+                child: Stack(
                   children: [
-                    SizedBox(
-                      height: 132,
-                      width: double.infinity,
-                      child: imageUrl != null
-                          ? Image.network(
-                              imageUrl!,
-                              fit: BoxFit.cover,
-                              loadingBuilder: (ctx, child, progress) =>
-                                  progress == null ? child : _fallbackHeader(),
-                              errorBuilder: (ctx, error, stack) {
-                                debugPrint('[CityCard] image failed: $error');
-                                return _fallbackHeader();
-                              },
-                            )
-                          : _fallbackHeader(),
-                    ),
-                    if (imageUrl != null)
-                      Positioned.fill(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.black.withValues(alpha: 0.15),
-                                Colors.black.withValues(alpha: 0.5),
-                              ],
-                            ),
-                          ),
+                    Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white, width: 2.5),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: SizedBox(
+                          height: 190,
+                          width: double.infinity,
+                          child: imageUrl != null
+                              ? Image.network(
+                                  imageUrl!,
+                                  fit: BoxFit.cover,
+                                  loadingBuilder: (ctx, child, progress) =>
+                                      progress == null ? child : _placeholder(),
+                                  errorBuilder: (ctx, err, stack) {
+                                    debugPrint('[CityCard] image failed: $err');
+                                    return _placeholder();
+                                  },
+                                )
+                              : _placeholder(),
                         ),
                       ),
+                    ),
+                    // X inside image, top-right corner
                     Positioned(
                       top: 8,
                       right: 8,
-                      child: IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white),
-                        onPressed: onClose,
+                      child: GestureDetector(
+                        onTap: onClose,
+                        behavior: HitTestBehavior.opaque,
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(Icons.close_rounded, color: Colors.white, size: 22),
+                        ),
                       ),
                     ),
                   ],
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
-                  child: Column(
-                    children: [
-                      Text(
-                        city.name,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Επιλέξτε προσεκτικά την πόλη σας! Μπορείτε να αλλάξετε πόλη μετά από 6 μήνες.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Color(0xffababab),
-                          fontSize: 13,
-                          height: 1.4,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: FilledButton(
-                          onPressed: onJoin,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.black,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: Text(
-                            'Παρακολούθησε ${city.name}',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ),
-                    ],
+              ),
+              // Text
+              const Padding(
+                padding: EdgeInsets.fromLTRB(22, 18, 22, 0),
+                child: Text(
+                  'Επιλέξτε προσεκτικά την πόλη σας! Μπορείτε να αλλάξετε πόλη μετά από 6 μήνες.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    height: 1.5,
                   ),
                 ),
-              ],
-            ),
+              ),
+              // Button
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: FilledButton(
+                    onPressed: onJoin,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xff2F80ED),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    child: Text(
+                      'Συνδέσου ${city.name}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _fallbackHeader() {
-    final initial = city.name.trim().isEmpty ? '?' : city.name.trim()[0].toUpperCase();
+  Widget _placeholder() {
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xff1c1c1c), Color(0xff090909)],
-        ),
-      ),
-      alignment: Alignment.center,
-      child: CircleAvatar(
-        radius: 38,
-        backgroundColor: const Color(0xff171717),
-        child: Text(
-          initial,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 28,
-            fontWeight: FontWeight.w800,
+      color: const Color(0xff1e1f21),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.add_photo_alternate_outlined,
+              size: 40, color: Colors.white.withValues(alpha: 0.25)),
+          const SizedBox(height: 10),
+          Text(
+            city.name,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.35),
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        ),
+          const SizedBox(height: 4),
+          Text(
+            '// TODO: add imageUrl in greece_cities.dart',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.18),
+              fontSize: 10,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ],
       ),
     );
   }
