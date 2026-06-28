@@ -223,7 +223,9 @@ final isLight = Theme.of(context).brightness == Brightness.light;
 return Scaffold(
 backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
 body: SafeArea(
-child: CityMapView(
+child: Stack(
+children: [
+CityMapView(
 token: token,
 homeCity: '',
 isSignUp: true,
@@ -231,6 +233,29 @@ onOpenUserProfile: (_) {},
 onCitySelected: (city) {
 Navigator.of(context).pop(city);
 },
+),
+Positioned(
+bottom: 24,
+left: 16,
+right: 16,
+child: Container(
+padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+decoration: BoxDecoration(
+color: Colors.black.withValues(alpha: 0.62),
+borderRadius: BorderRadius.circular(14),
+),
+child: const Text(
+'Συνδεθείτε στο For You της περιοχής σας, πατώντας την πινέζα της.',
+textAlign: TextAlign.center,
+style: TextStyle(
+color: Colors.white,
+fontSize: 14,
+height: 1.5,
+),
+),
+),
+),
+],
 ),
 ),
 );
