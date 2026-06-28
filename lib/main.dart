@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/giphy_flutter_sdk.dart';
@@ -16,10 +17,12 @@ void main() {
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
-  GiphyFlutterSDK.configure(
-    apiKey: Platform.isIOS
-        ? 'phQaZvEZeoJTE7GqZ2LnOxUAXWMyEPbM'
-        : 'dmecPhhlED6LaEOrcnBOjVGYOQd62EYj',
-  );
+  if (!kIsWeb) {
+    GiphyFlutterSDK.configure(
+      apiKey: Platform.isIOS
+          ? 'phQaZvEZeoJTE7GqZ2LnOxUAXWMyEPbM'
+          : 'dmecPhhlED6LaEOrcnBOjVGYOQd62EYj',
+    );
+  }
   runApp(const NeatApp());
 }

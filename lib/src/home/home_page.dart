@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -66,7 +68,7 @@ class _HomePageState extends State<HomePage> {
   int _navBarHideCount = 0; // reference count; bar only shows when this reaches 0
 
   static bool _detectIOS26() {
-    if (!Platform.isIOS) return false;
+    if (kIsWeb || !Platform.isIOS) return false;
     final major = int.tryParse(
         Platform.operatingSystemVersion.split('.').first) ?? 0;
     return major >= 26;
