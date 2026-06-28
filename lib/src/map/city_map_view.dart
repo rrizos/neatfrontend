@@ -495,21 +495,22 @@ class _CityCard extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
                 child: SizedBox(
                   width: double.infinity,
-                  height: 54,
                   child: FilledButton(
                     onPressed: onJoin,
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xff2F80ED),
                       foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30),
                       ),
                     ),
                     child: Text(
                       isSignUp ? 'Συνδέσου ${city.name}' : 'Παρακολούθησε ${city.name}',
+                      textAlign: TextAlign.center,
                       style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
                       ),
                     ),
                   ),
