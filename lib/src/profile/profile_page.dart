@@ -425,6 +425,52 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
   }
 
+  void _openAvatarFullscreen(UserProfile profile) {
+    if (profile.avatarUrl.isEmpty) return;
+    final bytes = _dataUrlBytes(profile.avatarUrl);
+    final Widget image = bytes != null
+        ? Image.memory(bytes, fit: BoxFit.contain)
+        : Image.network(profile.avatarUrl, fit: BoxFit.contain);
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4.0,
+                  child: image,
+                ),
+              ),
+              SafeArea(
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: GestureDetector(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        padding: const EdgeInsets.all(8),
+                        child: const Icon(Icons.close, color: Colors.white, size: 22),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openEditProfile() async {
     final profile = _profile;
     if (profile == null) return;
@@ -543,18 +589,23 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 40,
-                  backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                  foregroundImage: _dataUrlBytes(profile.avatarUrl) != null
-                      ? MemoryImage(_dataUrlBytes(profile.avatarUrl)!)
+                GestureDetector(
+                  onTap: (profile.avatarZoomable && profile.avatarUrl.isNotEmpty)
+                      ? () => _openAvatarFullscreen(profile)
                       : null,
-                  child: _dataUrlBytes(profile.avatarUrl) == null
-                      ? Text(
-                          initialFor(profile.username),
-                          style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                        )
-                      : null,
+                  child: CircleAvatar(
+                    radius: 40,
+                    backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+                    foregroundImage: _dataUrlBytes(profile.avatarUrl) != null
+                        ? MemoryImage(_dataUrlBytes(profile.avatarUrl)!)
+                        : null,
+                    child: _dataUrlBytes(profile.avatarUrl) == null
+                        ? Text(
+                            initialFor(profile.username),
+                            style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                          )
+                        : null,
+                  ),
                 ),
                 const SizedBox(width: 24),
                 Expanded(
@@ -989,6 +1040,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   late final TextEditingController _cityController;
   String _avatarUrl = '';
   bool _saving = false;
+  late bool _avatarZoomable;
 
   @override
   void initState() {
@@ -998,6 +1050,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     _bioController = TextEditingController(text: widget.profile.bio);
     _cityController = TextEditingController(text: widget.profile.city);
     _avatarUrl = widget.profile.avatarUrl;
+    _avatarZoomable = widget.profile.avatarZoomable;
   }
 
   @override
@@ -1044,6 +1097,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
           'bio': _bioController.text.trim(),
           'city': _cityController.text.trim(),
           'avatarUrl': _avatarUrl,
+          'avatarZoomable': _avatarZoomable,
         }),
       );
       if (!mounted) return;
@@ -1171,6 +1225,25 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
               controller: _bioController,
               label: 'Bio',
               maxLines: 4,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Text(
+                  'Allow profile picture zoom',
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.light
+                        ? Colors.black
+                        : Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Switch(
+                  value: _avatarZoomable,
+                  onChanged: (v) => setState(() => _avatarZoomable = v),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             Row(

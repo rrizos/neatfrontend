@@ -12,9 +12,11 @@ const AuthScreen({
   super.key,
   required this.onAuthenticated,
   required this.themeMode,
+  this.initialSignup = false,
 });
 final ValueChanged<AuthSession> onAuthenticated;
 final ThemeMode themeMode;
+final bool initialSignup;
 
 @override
 State<AuthScreen> createState() => _AuthScreenState();
@@ -25,7 +27,7 @@ final _username = TextEditingController();
 final _email = TextEditingController();
 final _password = TextEditingController();
 final _fullName = TextEditingController();
-bool _signup = false;
+late bool _signup = widget.initialSignup;
 bool _loading = false;
 String? _error;
 
@@ -87,8 +89,10 @@ final updated = jsonDecode(updateRes.body) as Map<String, dynamic>;
 final user = UserProfile.fromJson(
 updated['user'] as Map<String, dynamic>,
 );
+if (mounted && Navigator.of(context).canPop()) Navigator.of(context).popUntil((r) => r.isFirst);
 widget.onAuthenticated(AuthSession(token: session.token, user: user));
 } else {
+if (mounted && Navigator.of(context).canPop()) Navigator.of(context).popUntil((r) => r.isFirst);
 widget.onAuthenticated(session);
 }
 }

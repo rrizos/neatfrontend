@@ -51,6 +51,7 @@ class UserProfile {
     required this.isFollowing,
     this.mutuals = const [],
     this.mutualsCount = 0,
+    this.avatarZoomable = true,
   });
   final int id;
   final String username;
@@ -64,6 +65,7 @@ class UserProfile {
   final bool isFollowing;
   final List<MutualUser> mutuals;
   final int mutualsCount;
+  final bool avatarZoomable;
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -83,6 +85,7 @@ class UserProfile {
           .map(MutualUser.fromJson)
           .toList(),
       mutualsCount: parseInt(json['mutualsCount']),
+      avatarZoomable: json['avatarZoomable'] != false,
     );
   }
 }

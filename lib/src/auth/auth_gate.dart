@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api.dart';
 import '../core/models.dart';
 import '../home/home_page.dart';
-import 'auth_screen.dart';
+import 'landing_page.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({
@@ -93,7 +93,7 @@ class _AuthGateState extends State<AuthGate> {
     }
     final session = _session;
     if (session == null) {
-      return AuthScreen(
+      return LandingPage(
         onAuthenticated: _save,
         themeMode: widget.themeMode,
       );

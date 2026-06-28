@@ -245,11 +245,19 @@ class _HomePageState extends State<HomePage> {
       if (!firstImage.isVideo) body['imageUrl'] = firstImage.url;
     }
     try {
-      final res = await http.post(
-        postsEndpoint(),
-        headers: authJsonHeaders(widget.session.token),
-        body: jsonEncode(body),
-      );
+      final client = http.Client();
+      http.Response res;
+      try {
+        res = await client
+            .post(
+              postsEndpoint(),
+              headers: authJsonHeaders(widget.session.token),
+              body: jsonEncode(body),
+            )
+            .timeout(const Duration(seconds: 90));
+      } finally {
+        client.close();
+      }
       if (!mounted) return;
       if (res.statusCode == 201) {
         _compose.clear();
@@ -257,14 +265,18 @@ class _HomePageState extends State<HomePage> {
         Navigator.of(context).pop();
         _load();
       } else {
+        final msg = friendlyHttpError(res);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to post. Please try again.')),
+          SnackBar(content: Text(msg)),
         );
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
+        final msg = e.toString().contains('TimeoutException')
+            ? 'Upload timed out. Try a smaller image or better connection.'
+            : 'Network error. Please try again.';
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Network error. Please try again.')),
+          SnackBar(content: Text(msg)),
         );
       }
     }
@@ -2997,16 +3009,33 @@ class _NotifTile extends StatelessWidget {
       }
       // no image → trailing stays null (nothing shown)
     } else {
-      // post notification — grey placeholder
-      trailing = ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: Container(
+      // post notification — show actual thumbnail or video placeholder
+      final imgUrl = item.imageUrl;
+      final thumbBg = isLight ? const Color(0xffe8e8e8) : const Color(0xff2a2a2a);
+      Widget thumb;
+      if (imgUrl.startsWith('data:')) {
+        final comma = imgUrl.indexOf(',');
+        Uint8List? bytes;
+        if (comma > -1) {
+          try { bytes = base64Decode(imgUrl.substring(comma + 1)); } catch (_) {}
+        }
+        thumb = bytes != null
+            ? Image.memory(bytes, width: 44, height: 44, fit: BoxFit.cover)
+            : Container(width: 44, height: 44, color: thumbBg);
+      } else if (imgUrl.isNotEmpty) {
+        thumb = Image.network(
+          imgUrl,
           width: 44,
           height: 44,
-          color: isLight
-              ? const Color(0xffe8e8e8)
-              : const Color(0xff2a2a2a),
-        ),
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => Container(width: 44, height: 44, color: thumbBg),
+        );
+      } else {
+        thumb = Container(width: 44, height: 44, color: thumbBg);
+      }
+      trailing = ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: thumb,
       );
     }
 
