@@ -61,6 +61,7 @@ class _HomePageState extends State<HomePage> {
   bool _loading = true;
   String? _activeCity;
   final _composeMedia = <_ComposeMedia>[];
+  bool _composeMediaLoading = false;
   bool _showInlineProfile = false;
   String _inlineProfileUsername = '';
   int? _inlinePostId;
@@ -292,6 +293,8 @@ class _HomePageState extends State<HomePage> {
       maxWidth: 1600,
     );
     if (picked.isEmpty || !mounted) return;
+    setState(() => _composeMediaLoading = true);
+    setPageState(() {});
     final toAdd = picked.take(remaining);
     final newItems = <_ComposeMedia>[];
     for (final f in toAdd) {
@@ -304,6 +307,7 @@ class _HomePageState extends State<HomePage> {
     }
     if (!mounted) return;
     setState(() {
+      _composeMediaLoading = false;
       _composeMedia.removeWhere((m) => m.isVideo);
       _composeMedia.addAll(newItems);
     });
@@ -316,9 +320,12 @@ class _HomePageState extends State<HomePage> {
       maxDuration: const Duration(seconds: 60),
     );
     if (picked == null || !mounted) return;
+    setState(() => _composeMediaLoading = true);
+    setPageState(() {});
     final bytes = await picked.readAsBytes();
     if (!mounted) return;
     setState(() {
+      _composeMediaLoading = false;
       _composeMedia.clear();
       _composeMedia.add(_ComposeMedia.video(
         url: 'data:video/mp4;base64,${base64Encode(bytes)}',
@@ -369,33 +376,43 @@ class _HomePageState extends State<HomePage> {
       body: jsonEncode({'follow': true}),
     );
     if (res.statusCode == 401) {
-      setState(() => _followingAuthors.remove(username));
+      if (mounted) setState(() => _followingAuthors.remove(username));
       await widget.onLogout();
       return;
     }
-    if (res.statusCode != 200 && res.statusCode != 201) {
+    if (res.statusCode >= 400) {
       if (mounted) setState(() => _followingAuthors.remove(username));
-    } else if (mounted) {
-      await _loadFollowingAuthors();
     }
   }
 
   Future<void> _unfollow(String username) async {
-    setState(() => _followingAuthors.remove(username));
+    final removed = _followingProfiles.where((p) => p.username == username).toList();
+    setState(() {
+      _followingAuthors.remove(username);
+      _followingProfiles.removeWhere((p) => p.username == username);
+    });
     final res = await http.post(
       followEndpoint(username),
       headers: authJsonHeaders(widget.session.token),
       body: jsonEncode({'follow': false}),
     );
     if (res.statusCode == 401) {
-      setState(() => _followingAuthors.add(username));
+      if (mounted) {
+        setState(() {
+          _followingAuthors.add(username);
+          _followingProfiles.addAll(removed);
+        });
+      }
       await widget.onLogout();
       return;
     }
-    if (res.statusCode != 200 && res.statusCode != 201) {
-      if (mounted) setState(() => _followingAuthors.add(username));
-    } else if (mounted) {
-      await _loadFollowingAuthors();
+    if (res.statusCode >= 400) {
+      if (mounted) {
+        setState(() {
+          _followingAuthors.add(username);
+          _followingProfiles.addAll(removed);
+        });
+      }
     }
   }
 
@@ -837,8 +854,12 @@ class _HomePageState extends State<HomePage> {
                                             contentPadding: EdgeInsets.zero,
                                           ),
                                         ),
-                                        // ── media grid preview ───────────
-                                        if (_composeMedia.isNotEmpty) ...[
+                                        // ── media grid / loading ─────────
+                                        if (_composeMediaLoading) ...[
+                                          const SizedBox(height: 20),
+                                          const Center(child: CircularProgressIndicator()),
+                                          const SizedBox(height: 6),
+                                        ] else if (_composeMedia.isNotEmpty) ...[
                                           const SizedBox(height: 14),
                                           LayoutBuilder(
                                             builder: (_, constraints) =>
@@ -851,7 +872,8 @@ class _HomePageState extends State<HomePage> {
                                         Row(
                                           children: [
                                             // Photos (max 4, disabled if video present)
-                                            if (!_composeMedia.any(
+                                            if (!_composeMediaLoading &&
+                                                !_composeMedia.any(
                                                 (m) => m.isVideo) &&
                                                 _composeMedia.length < 4)
                                               _ComposeAction(
@@ -861,7 +883,8 @@ class _HomePageState extends State<HomePage> {
                                                         setPageState),
                                               ),
                                             // Video (disabled if any media present)
-                                            if (_composeMedia.isEmpty)
+                                            if (!_composeMediaLoading &&
+                                                _composeMedia.isEmpty)
                                               _ComposeAction(
                                                 icon: Icons
                                                     .videocam_outlined,
@@ -1235,6 +1258,9 @@ class _HomePageState extends State<HomePage> {
                                       onFollow: (post.author != widget.session.user.username && _activeCity == null)
                                           ? () => _follow(post.author)
                                           : null,
+                                      onUnfollow: (post.author != widget.session.user.username && _activeCity == null)
+                                          ? () => _unfollow(post.author)
+                                          : null,
                                       isFollowing: _followingAuthors.contains(post.author),
                                       onHideNavBar: _hideNativeBar,
                                       onShowNavBar: _showNativeBar,
@@ -1400,6 +1426,12 @@ class _HomePageState extends State<HomePage> {
 
   void _onNavTap(int i) {
     if (_activeCity != null && (i == 1 || i == 2 || i == 4)) return;
+    // If a route is pushed on top (e.g. a profile opened from the feed),
+    // pop back to root immediately so the tab switch is visible right away
+    // rather than only after the user manually presses back.
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
     if (i == 2) {
       _openCreatePost();
       return;

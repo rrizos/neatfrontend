@@ -49,6 +49,7 @@ class UserProfile {
     required this.followers,
     required this.following,
     required this.isFollowing,
+    this.followsYou = false,
     this.mutuals = const [],
     this.mutualsCount = 0,
     this.avatarZoomable = true,
@@ -63,9 +64,20 @@ class UserProfile {
   final int followers;
   final int following;
   final bool isFollowing;
+  final bool followsYou;
   final List<MutualUser> mutuals;
   final int mutualsCount;
   final bool avatarZoomable;
+
+  UserProfile copyWith({bool? isFollowing, bool? followsYou, int? followers}) => UserProfile(
+    id: id, username: username, email: email, fullName: fullName,
+    bio: bio, city: city, avatarUrl: avatarUrl,
+    followers: followers ?? this.followers,
+    following: following,
+    isFollowing: isFollowing ?? this.isFollowing,
+    followsYou: followsYou ?? this.followsYou,
+    mutuals: mutuals, mutualsCount: mutualsCount, avatarZoomable: avatarZoomable,
+  );
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -80,6 +92,10 @@ class UserProfile {
       followers: parseInt(json['followers']),
       following: parseInt(json['following']),
       isFollowing: json['isFollowing'] == true,
+      followsYou: json['followsYou'] == true ||
+          json['isFollowedBy'] == true ||
+          json['follows_you'] == true ||
+          json['is_followed_by'] == true,
       mutuals: (json['mutuals'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(MutualUser.fromJson)

@@ -137,13 +137,13 @@ class _EventsPageState extends State<EventsPage> {
             final localDate = _localDates[e.id];
             return EventItem(
               id: e.id, city: e.city, eventType: e.eventType,
-              category: (localCat != null && e.category.isEmpty) ? localCat : e.category,
+              category: (localCat != null && localCat.isNotEmpty) ? localCat : e.category,
               title: e.title, description: e.description,
               location: e.location, imageUrl: e.imageUrl, creator: e.creator,
               organizer: e.organizer, hasTickets: e.hasTickets,
               ticketsUrl: e.ticketsUrl, attendees: e.attendees,
               isAttending: _localAttending.contains(e.id),
-              date: (localDate != null && e.date.isEmpty) ? localDate : e.date,
+              date: (localDate != null && localDate.isNotEmpty) ? localDate : e.date,
             );
           })
           .toList();
@@ -181,18 +181,36 @@ class _EventsPageState extends State<EventsPage> {
     if (res.statusCode == 201) {
       final category = result['category'] as String?;
       final date = result['date'] as String?;
-      if (category != null && category.isNotEmpty || date != null && date.isNotEmpty) {
-        try {
-          final body = jsonDecode(res.body) as Map<String, dynamic>;
-          final eventMap = (body['event'] ?? body) as Map<String, dynamic>?;
-          final id = int.tryParse(eventMap?['id']?.toString() ?? '');
-          if (id != null) {
-            if (category != null && category.isNotEmpty) await _saveLocalCategory(id, category);
-            if (date != null && date.isNotEmpty) await _saveLocalDate(id, date);
-          }
-        } catch (_) {}
+      int? id;
+      try {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic>) {
+          final evt = (() {
+            final v = decoded['event'] ?? decoded['data'] ?? decoded;
+            return v is Map<String, dynamic> ? v : decoded;
+          })();
+          id = int.tryParse(evt['id']?.toString() ?? '')
+              ?? int.tryParse(evt['eventId']?.toString() ?? '')
+              ?? int.tryParse(decoded['id']?.toString() ?? '')
+              ?? int.tryParse(decoded['eventId']?.toString() ?? '');
+        }
+      } catch (_) {}
+      if (id != null) {
+        if (category != null && category.isNotEmpty) await _saveLocalCategory(id, category);
+        if (date != null && date.isNotEmpty) await _saveLocalDate(id, date);
       }
       await _load();
+      if (id == null) {
+        final title = result['title']?.toString().trim() ?? '';
+        if (title.isNotEmpty) {
+          final found = _events.where((e) => e.title == title).firstOrNull;
+          if (found != null) {
+            if (category != null && category.isNotEmpty) await _saveLocalCategory(found.id, category);
+            if (date != null && date.isNotEmpty) await _saveLocalDate(found.id, date);
+            await _load();
+          }
+        }
+      }
     }
   }
 
@@ -274,6 +292,62 @@ class _EventsPageState extends State<EventsPage> {
   List<EventItem> get _filteredOfficial => _selectedCategory == 'All'
       ? _official
       : _official.where((e) => e.category == _selectedCategory).toList();
+
+  bool _isExpired(EventItem e) {
+    if (e.date.isEmpty) return false;
+    final d = DateTime.tryParse(e.date);
+    if (d == null) return false;
+    final today = DateTime.now();
+    return DateTime(d.year, d.month, d.day)
+        .isBefore(DateTime(today.year, today.month, today.day));
+  }
+
+  Widget _buildSection(bool isLight, String title, List<EventItem> events) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 20, 14, 10),
+          child: Text(
+            title,
+            style: TextStyle(
+              color: isLight ? Colors.black : Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 430,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(14, 0, 0, 0),
+            itemCount: events.length,
+            itemBuilder: (context, index) {
+              final event = events[index];
+              return Padding(
+                padding: const EdgeInsets.only(right: 14),
+                child: SizedBox(
+                  width: MediaQuery.sizeOf(context).width - 80,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: _EventCard(
+                      event: event,
+                      currentUsername: widget.currentUser.username,
+                      onAttend: () => _attend(event),
+                      onDelete: () => _deleteEvent(event),
+                      onTap: () => _showEventDetail(event),
+                      attendEnabled: widget.attendEnabled,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -391,38 +465,27 @@ class _EventsPageState extends State<EventsPage> {
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : visible.isEmpty
-                    ? Center(
+                : () {
+                    final upcoming = visible.where((e) => !_isExpired(e)).toList();
+                    final completed = visible.where((e) => _isExpired(e) && !e.isAttending).toList();
+                    final attended = visible.where((e) => _isExpired(e) && e.isAttending).toList();
+                    if (upcoming.isEmpty && completed.isEmpty && attended.isEmpty) {
+                      return Center(
                         child: Text(
                           'No events yet.',
                           style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c)),
                         ),
-                      )
-                    : ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.fromLTRB(14, 12, 0, 24),
-                        itemCount: visible.length,
-                        itemBuilder: (context, index) {
-                          final event = visible[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 14),
-                            child: SizedBox(
-                              width: MediaQuery.sizeOf(context).width - 80,
-                              child: Align(
-                                alignment: Alignment.topCenter,
-                                child: _EventCard(
-                                  event: event,
-                                  currentUsername: widget.currentUser.username,
-                                  onAttend: () => _attend(event),
-                                  onDelete: () => _deleteEvent(event),
-                                  onTap: () => _showEventDetail(event),
-                                  attendEnabled: widget.attendEnabled,
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+                      );
+                    }
+                    return ListView(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      children: [
+                        if (upcoming.isNotEmpty) _buildSection(isLight, 'Upcoming Events', upcoming),
+                        if (completed.isNotEmpty) _buildSection(isLight, 'Completed Events', completed),
+                        if (attended.isNotEmpty) _buildSection(isLight, 'Already Attended', attended),
+                      ],
+                    );
+                  }(),
           ),
         ],
       ),
@@ -491,7 +554,7 @@ class EventItem {
       id: p(json['id']),
       city: json['city']?.toString() ?? '',
       eventType: json['eventType']?.toString() ?? 'community',
-      category: json['category']?.toString() ?? '',
+      category: json['category']?.toString() ?? json['eventCategory']?.toString() ?? json['event_category']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
       description: json['description']?.toString() ?? '',
       location: json['location']?.toString() ?? '',
@@ -502,7 +565,7 @@ class EventItem {
       ticketsUrl: json['ticketsUrl']?.toString() ?? '',
       attendees: p(json['attendees']),
       isAttending: json['isAttending'] == true,
-      date: json['date']?.toString() ?? '',
+      date: json['date']?.toString() ?? json['eventDate']?.toString() ?? json['event_date']?.toString() ?? json['scheduledAt']?.toString() ?? '',
     );
   }
 }

@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_content_type.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_media.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_settings.dart';
@@ -37,6 +36,7 @@ const _kDivLgt    = Color(0xffe0e0e0);
 const _kPostPrefix  = '__neat_post__:';
 const _kImagePrefix = '__neat_image__:';
 const _kVoicePrefix = '__neat_voice__:';
+const _kReplyPrefix = '__neat_reply__:';
 
 // ─── Image helpers ────────────────────────────────────────────────────────────
 
@@ -183,6 +183,18 @@ Uint8List? _parseImage(String t) {
     final bytes = base64Decode(data.substring(0, sep));
     final secs  = int.tryParse(data.substring(sep + 1)) ?? 0;
     return (bytes: bytes, secs: secs);
+  } catch (_) { return null; }
+}
+
+({String sender, String preview, String text})? _parseReply(String t) {
+  if (!t.startsWith(_kReplyPrefix)) return null;
+  try {
+    final d = jsonDecode(t.substring(_kReplyPrefix.length)) as Map<String, dynamic>;
+    return (
+      sender: d['sender']?.toString() ?? '',
+      preview: d['preview']?.toString() ?? '',
+      text: d['text']?.toString() ?? '',
+    );
   } catch (_) { return null; }
 }
 
@@ -467,6 +479,7 @@ class _InboxRow extends StatelessWidget {
     if (msg.startsWith(_kPostPrefix))  return me ? 'You sent a post'          : 'Sent a post';
     if (msg.startsWith(_kImagePrefix)) return me ? 'You sent a photo'         : 'Sent a photo';
     if (msg.startsWith(_kVoicePrefix)) return me ? 'You sent a voice message' : 'Sent a voice message';
+    if (msg.startsWith(_kReplyPrefix)) return me ? 'You replied'              : 'Replied';
     return me ? 'You: $msg' : msg;
   }
 
@@ -899,6 +912,7 @@ class _ConversationPageState extends State<ConversationPage> {
   List<MessageItem> _messages = [];
   bool _loading = true;
   bool _sending = false;
+  MessageItem? _replyTo;
   Timer? _presenceTimer;
   DateTime? _otherLastActive;
 
@@ -1007,9 +1021,17 @@ class _ConversationPageState extends State<ConversationPage> {
           .map(MessageItem.fromJson)
           .toList();
       if (!mounted) return;
-      // Merge: keep any locally-cached messages the server didn't return
-      final serverIds = msgs.map((m) => m.id).toSet();
-      final localOnly = _messages.where((m) => !serverIds.contains(m.id)).toList();
+      // Merge: keep locally-cached messages the server didn't return.
+      // For optimistic (negative-ID) entries, also drop them if the server
+      // returned a matching sender+text — that means the send was confirmed
+      // and the real message has a new positive ID. Without this check,
+      // re-entering the DM would show the message twice.
+      final serverIds   = msgs.map((m) => m.id).toSet();
+      final serverKeys  = msgs.map((m) => '${m.sender}\x00${m.text}').toSet();
+      final localOnly   = _messages
+          .where((m) => !serverIds.contains(m.id))
+          .where((m) => m.id >= 0 || !serverKeys.contains('${m.sender}\x00${m.text}'))
+          .toList();
       final merged = [...msgs, ...localOnly]
         ..sort((a, b) => a.created.compareTo(b.created));
       setState(() { _messages = merged; _loading = false; });
@@ -1050,13 +1072,36 @@ class _ConversationPageState extends State<ConversationPage> {
     }
   }
 
-  Future<void> _sendText() => _sendRaw(_composer.text.trim(), clearInput: true);
+  Future<void> _sendText() {
+    final text = _composer.text.trim();
+    if (text.isEmpty) return Future.value();
+    if (_replyTo != null) {
+      final msg = _replyTo!;
+      _clearReply();
+      return _sendRaw(
+        '$_kReplyPrefix${jsonEncode({'sender': msg.sender, 'preview': _replyPreview(msg), 'text': text})}',
+        clearInput: true,
+      );
+    }
+    return _sendRaw(text, clearInput: true);
+  }
 
   Future<void> _sendImage(Uint8List bytes) =>
       _sendRaw('$_kImagePrefix${base64Encode(bytes)}');
 
   Future<void> _sendVoice(Uint8List bytes, int durationSecs) =>
       _sendRaw('$_kVoicePrefix${base64Encode(bytes)}|$durationSecs');
+
+  void _setReplyTo(MessageItem msg) => setState(() => _replyTo = msg);
+  void _clearReply() => setState(() => _replyTo = null);
+
+  String _replyPreview(MessageItem msg) {
+    if (_parseImage(msg.text) != null) return '📷 Photo';
+    if (_parseVoice(msg.text) != null) return '🎤 Voice message';
+    if (_parsePost(msg.text) != null) return '📎 Post';
+    final t = msg.text;
+    return t.length > 80 ? '${t.substring(0, 80)}…' : t;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1159,6 +1204,7 @@ class _ConversationPageState extends State<ConversationPage> {
                                 onOpenUserProfile: widget.onOpenUserProfile != null
                                     ? () => widget.onOpenUserProfile!(widget.otherUsername)
                                     : null,
+                                onReply: mine ? null : () => _setReplyTo(msg),
                               ),
                             ],
                           );
@@ -1172,6 +1218,8 @@ class _ConversationPageState extends State<ConversationPage> {
             onSendText: _sendText,
             onSendImage: _sendImage,
             onSendVoice: _sendVoice,
+            replyTo: _replyTo,
+            onClearReply: _clearReply,
           ),
         ],
       ),
@@ -1191,6 +1239,7 @@ class _MessageRow extends StatelessWidget {
     required this.isLight,
     required this.onOpenPost,
     this.onOpenUserProfile,
+    this.onReply,
   });
 
   final MessageItem message;
@@ -1201,8 +1250,14 @@ class _MessageRow extends StatelessWidget {
   final bool isLight;
   final void Function(String, int)? onOpenPost;
   final VoidCallback? onOpenUserProfile;
+  final VoidCallback? onReply;
 
   Widget _content() {
+    final replyData = _parseReply(message.text);
+    if (replyData != null) {
+      return _ReplyMessageBubble(replyData: replyData, mine: mine, isLast: isLast, isLight: isLight);
+    }
+
     final imgBytes  = _parseImage(message.text);
     if (imgBytes != null) {
       return _ImageBubble(bytes: imgBytes, mine: mine, isLast: isLast);
@@ -1238,7 +1293,7 @@ class _MessageRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxW     = MediaQuery.sizeOf(context).width * 0.70;
+    final maxW      = MediaQuery.sizeOf(context).width * 0.70;
     final bottomPad = isLast ? 6.0 : 2.0;
 
     if (mine) {
@@ -1251,6 +1306,11 @@ class _MessageRow extends StatelessWidget {
           ],
         ),
       );
+    }
+
+    Widget bubble = ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content());
+    if (onReply != null) {
+      bubble = _SwipeToReply(onReply: onReply!, isLight: isLight, child: bubble);
     }
 
     return Padding(
@@ -1267,7 +1327,7 @@ class _MessageRow extends StatelessWidget {
           else
             const SizedBox(width: 32),
           const SizedBox(width: 6),
-          ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()),
+          bubble,
         ],
       ),
     );
@@ -1495,6 +1555,8 @@ class _Composer extends StatefulWidget {
     required this.onSendText,
     required this.onSendImage,
     required this.onSendVoice,
+    this.replyTo,
+    this.onClearReply,
   });
 
   final TextEditingController controller;
@@ -1503,6 +1565,8 @@ class _Composer extends StatefulWidget {
   final VoidCallback onSendText;
   final Future<void> Function(Uint8List) onSendImage;
   final Future<void> Function(Uint8List, int) onSendVoice;
+  final MessageItem? replyTo;
+  final VoidCallback? onClearReply;
 
   @override
   State<_Composer> createState() => _ComposerState();
@@ -1623,9 +1687,20 @@ class _ComposerState extends State<_Composer> {
   Widget build(BuildContext context) {
     return SafeArea(
       top: false,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 200),
-        child: _recording ? _buildRecordingBar() : _buildNormalBar(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.replyTo != null)
+            _ReplyPreviewBar(
+              replyTo: widget.replyTo!,
+              isLight: widget.isLight,
+              onClear: widget.onClearReply ?? () {},
+            ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: _recording ? _buildRecordingBar() : _buildNormalBar(),
+          ),
+        ],
       ),
     );
   }
@@ -1985,6 +2060,229 @@ class _SharedPostCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Swipe-to-reply wrapper ───────────────────────────────────────────────────
+
+class _SwipeToReply extends StatefulWidget {
+  const _SwipeToReply({required this.child, required this.onReply, required this.isLight});
+  final Widget child;
+  final VoidCallback onReply;
+  final bool isLight;
+
+  @override
+  State<_SwipeToReply> createState() => _SwipeToReplyState();
+}
+
+class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  double _offset = 0;
+  bool _triggered = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    if (d.delta.dx < 0 && _offset <= 0) return;
+    final newOffset = (_offset + d.delta.dx).clamp(0.0, 72.0);
+    setState(() => _offset = newOffset);
+    if (_offset >= 56 && !_triggered) {
+      _triggered = true;
+      HapticFeedback.lightImpact();
+      widget.onReply();
+    }
+  }
+
+  void _onDragEnd(DragEndDetails _) {
+    _triggered = false;
+    final startOffset = _offset;
+    _ctrl.reset();
+    final anim = Tween<double>(begin: startOffset, end: 0)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    anim.addListener(() { if (mounted) setState(() => _offset = anim.value); });
+    _ctrl.forward();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = (_offset / 56).clamp(0.0, 1.0);
+    return GestureDetector(
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: _offset - 36,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: Opacity(
+                opacity: progress,
+                child: Transform.scale(
+                  scale: 0.7 + progress * 0.3,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: widget.isLight ? const Color(0xffe0e0e0) : const Color(0xff3a3a3a),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.reply_rounded, size: 16,
+                        color: widget.isLight ? Colors.black54 : Colors.white54),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Transform.translate(
+            offset: Offset(_offset, 0),
+            child: widget.child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Reply message bubble (quote + reply text) ────────────────────────────────
+
+class _ReplyMessageBubble extends StatelessWidget {
+  const _ReplyMessageBubble({
+    required this.replyData,
+    required this.mine,
+    required this.isLast,
+    required this.isLight,
+  });
+
+  final ({String sender, String preview, String text}) replyData;
+  final bool mine;
+  final bool isLast;
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    final bubbleBg    = mine ? _kBlue : (isLight ? _kOtherLgt : _kOtherDark);
+    final textColor   = mine ? Colors.white : (isLight ? Colors.black : Colors.white);
+    final quoteBg     = mine
+        ? Colors.white.withValues(alpha: 0.15)
+        : (isLight ? Colors.black.withValues(alpha: 0.07) : Colors.white.withValues(alpha: 0.10));
+    final quoteBar    = mine ? Colors.white.withValues(alpha: 0.8) : _kBlue;
+    final quoteSender = mine ? Colors.white.withValues(alpha: 0.9) : _kBlue;
+    final quoteText   = mine
+        ? Colors.white.withValues(alpha: 0.72)
+        : (isLight ? Colors.black54 : Colors.white60);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      decoration: BoxDecoration(color: bubbleBg, borderRadius: _bubbleRadius(mine, isLast)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+            decoration: BoxDecoration(
+              color: quoteBg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border(left: BorderSide(color: quoteBar, width: 3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('@${replyData.sender}',
+                    style: TextStyle(color: quoteSender, fontSize: 12, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(replyData.preview,
+                    style: TextStyle(color: quoteText, fontSize: 12, height: 1.3),
+                    maxLines: 2, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          Text(replyData.text,
+              style: TextStyle(color: textColor, fontSize: 15, height: 1.35)),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Reply preview bar (shown above composer) ─────────────────────────────────
+
+class _ReplyPreviewBar extends StatelessWidget {
+  const _ReplyPreviewBar({required this.replyTo, required this.isLight, required this.onClear});
+  final MessageItem replyTo;
+  final bool isLight;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg      = isLight ? const Color(0xfff2f2f2) : const Color(0xff1a1a1a);
+    final subClr  = isLight ? _kSubLgt : _kSubDark;
+    final divClr  = isLight ? const Color(0xffe0e0e0) : const Color(0xff2a2a2a);
+
+    String preview;
+    if (_parseImage(replyTo.text) != null) {
+      preview = '📷 Photo';
+    } else if (_parseVoice(replyTo.text) != null) {
+      preview = '🎤 Voice message';
+    } else if (_parsePost(replyTo.text) != null) {
+      preview = '📎 Post';
+    } else {
+      final inner = _parseReply(replyTo.text);
+      final raw   = inner != null ? inner.text : replyTo.text;
+      preview = raw.length > 80 ? '${raw.substring(0, 80)}…' : raw;
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: bg,
+        border: Border(top: BorderSide(color: divClr)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 36,
+            decoration: BoxDecoration(color: _kBlue, borderRadius: BorderRadius.circular(1.5)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Replying to @${replyTo.sender}',
+                    style: const TextStyle(
+                        color: _kBlue, fontSize: 12, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(preview,
+                    style: TextStyle(color: subClr, fontSize: 12),
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.close_rounded, size: 20, color: subClr),
+            padding: const EdgeInsets.all(8),
+            onPressed: onClear,
+          ),
+        ],
       ),
     );
   }

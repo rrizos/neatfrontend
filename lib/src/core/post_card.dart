@@ -143,6 +143,24 @@ class _FeedMedia extends StatelessWidget {
       fit: fit,
       width: double.infinity,
       height: double.infinity,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        final isLight = Theme.of(context).brightness == Brightness.light;
+        return Container(
+          width: double.infinity,
+          height: double.infinity,
+          color: isLight ? const Color(0xfff0f0f0) : const Color(0xff1e1e1e),
+          child: const Center(child: CircularProgressIndicator()),
+        );
+      },
+      errorBuilder: (context, _, _) {
+        final isLight = Theme.of(context).brightness == Brightness.light;
+        return Container(
+          width: double.infinity,
+          height: double.infinity,
+          color: isLight ? const Color(0xfff0f0f0) : const Color(0xff1e1e1e),
+        );
+      },
     );
   }
 }
@@ -941,6 +959,7 @@ class FeedPostCard extends StatefulWidget {
     required this.onProfileTap,
     required this.onOpenUserProfile,
     this.onFollow,
+    this.onUnfollow,
     this.isFollowing = false,
     this.followingAuthors = const {},
     this.onFollowUser,
@@ -961,6 +980,7 @@ class FeedPostCard extends StatefulWidget {
   final VoidCallback onProfileTap;
   final ValueChanged<String> onOpenUserProfile;
   final VoidCallback? onFollow;
+  final VoidCallback? onUnfollow;
   final bool isFollowing;
   final Set<String> followingAuthors;
   final Future<void> Function(String)? onFollowUser;
@@ -1107,27 +1127,23 @@ class _FeedPostCardState extends State<FeedPostCard> {
                       ),
                     ),
                   ),
-                  if (widget.onFollow != null) ...[
+                  if (widget.onFollow != null || widget.onUnfollow != null) ...[
                     const SizedBox(width: 8),
                     OutlinedButton(
-                      onPressed: widget.isFollowing ? null : widget.onFollow,
+                      onPressed: widget.isFollowing ? widget.onUnfollow : widget.onFollow,
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         side: BorderSide(
-                          color: widget.isFollowing
-                              ? (isLight ? const Color(0xffb0b0b0) : const Color(0xff555555))
-                              : (isLight ? Colors.black : Colors.white),
+                          color: isLight ? Colors.black : Colors.white,
                         ),
+                        foregroundColor: isLight ? Colors.black : Colors.white,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                       child: Text(
                         widget.isFollowing ? 'Following' : 'Follow',
-                        style: TextStyle(
-                          color: widget.isFollowing
-                              ? (isLight ? const Color(0xffb0b0b0) : const Color(0xff555555))
-                              : (isLight ? Colors.black : Colors.white),
+                        style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                         ),

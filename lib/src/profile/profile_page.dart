@@ -52,6 +52,7 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin {
   UserProfile? _profile;
+  bool? _followingOverride;
   bool _loading = true;
   final ImagePicker _imagePicker = ImagePicker();
   final ScrollController _scrollController = ScrollController();
@@ -109,6 +110,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       // Refresh whichever tab is open; null above ensures a fresh fetch
       if (_tabController.index == 1) _loadLikedPosts();
       if (_tabController.index == 2) _loadSavedPosts();
+      // If server didn't supply followsYou, check followers list as fallback
+      if (!(_profile?.followsYou ?? false)) _checkFollowsYou();
       if (widget.initialPostId != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final key = _postKeys[widget.initialPostId!];
@@ -124,6 +127,26 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _checkFollowsYou() async {
+    try {
+      final res = await http.get(
+        followersEndpoint(widget.username),
+        headers: authGetHeaders(widget.token),
+      );
+      if (res.statusCode != 200 || !mounted) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final users = (decoded['users'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((u) => u['username']?.toString() ?? '')
+          .where((u) => u.isNotEmpty);
+      if (users.contains(widget.currentUser.username)) {
+        setState(() {
+          _profile = _profile?.copyWith(followsYou: true);
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadFollowingAuthors() async {
@@ -188,28 +211,47 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   Future<void> _toggleFollow() async {
     final profile = _profile;
     if (profile == null) return;
+    final newFollowing = !profile.isFollowing;
+    setState(() => _followingOverride = newFollowing);
     final res = await http.post(
       followEndpoint(profile.username),
       headers: authJsonHeaders(widget.token),
-      body: jsonEncode({'follow': !profile.isFollowing}),
+      body: jsonEncode({'follow': newFollowing}),
     );
-    if (res.statusCode == 200) {
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode < 400) {
       if (mounted) {
-        setState(() {
-          _profile = UserProfile.fromJson(
-            decoded['user'] as Map<String, dynamic>,
-          );
-          widget.onSessionUpdated(
-            AuthSession(
-              token: widget.token,
-              user: UserProfile.fromJson(
-                decoded['viewer'] as Map<String, dynamic>,
-              ),
-            ),
-          );
-        });
+        if (res.statusCode == 200 && res.body.isNotEmpty) {
+          try {
+            final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+            setState(() {
+              _followingOverride = null;
+              _profile = UserProfile.fromJson(
+                decoded['user'] as Map<String, dynamic>,
+              );
+              widget.onSessionUpdated(
+                AuthSession(
+                  token: widget.token,
+                  user: UserProfile.fromJson(
+                    decoded['viewer'] as Map<String, dynamic>,
+                  ),
+                ),
+              );
+            });
+          } catch (_) {
+            setState(() {
+              _followingOverride = null;
+              _profile = _profile?.copyWith(isFollowing: newFollowing);
+            });
+          }
+        } else {
+          setState(() {
+            _followingOverride = null;
+            _profile = _profile?.copyWith(isFollowing: newFollowing);
+          });
+        }
       }
+    } else if (mounted) {
+      setState(() => _followingOverride = null);
     }
   }
 
@@ -515,21 +557,25 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         .toList();
     if (!mounted) return;
     widget.onHideNavBar?.call();
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    final navTarget = await Navigator.of(context).push<String?>(
+      MaterialPageRoute<String?>(
         builder: (_) => _UserListPage(
           title: title,
           users: users,
           currentUser: widget.currentUser,
           token: widget.token,
           themeMode: widget.themeMode,
-          onOpenUserProfile: widget.onOpenUserProfile,
           onSessionUpdated: widget.onSessionUpdated,
           onProfileRefresh: _load,
         ),
       ),
     );
+    // Show bar BEFORE navigating so _navBarHideCount is already 0 when
+    // _pushProfileRoute captures its savedCount. If we called onOpenUserProfile
+    // inside the ListTile.onTap (synchronously with pop()), savedCount would
+    // be 1 and the tab bar would get stuck hidden after returning.
     widget.onShowNavBar?.call();
+    if (navTarget != null) widget.onOpenUserProfile(navTarget);
   }
 
   @override
@@ -676,7 +722,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 : Row(
                     children: [
                       Expanded(
-                        child: profile.isFollowing
+                        child: (_followingOverride ?? profile.isFollowing)
                             ? OutlinedButton(
                                 onPressed: widget.followEnabled ? _toggleFollow : null,
                                 style: OutlinedButton.styleFrom(
@@ -686,7 +732,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                 ),
                                 child: const Text('Following', style: TextStyle(fontWeight: FontWeight.w600)),
                               )
-                            : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: const Text('Follow')),
+                            : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? 'Follow Back' : 'Follow')),
                       ),
                       const SizedBox(width: 12),
                       SizedBox(
@@ -939,17 +985,23 @@ class _EditorField extends StatelessWidget {
     required this.controller,
     required this.label,
     this.maxLines = 1,
+    this.maxLength,
+    this.readOnly = false,
   });
 
   final TextEditingController controller;
   final String label;
   final int maxLines;
+  final int? maxLength;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
       maxLines: maxLines,
+      maxLength: maxLength,
+      readOnly: readOnly,
       style: TextStyle(
         color: Theme.of(context).brightness == Brightness.light
             ? Colors.black
@@ -1220,12 +1272,14 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
             _EditorField(
               controller: _cityController,
               label: 'City',
+              readOnly: true,
             ),
             const SizedBox(height: 12),
             _EditorField(
               controller: _bioController,
               label: 'Bio',
               maxLines: 4,
+              maxLength: 150,
             ),
             const SizedBox(height: 12),
             Row(
@@ -1490,7 +1544,6 @@ class _UserListPage extends StatefulWidget {
     required this.currentUser,
     required this.token,
     required this.themeMode,
-    required this.onOpenUserProfile,
     required this.onSessionUpdated,
     required this.onProfileRefresh,
   });
@@ -1500,7 +1553,6 @@ class _UserListPage extends StatefulWidget {
   final UserProfile currentUser;
   final String token;
   final ThemeMode themeMode;
-  final ValueChanged<String> onOpenUserProfile;
   final ValueChanged<AuthSession> onSessionUpdated;
   final Future<void> Function() onProfileRefresh;
 
@@ -1660,6 +1712,11 @@ class _UserListPageState extends State<_UserListPage> {
                           backgroundColor: isLight
                               ? const Color(0xffe6e9ef)
                               : const Color(0xff2a2a2a),
+                          foregroundImage: user.avatarUrl.isNotEmpty
+                              ? (_dataUrlBytes(user.avatarUrl) != null
+                                  ? MemoryImage(_dataUrlBytes(user.avatarUrl)!)
+                                  : NetworkImage(user.avatarUrl) as ImageProvider)
+                              : null,
                           child: Text(
                             initialFor(user.username),
                             style: TextStyle(
@@ -1728,10 +1785,7 @@ class _UserListPageState extends State<_UserListPage> {
                                     child: const Text('Follow'),
                                   ))
                             : null,
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          widget.onOpenUserProfile(user.username);
-                        },
+                        onTap: () => Navigator.of(context).pop<String?>(user.username),
                       );
                     },
                   ),
