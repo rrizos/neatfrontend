@@ -1,8 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -180,7 +179,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
     try {
       VideoPlayerController ctrl;
       final url = widget.url;
-      if (url.startsWith('data:')) {
+      if (url.startsWith('data:') && !kIsWeb) {
         final key = url.hashCode;
         var path = _videoTempCache[key];
         if (path == null || !File(path).existsSync()) {
