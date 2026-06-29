@@ -132,7 +132,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   Future<void> _checkFollowsYou() async {
     try {
       final res = await http.get(
-        followersEndpoint(widget.username),
+        followersEndpoint(widget.currentUser.username),
         headers: authGetHeaders(widget.token),
       );
       if (res.statusCode != 200 || !mounted) return;
@@ -141,7 +141,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           .whereType<Map<String, dynamic>>()
           .map((u) => u['username']?.toString() ?? '')
           .where((u) => u.isNotEmpty);
-      if (users.contains(widget.currentUser.username)) {
+      if (users.contains(widget.username)) {
         setState(() {
           _profile = _profile?.copyWith(followsYou: true);
         });
@@ -547,14 +547,18 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   Future<void> _openUserList({
     required String title,
     required Uri endpoint,
+    bool markFollowsYou = false,
   }) async {
     final res = await http.get(endpoint, headers: authGetHeaders(widget.token));
     if (res.statusCode != 200) return;
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-    final users = (decoded['users'] as List<dynamic>? ?? const [])
+    final rawUsers = (decoded['users'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .map(UserProfile.fromJson)
         .toList();
+    final users = markFollowsYou
+        ? rawUsers.map((u) => u.copyWith(followsYou: true)).toList()
+        : rawUsers;
     if (!mounted) return;
     widget.onHideNavBar?.call();
     final navTarget = await Navigator.of(context).push<String?>(
@@ -665,6 +669,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                         onTap: () => _openUserList(
                           title: 'Followers',
                           endpoint: followersEndpoint(profile.username),
+                          markFollowsYou: profile.username == widget.currentUser.username,
                         ),
                       ),
                       _Metric(
@@ -1782,7 +1787,7 @@ class _UserListPageState extends State<_UserListPage> {
                                         fontSize: 13,
                                       ),
                                     ),
-                                    child: const Text('Follow'),
+                                    child: Text(user.followsYou ? 'Follow Back' : 'Follow'),
                                   ))
                             : null,
                         onTap: () => Navigator.of(context).pop<String?>(user.username),

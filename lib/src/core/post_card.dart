@@ -720,6 +720,7 @@ class _LikersSheet extends StatefulWidget {
     required this.token,
     required this.currentUsername,
     required this.followingAuthors,
+    this.followerAuthors = const {},
     this.onFollow,
     required this.onUnfollow,
     required this.onOpenUserProfile,
@@ -728,6 +729,7 @@ class _LikersSheet extends StatefulWidget {
   final String token;
   final String currentUsername;
   final Set<String> followingAuthors;
+  final Set<String> followerAuthors;
   final Future<void> Function(String)? onFollow;
   final Future<void> Function(String) onUnfollow;
   final ValueChanged<String> onOpenUserProfile;
@@ -859,7 +861,7 @@ class _LikersSheetState extends State<_LikersSheet> {
                             : textColor,
                         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                       ),
-                      child: Text(isFollowing ? 'Following' : 'Follow'),
+                      child: Text(isFollowing ? 'Following' : widget.followerAuthors.contains(u.username) ? 'Follow Back' : 'Follow'),
                     ),
                   ),
           );
@@ -962,6 +964,7 @@ class FeedPostCard extends StatefulWidget {
     this.onUnfollow,
     this.isFollowing = false,
     this.followingAuthors = const {},
+    this.followerAuthors = const {},
     this.onFollowUser,
     this.onUnfollowUser,
     this.onHideNavBar,
@@ -983,6 +986,7 @@ class FeedPostCard extends StatefulWidget {
   final VoidCallback? onUnfollow;
   final bool isFollowing;
   final Set<String> followingAuthors;
+  final Set<String> followerAuthors;
   final Future<void> Function(String)? onFollowUser;
   final Future<void> Function(String)? onUnfollowUser;
   final VoidCallback? onHideNavBar;
@@ -1071,6 +1075,7 @@ class _FeedPostCardState extends State<FeedPostCard> {
           token: widget.token,
           currentUsername: widget.currentUser.username,
           followingAuthors: widget.followingAuthors,
+          followerAuthors: widget.followerAuthors,
           onFollow: widget.onFollowUser,
           onUnfollow: widget.onUnfollowUser ?? (_) async {},
           onOpenUserProfile: widget.onOpenUserProfile,
@@ -1142,7 +1147,11 @@ class _FeedPostCardState extends State<FeedPostCard> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                       child: Text(
-                        widget.isFollowing ? 'Following' : 'Follow',
+                        widget.isFollowing
+                            ? 'Following'
+                            : widget.followerAuthors.contains(widget.post.author)
+                                ? 'Follow Back'
+                                : 'Follow',
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,

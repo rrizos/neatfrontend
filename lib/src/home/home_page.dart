@@ -53,6 +53,7 @@ class _HomePageState extends State<HomePage> {
   final List<NotificationItem> _notificationsList = [];
   final Set<String> _followingAuthors = {};
   final List<UserProfile> _followingProfiles = [];
+  final Set<String> _followerAuthors = {};
   final ScrollController _feedScroll = ScrollController();
   int _nav = 0;
   int _selectedTab = 0;
@@ -128,7 +129,7 @@ class _HomePageState extends State<HomePage> {
           ..addAll(posts);
         _loading = false;
       });
-      await _loadFollowingAuthors();
+      await Future.wait([_loadFollowingAuthors(), _loadFollowerAuthors()]);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -153,6 +154,28 @@ class _HomePageState extends State<HomePage> {
           ..clear()
           ..addAll(users.map((user) => user.username));
         _followingProfiles
+          ..clear()
+          ..addAll(users);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadFollowerAuthors() async {
+    try {
+      final res = await http.get(
+        followersEndpoint(widget.session.user.username),
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (res.statusCode != 200) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final users = (decoded['users'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((j) => j['username']?.toString() ?? '')
+          .where((u) => u.isNotEmpty)
+          .toSet();
+      if (!mounted) return;
+      setState(() {
+        _followerAuthors
           ..clear()
           ..addAll(users);
       });
@@ -558,6 +581,7 @@ class _HomePageState extends State<HomePage> {
         child: _NotificationsSheet(
           fetchNotifications: _fetchNotifications,
           followingAuthors: Set.of(_followingAuthors),
+          followerAuthors: Set.of(_followerAuthors),
           token: widget.session.token,
           onFollow: _follow,
           onUnfollow: _unfollow,
@@ -1172,6 +1196,7 @@ class _HomePageState extends State<HomePage> {
                                   selectedTab: _selectedTab,
                                   city: _activeCity ?? widget.session.user.city,
                                   showFollowing: _activeCity == null,
+                                  scrollController: _feedScroll,
                                   onTabChanged: (value) {
                                     setState(() => _selectedTab = value);
                                     if (_feedScroll.hasClients) {
@@ -1262,6 +1287,7 @@ class _HomePageState extends State<HomePage> {
                                           ? () => _unfollow(post.author)
                                           : null,
                                       isFollowing: _followingAuthors.contains(post.author),
+                                      followerAuthors: _followerAuthors,
                                       onHideNavBar: _hideNativeBar,
                                       onShowNavBar: _showNativeBar,
                                     );
@@ -1278,6 +1304,7 @@ class _HomePageState extends State<HomePage> {
                                 currentUser: widget.session.user,
                                 onOpenUserProfile: _pushProfileRoute,
                                 onOpenPost: (u, id) => _pushProfileRoute(u, postId: id),
+                                followerAuthors: _followerAuthors,
                               )
                             : const SizedBox.shrink(),
                         // 2: Create (intercepted by bottom nav, never shown)
@@ -1624,14 +1651,15 @@ class _TopBar extends StatelessWidget {
 }
 
 class _TabsHeader extends SliverPersistentHeaderDelegate {
-  const _TabsHeader({required this.selectedTab, required this.city, required this.onTabChanged, required this.showFollowing});
+  const _TabsHeader({required this.selectedTab, required this.city, required this.onTabChanged, required this.showFollowing, required this.scrollController});
   final int selectedTab;
   final String city;
   final bool showFollowing;
   final ValueChanged<int> onTabChanged;
+  final ScrollController scrollController;
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return _TabsHeaderContent(selectedTab: selectedTab, city: city, onTabChanged: onTabChanged, showFollowing: showFollowing);
+    return _TabsHeaderContent(selectedTab: selectedTab, city: city, onTabChanged: onTabChanged, showFollowing: showFollowing, scrollController: scrollController);
   }
   @override
   double get maxExtent => 52;
@@ -1642,11 +1670,12 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
 }
 
 class _TabsHeaderContent extends StatefulWidget {
-  const _TabsHeaderContent({required this.selectedTab, required this.city, required this.onTabChanged, required this.showFollowing});
+  const _TabsHeaderContent({required this.selectedTab, required this.city, required this.onTabChanged, required this.showFollowing, required this.scrollController});
   final int selectedTab;
   final String city;
   final bool showFollowing;
   final ValueChanged<int> onTabChanged;
+  final ScrollController scrollController;
 
   @override
   State<_TabsHeaderContent> createState() => _TabsHeaderContentState();
@@ -1656,8 +1685,19 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final CurvedAnimation _curved;
+  double _bgOpacity = 1.0;
 
-  static const _indicatorW = 56.0;
+  static const _indicatorW = 44.0;
+
+  void _onScroll() {
+    final offset = widget.scrollController.hasClients
+        ? widget.scrollController.offset
+        : 0.0;
+    final opacity = (1.0 - (offset / 24.0)).clamp(0.0, 1.0);
+    if ((opacity - _bgOpacity).abs() > 0.01) {
+      setState(() => _bgOpacity = opacity);
+    }
+  }
 
   @override
   void initState() {
@@ -1668,6 +1708,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
       value: widget.selectedTab.toDouble(),
     );
     _curved = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+    widget.scrollController.addListener(_onScroll);
   }
 
   @override
@@ -1676,10 +1717,15 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
     if (old.selectedTab != widget.selectedTab) {
       widget.selectedTab == 1 ? _ctrl.forward() : _ctrl.reverse();
     }
+    if (old.scrollController != widget.scrollController) {
+      old.scrollController.removeListener(_onScroll);
+      widget.scrollController.addListener(_onScroll);
+    }
   }
 
   @override
   void dispose() {
+    widget.scrollController.removeListener(_onScroll);
     _curved.dispose();
     _ctrl.dispose();
     super.dispose();
@@ -1695,7 +1741,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
     // Spectating: single centered city tab, no indicator
     if (!widget.showFollowing) {
       return Container(
-        color: bg,
+        color: bg.withValues(alpha: _bgOpacity),
         height: 52,
         alignment: Alignment.center,
         child: Text(
@@ -1721,7 +1767,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
             final followingClr = Color.lerp(inactiveClr, activeClr,   t)!;
 
             return Container(
-              color: bg,
+              color: bg.withValues(alpha: _bgOpacity),
               child: Stack(
                 children: [
                   Row(
@@ -1766,12 +1812,12 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
                   ),
                   Positioned(
                     left: left,
-                    bottom: 0,
+                    bottom: 4,
                     child: Container(
                       width: _indicatorW,
                       height: 3,
                       decoration: BoxDecoration(
-                        color: const Color(0xff3897f0),
+                        color: activeClr,
                         borderRadius: BorderRadius.circular(1.5),
                       ),
                     ),
@@ -1812,12 +1858,14 @@ class _SearchView extends StatefulWidget {
     required this.currentUser,
     required this.onOpenUserProfile,
     required this.onOpenPost,
+    this.followerAuthors = const {},
   });
 
   final String token;
   final UserProfile currentUser;
   final ValueChanged<String> onOpenUserProfile;
   final void Function(String username, int postId) onOpenPost;
+  final Set<String> followerAuthors;
 
   @override
   State<_SearchView> createState() => _SearchViewState();
@@ -2409,7 +2457,7 @@ class _SearchViewState extends State<_SearchView> {
                   textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 child: Text(
-                  _followingAuthors.contains(user.username) ? 'Following' : 'Follow',
+                  _followingAuthors.contains(user.username) ? 'Following' : widget.followerAuthors.contains(user.username) ? 'Follow Back' : 'Follow',
                 ),
               ),
             ),
@@ -2583,7 +2631,7 @@ class _SearchViewState extends State<_SearchView> {
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               child: Text(
-                'Follow',
+                widget.followerAuthors.contains(user.username) ? 'Follow Back' : 'Follow',
                 style: TextStyle(
                   color: isLight ? Colors.black : Colors.white,
                   fontWeight: FontWeight.w700,
@@ -2779,6 +2827,7 @@ class _NotificationsSheet extends StatefulWidget {
   const _NotificationsSheet({
     required this.fetchNotifications,
     required this.followingAuthors,
+    required this.followerAuthors,
     required this.token,
     required this.onFollow,
     required this.onUnfollow,
@@ -2787,6 +2836,7 @@ class _NotificationsSheet extends StatefulWidget {
   });
   final Future<List<NotificationItem>> Function() fetchNotifications;
   final Set<String> followingAuthors;
+  final Set<String> followerAuthors;
   final String token;
   final Future<void> Function(String username) onFollow;
   final Future<void> Function(String username) onUnfollow;
@@ -2882,6 +2932,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         Widget tileFor(NotificationItem n) => _NotifTile(
               item: n,
               isFollowing: _following.contains(n.actor),
+              followsYou: widget.followerAuthors.contains(n.actor),
               onFollowToggle: () => _toggleFollow(n.actor),
               eventImageUrl: _eventImages[n.targetId] ?? "",
               onTap: () => widget.onTapItem(n, _eventTypes[n.targetId]),
@@ -2973,6 +3024,7 @@ class _NotifTile extends StatelessWidget {
   const _NotifTile({
     required this.item,
     required this.isFollowing,
+    this.followsYou = false,
     required this.onFollowToggle,
     required this.eventImageUrl,
     required this.onTap,
@@ -2980,6 +3032,7 @@ class _NotifTile extends StatelessWidget {
   });
   final NotificationItem item;
   final bool isFollowing;
+  final bool followsYou;
   final VoidCallback onFollowToggle;
   final String eventImageUrl;
   final VoidCallback onTap;
@@ -3023,7 +3076,7 @@ class _NotifTile extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          child: Text(isFollowing ? "Following" : "Follow"),
+          child: Text(isFollowing ? "Following" : followsYou ? "Follow Back" : "Follow"),
         ),
       );
     } else if (isEvent) {
