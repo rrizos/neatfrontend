@@ -323,7 +323,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
           ),
 
           // Controls overlay (fullscreen only)
-          if (widget.fullscreen && _showControls) ...[
+          if (widget.fullscreen && (_showControls || kIsWeb)) ...[
             // Semi-transparent scrim at bottom
             Positioned(
               left: 0, right: 0, bottom: 0,
