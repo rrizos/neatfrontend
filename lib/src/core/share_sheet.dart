@@ -253,11 +253,10 @@ class _ShareSheetState extends State<_ShareSheet> {
   }
 
   Future<void> _copyLink() async {
-    final text = '$_shareText\n$_shareLink';
-    await Clipboard.setData(ClipboardData(text: text));
+    await Clipboard.setData(ClipboardData(text: _shareLink));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
+      const SnackBar(content: Text('Link copied'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -268,9 +267,8 @@ class _ShareSheetState extends State<_ShareSheet> {
       await _copyLink();
       return;
     }
-    final text = '$_shareText\n$_shareLink';
     try {
-      await _shareChannel.invokeMethod<void>('share', {'text': text});
+      await _shareChannel.invokeMethod<void>('share', {'text': _shareLink});
     } catch (_) {}
   }
 
