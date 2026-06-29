@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +11,8 @@ import 'core/post_deep_link_page.dart';
 class NeatApp extends StatefulWidget {
   const NeatApp({super.key});
 
+  static final navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   State<NeatApp> createState() => _NeatAppState();
 }
@@ -17,6 +22,7 @@ class _NeatAppState extends State<NeatApp> {
   ThemeMode _themeMode = ThemeMode.dark;
   bool _loading = true;
   int? _deepLinkPostId;
+  StreamSubscription<Uri>? _linkSub;
 
   @override
   void initState() {
@@ -25,7 +31,38 @@ class _NeatAppState extends State<NeatApp> {
     if (kIsWeb) {
       final match = RegExp(r'^/post/(\d+)$').firstMatch(Uri.base.path);
       if (match != null) _deepLinkPostId = int.tryParse(match.group(1)!);
+    } else {
+      _initAppLinks();
     }
+  }
+
+  Future<void> _initAppLinks() async {
+    final appLinks = AppLinks();
+    _linkSub = appLinks.uriLinkStream.listen(_handleUri);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final uri = await appLinks.getInitialLink();
+      if (uri != null) _handleUri(uri);
+    });
+  }
+
+  void _handleUri(Uri uri) {
+    if (uri.scheme != 'neat') return;
+    int? postId;
+    if (uri.host == 'post' && uri.pathSegments.isNotEmpty) {
+      postId = int.tryParse(uri.pathSegments.first);
+    }
+    if (postId == null) return;
+    NeatApp.navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => PostDeepLinkPage(postId: postId!, themeMode: _themeMode),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _linkSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _restoreTheme() async {
@@ -108,6 +145,7 @@ class _NeatAppState extends State<NeatApp> {
     }
     return MaterialApp(
       title: 'neat',
+      navigatorKey: NeatApp.navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: _lightTheme(),
       darkTheme: _darkTheme(),

@@ -520,16 +520,10 @@ class _AppBanner extends StatelessWidget {
         child: Row(
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.asset('assets/neat_logo.png', width: 40, height: 40),
+              borderRadius: BorderRadius.circular(12),
+              child: Image.asset('assets/neat_logo.png', width: 52, height: 52),
             ),
-            const SizedBox(width: 16),
-            const Expanded(
-              child: Text(
-                'Download Neat',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
-              ),
-            ),
+            const Spacer(),
             _StoreBtn(
               label: 'App Store',
               icon: Icons.apple,
@@ -561,9 +555,8 @@ class _StoreBtn extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xff2a2a2a),
+          color: const Color(0xff1479ff),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xff3a3a3a)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

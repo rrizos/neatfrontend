@@ -15,8 +15,12 @@ export default async (request, context) => {
   }
 
   const media = post.media || [];
+
+  // Prefer the first image in the media array
   const imageItem = media.find((m) => m.type === 'image');
-  const dataUrl = imageItem?.url || post.imageUrl || post.avatarUrl || '';
+
+  // For video-only or text-only posts fall back to the author avatar
+  const dataUrl = imageItem?.url || post.avatarUrl || '';
 
   if (!dataUrl.startsWith('data:')) {
     return new Response('No image', { status: 404 });

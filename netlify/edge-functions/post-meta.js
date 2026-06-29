@@ -21,9 +21,9 @@ export default async (request, context) => {
     return context.next();
   }
 
-  const title = `@${post.author} on Neat${post.city ? ` · ${post.city}` : ''}`;
-  const raw = post.text || '';
-  const description = raw.length > 160 ? raw.slice(0, 157) + '…' : raw || 'Check out this post on Neat';
+  const raw = (post.text || '').trim();
+  const title = raw.length > 100 ? raw.slice(0, 97) + '…' : raw || `Post by @${post.author}`;
+  const description = `@${post.author} on Neat${post.city ? ' · ' + post.city : ''}`;
   const ogImage = `${url.origin}/post/${postId}/og-image`;
 
   const tags = `
