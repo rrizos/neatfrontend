@@ -53,6 +53,8 @@ class UserProfile {
     this.mutuals = const [],
     this.mutualsCount = 0,
     this.avatarZoomable = true,
+    this.isVerified = false,
+    this.isAdmin = false,
   });
   final int id;
   final String username;
@@ -68,6 +70,8 @@ class UserProfile {
   final List<MutualUser> mutuals;
   final int mutualsCount;
   final bool avatarZoomable;
+  final bool isVerified;
+  final bool isAdmin;
 
   UserProfile copyWith({bool? isFollowing, bool? followsYou, int? followers}) => UserProfile(
     id: id, username: username, email: email, fullName: fullName,
@@ -77,6 +81,7 @@ class UserProfile {
     isFollowing: isFollowing ?? this.isFollowing,
     followsYou: followsYou ?? this.followsYou,
     mutuals: mutuals, mutualsCount: mutualsCount, avatarZoomable: avatarZoomable,
+    isVerified: isVerified, isAdmin: isAdmin,
   );
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -102,6 +107,8 @@ class UserProfile {
           .toList(),
       mutualsCount: parseInt(json['mutualsCount']),
       avatarZoomable: json['avatarZoomable'] != false,
+      isVerified: json['isVerified'] == true,
+      isAdmin: json['isAdmin'] == true,
     );
   }
 }
@@ -120,6 +127,7 @@ class FeedPost {
     required this.minutesAgo,
     required this.following,
     required this.likedByFollowing,
+    this.authorVerified = false,
   });
 
   final int id;
@@ -134,6 +142,7 @@ class FeedPost {
   final int minutesAgo;
   final bool following;
   final List<String> likedByFollowing;
+  final bool authorVerified;
   bool liked = false;
   bool saved = false;
 
@@ -180,6 +189,7 @@ class FeedPost {
       minutesAgo: parseInt(json['minutesAgo']),
       following: json['following'] != false,
       likedByFollowing: likedByFollowing,
+      authorVerified: json['authorVerified'] == true,
     );
     post.liked = json['liked'] == true;
     post.saved = json['saved'] == true;

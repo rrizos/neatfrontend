@@ -111,20 +111,16 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 56,
+      height: 60,
       color: const Color(0xff0a0a0a),
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          // Logo
-          Image.asset('assets/neat_logo.png', width: 30, height: 30),
-          const SizedBox(width: 8),
-          const Text(
-            'neat',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 19, letterSpacing: -0.5),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(11),
+            child: Image.asset('assets/neat_logo.png', width: 44, height: 44),
           ),
           const Spacer(),
-          // Open in app button
           _OpenInAppBtn(postId: postId),
         ],
       ),
@@ -157,19 +153,10 @@ class _OpenInAppBtn extends StatelessWidget {
     return GestureDetector(
       onTap: _tap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xff6366f1), Color(0xff8b5cf6)],
-          ),
+          color: const Color(0xff1479ff),
           borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xff6366f1).withValues(alpha: 0.45),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
@@ -178,7 +165,7 @@ class _OpenInAppBtn extends StatelessWidget {
             SizedBox(width: 6),
             Text(
               'Open in app',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13, letterSpacing: 0.1),
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ],
         ),
@@ -301,6 +288,8 @@ class _PostContent extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              _AvatarCircle(avatarBytes: avatarBytes, author: post.author),
+              const SizedBox(height: 22),
               _ActionBtn(icon: Icons.favorite_rounded, count: post.likes, onTap: null),
               const SizedBox(height: 18),
               _ActionBtn(
@@ -312,6 +301,41 @@ class _PostContent extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Author avatar (right column, non-interactive)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AvatarCircle extends StatelessWidget {
+  const _AvatarCircle({required this.avatarBytes, required this.author});
+  final Uint8List? avatarBytes;
+  final String author;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 50,
+      height: 50,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+      ),
+      child: ClipOval(
+        child: avatarBytes != null
+            ? Image.memory(avatarBytes!, fit: BoxFit.cover)
+            : ColoredBox(
+                color: const Color(0xff2a2a2a),
+                child: Center(
+                  child: Text(
+                    author.isNotEmpty ? author[0].toUpperCase() : '?',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 18),
+                  ),
+                ),
+              ),
+      ),
     );
   }
 }
@@ -519,21 +543,20 @@ class _AppBanner extends StatelessWidget {
         top: false,
         child: Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.asset('assets/neat_logo.png', width: 52, height: 52),
+            Expanded(
+              child: _StoreBtn(
+                label: 'App Store',
+                icon: Icons.apple,
+                onTap: () => _launch(_iosUrl),
+              ),
             ),
-            const Spacer(),
-            _StoreBtn(
-              label: 'App Store',
-              icon: Icons.apple,
-              onTap: () => _launch(_iosUrl),
-            ),
-            const SizedBox(width: 8),
-            _StoreBtn(
-              label: 'Google Play',
-              icon: Icons.android_rounded,
-              onTap: () => _launch(_androidUrl),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _StoreBtn(
+                label: 'Google Play',
+                icon: Icons.android_rounded,
+                onTap: () => _launch(_androidUrl),
+              ),
             ),
           ],
         ),
@@ -553,17 +576,17 @@ class _StoreBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
           color: const Color(0xff1479ff),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.white, size: 15),
-            const SizedBox(width: 5),
-            Text(label, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+            Icon(icon, color: Colors.white, size: 16),
+            const SizedBox(width: 7),
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
           ],
         ),
       ),

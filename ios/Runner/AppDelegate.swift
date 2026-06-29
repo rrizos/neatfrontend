@@ -33,17 +33,22 @@ import UIKit
         let channel = FlutterMethodChannel(name: "com.neat/share",
                                            binaryMessenger: r.messenger())
         channel.setMethodCallHandler { [weak self] call, result in
-            guard call.method == "share" else {
-                result(FlutterMethodNotImplemented)
-                return
-            }
             let args = call.arguments as? [String: Any]
             let text = args?["text"] as? String ?? ""
-            let imageTypedData = args?["imageBytes"] as? FlutterStandardTypedData
-            let imageData = imageTypedData?.data
 
-            DispatchQueue.main.async {
-                self?.presentNativeShareSheet(text: text, imageData: imageData, result: result)
+            switch call.method {
+            case "share":
+                let imageTypedData = args?["imageBytes"] as? FlutterStandardTypedData
+                let imageData = imageTypedData?.data
+                DispatchQueue.main.async {
+                    self?.presentNativeShareSheet(text: text, imageData: imageData, result: result)
+                }
+            case "shareToInstagramDm":
+                DispatchQueue.main.async {
+                    self?.shareToInstagramDm(text: text, result: result)
+                }
+            default:
+                result(FlutterMethodNotImplemented)
             }
         }
     }
@@ -75,6 +80,17 @@ import UIKit
         }
 
         presenter?.present(vc, animated: true)
+    }
+
+    private func shareToInstagramDm(text: String, result: @escaping FlutterResult) {
+        let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
+        guard let url = URL(string: "instagram://sharesheet?text=\(encoded)"),
+              UIApplication.shared.canOpenURL(url) else {
+            // Instagram not installed — fall back to the system share sheet
+            presentNativeShareSheet(text: text, imageData: nil, result: result)
+            return
+        }
+        UIApplication.shared.open(url, options: [:]) { _ in result(nil) }
     }
 
     // MARK: - NativeCityMap plugin

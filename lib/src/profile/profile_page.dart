@@ -8,6 +8,8 @@ import 'package:image_picker/image_picker.dart';
 import '../core/api.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
+import '../admin/admin_panel_page.dart';
+import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../messages/messages_page.dart';
 
@@ -355,7 +357,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (post.author == widget.currentUser.username)
+            if (post.author == widget.currentUser.username || widget.currentUser.isAdmin)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
                 title: const Text('Delete post', style: TextStyle(color: Color(0xfff66c6c))),
@@ -364,13 +366,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   await _deletePost(post);
                 },
               ),
-            const ListTile(
-              leading: Icon(Icons.visibility_off_outlined),
-              title: Text('Hide post'),
-            ),
-            const ListTile(
-              leading: Icon(Icons.flag_outlined),
-              title: Text('Report post'),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined),
+              title: const Text('Report post'),
+              onTap: () {
+                Navigator.of(context).pop();
+                showReportPostSheet(
+                  context,
+                  postId: post.id,
+                  token: widget.token,
+                );
+              },
             ),
           ],
         ),
@@ -625,6 +631,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           ],
         ),
         actions: [
+          if (profile.username == widget.currentUser.username && widget.currentUser.isAdmin)
+            IconButton(
+              tooltip: 'Admin Panel',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AdminPanelPage(token: widget.token),
+                ),
+              ),
+              icon: Icon(Icons.admin_panel_settings_rounded, color: isLight ? Colors.black : Colors.white),
+            ),
           if (profile.username == widget.currentUser.username)
             IconButton(
               onPressed: () async => widget.onLogout(),
@@ -691,13 +707,22 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  profile.fullName.isEmpty ? profile.username : profile.fullName,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: isLight ? Colors.black : Colors.white,
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      profile.fullName.isEmpty ? profile.username : profile.fullName,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: isLight ? Colors.black : Colors.white,
+                      ),
+                    ),
+                    if (profile.isVerified) ...[
+                      const SizedBox(width: 5),
+                      const Icon(Icons.verified_rounded, size: 18, color: Color(0xff0095f6)),
+                    ],
+                  ],
                 ),
                 if (profile.bio.isNotEmpty) ...[
                   const SizedBox(height: 4),

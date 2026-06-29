@@ -281,6 +281,7 @@ class _EventsPageState extends State<EventsPage> {
           _deleteEvent(event);
         },
         attendEnabled: widget.attendEnabled,
+        isAdmin: widget.currentUser.isAdmin,
       ),
     );
   }
@@ -338,6 +339,7 @@ class _EventsPageState extends State<EventsPage> {
                       onDelete: () => _deleteEvent(event),
                       onTap: () => _showEventDetail(event),
                       attendEnabled: widget.attendEnabled,
+                      isAdmin: widget.currentUser.isAdmin,
                     ),
                   ),
                 ),
@@ -578,6 +580,7 @@ class _EventCard extends StatelessWidget {
     required this.onDelete,
     required this.onTap,
     this.attendEnabled = true,
+    this.isAdmin = false,
   });
 
   final EventItem event;
@@ -586,6 +589,7 @@ class _EventCard extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onTap;
   final bool attendEnabled;
+  final bool isAdmin;
 
   @override
   Widget build(BuildContext context) {
@@ -792,7 +796,7 @@ class _EventCard extends StatelessWidget {
                       style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3)),
                     ),
                     const Spacer(),
-                    if (event.creator == currentUsername)
+                    if (event.creator == currentUsername || isAdmin)
                       PopupMenuButton<String>(
                         icon: const Icon(
                           Icons.more_horiz_rounded,
@@ -1317,6 +1321,7 @@ class _EventDetailSheet extends StatefulWidget {
     required this.onAttend,
     required this.onDelete,
     this.attendEnabled = true,
+    this.isAdmin = false,
   });
 
   final EventItem event;
@@ -1324,6 +1329,7 @@ class _EventDetailSheet extends StatefulWidget {
   final VoidCallback onAttend;
   final VoidCallback onDelete;
   final bool attendEnabled;
+  final bool isAdmin;
 
   @override
   State<_EventDetailSheet> createState() => _EventDetailSheetState();
@@ -1503,7 +1509,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                           ),
                         ],
                       ),
-                      if (event.creator == widget.currentUsername) ...[
+                      if (event.creator == widget.currentUsername || widget.isAdmin) ...[
                         const SizedBox(height: 10),
                         SizedBox(
                           width: double.infinity,

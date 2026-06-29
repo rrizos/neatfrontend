@@ -18,6 +18,7 @@ import 'package:image_picker/image_picker.dart';
 import '../core/api.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
+import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../events/events_page.dart';
 import '../map/city_map_view.dart';
@@ -256,54 +257,65 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  static const _kMaxImageBytes = 6 * 1024 * 1024; // 6 MB per image
+  static const _kMaxVideoBytes = 20 * 1024 * 1024; // 20 MB per video
+
   Future<void> _createPost() async {
     final text = _compose.text.trim();
     if (text.isEmpty) return;
-    final body = <String, dynamic>{'text': text};
-    if (_composeMedia.isNotEmpty) {
-      body['media'] = _composeMedia
-          .map((m) => {'type': m.type, 'url': m.url})
-          .toList();
-      final firstImage = _composeMedia.firstWhere(
-        (m) => !m.isVideo,
-        orElse: () => _composeMedia.first,
-      );
-      if (!firstImage.isVideo) body['imageUrl'] = firstImage.url;
-    }
     try {
-      final client = http.Client();
-      http.Response res;
-      try {
-        res = await client
-            .post(
-              postsEndpoint(),
-              headers: authJsonHeaders(widget.session.token),
-              body: jsonEncode(body),
-            )
-            .timeout(const Duration(seconds: 90));
-      } finally {
-        client.close();
+      final request = http.MultipartRequest('POST', postsEndpoint())
+        ..headers['Authorization'] = 'Token ${widget.session.token}';
+      request.fields['text'] = text;
+
+      final mediaInfo = <Map<String, dynamic>>[];
+      int fileIndex = 0;
+      for (final m in _composeMedia) {
+        if (m.externalUrl != null) {
+          mediaInfo.add({'type': m.type, 'url': m.externalUrl!, 'order': mediaInfo.length});
+        } else if (m.isVideo && m.videoPath != null) {
+          mediaInfo.add({'type': 'video', 'file_index': fileIndex, 'order': mediaInfo.length});
+          request.files.add(await http.MultipartFile.fromPath(
+            'media_$fileIndex',
+            m.videoPath!,
+            filename: 'video.mp4',
+          ));
+          fileIndex++;
+        } else if (m.imageBytes != null) {
+          mediaInfo.add({'type': 'image', 'file_index': fileIndex, 'order': mediaInfo.length});
+          request.files.add(http.MultipartFile.fromBytes(
+            'media_$fileIndex',
+            m.imageBytes!,
+            filename: 'image.jpg',
+          ));
+          fileIndex++;
+        }
       }
+      request.fields['media'] = jsonEncode(mediaInfo);
+
+      final streamed = await request.send().timeout(const Duration(seconds: 120));
+      final res = await http.Response.fromStream(streamed);
       if (!mounted) return;
       if (res.statusCode == 201) {
         _compose.clear();
         setState(() => _composeMedia.clear());
         Navigator.of(context).pop();
         _load();
-      } else {
-        final msg = friendlyHttpError(res);
+      } else if (res.statusCode == 413) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg)),
+          const SnackBar(content: Text('File too large. Try a shorter video or smaller photos.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyHttpError(res))),
         );
       }
     } catch (e) {
       if (mounted) {
         final msg = e.toString().contains('TimeoutException')
-            ? 'Upload timed out. Try a smaller image or better connection.'
+            ? 'Upload timed out. Please try again.'
             : 'Network error. Please try again.';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg)),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     }
   }
@@ -320,13 +332,15 @@ class _HomePageState extends State<HomePage> {
     setPageState(() {});
     final toAdd = picked.take(remaining);
     final newItems = <_ComposeMedia>[];
+    int skipped = 0;
     for (final f in toAdd) {
+      final fileSize = await f.length();
+      if (fileSize > _kMaxImageBytes) {
+        skipped++;
+        continue;
+      }
       final bytes = await f.readAsBytes();
-      final ext = f.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
-      newItems.add(_ComposeMedia.image(
-        url: 'data:image/$ext;base64,${base64Encode(bytes)}',
-        imageBytes: bytes,
-      ));
+      newItems.add(_ComposeMedia.localImage(imageBytes: bytes));
     }
     if (!mounted) return;
     setState(() {
@@ -335,25 +349,44 @@ class _HomePageState extends State<HomePage> {
       _composeMedia.addAll(newItems);
     });
     setPageState(() {});
+    if (skipped > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$skipped photo${skipped > 1 ? 's were' : ' was'} too large and skipped. Try selecting a different photo.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _pickComposeVideo(StateSetter setPageState) async {
     final picked = await _imagePicker.pickVideo(
       source: ImageSource.gallery,
-      maxDuration: const Duration(seconds: 60),
+      maxDuration: const Duration(seconds: 30),
     );
     if (picked == null || !mounted) return;
     setState(() => _composeMediaLoading = true);
     setPageState(() {});
-    final bytes = await picked.readAsBytes();
+    final fileSize = await picked.length();
+    if (!mounted) return;
+    if (fileSize > _kMaxVideoBytes) {
+      setState(() => _composeMediaLoading = false);
+      setPageState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Video is too large (${(fileSize / 1024 / 1024).toStringAsFixed(0)} MB). Try a shorter clip under 30 seconds.',
+          ),
+        ),
+      );
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _composeMediaLoading = false;
       _composeMedia.clear();
-      _composeMedia.add(_ComposeMedia.video(
-        url: 'data:video/mp4;base64,${base64Encode(bytes)}',
-        videoPath: picked.path,
-      ));
+      _composeMedia.add(_ComposeMedia.localVideo(videoPath: picked.path));
     });
     setPageState(() {});
   }
@@ -641,8 +674,10 @@ class _HomePageState extends State<HomePage> {
               );
             } else if (item.imageBytes != null) {
               preview = Image.memory(item.imageBytes!, fit: BoxFit.cover);
+            } else if (item.externalUrl != null) {
+              preview = Image.network(item.externalUrl!, fit: BoxFit.cover);
             } else {
-              preview = Image.network(item.url, fit: BoxFit.cover);
+              preview = const ColoredBox(color: Color(0xff1a1a1a));
             }
             return SizedBox(
               width: size,
@@ -694,8 +729,10 @@ class _HomePageState extends State<HomePage> {
                 );
               } else if (item.imageBytes != null) {
                 preview = Image.memory(item.imageBytes!, fit: BoxFit.cover);
+              } else if (item.externalUrl != null) {
+                preview = Image.network(item.externalUrl!, fit: BoxFit.cover);
               } else {
-                preview = Image.network(item.url, fit: BoxFit.cover);
+                preview = const ColoredBox(color: Color(0xff1a1a1a));
               }
               return ClipRRect(
                 borderRadius: BorderRadius.circular(18),
@@ -988,9 +1025,9 @@ class _HomePageState extends State<HomePage> {
                                                     setState(() {
                                                       _composeMedia.clear();
                                                       _composeMedia.add(
-                                                        _ComposeMedia.image(
-                                                          url: url,
-                                                          imageBytes: null,
+                                                        _ComposeMedia.external(
+                                                          externalUrl: url,
+                                                          mediaType: 'image',
                                                         ),
                                                       );
                                                     });
@@ -1249,7 +1286,7 @@ class _HomePageState extends State<HomePage> {
                                         title: post.author,
                                         child: Column(
                                           children: [
-                                            if (post.author == widget.session.user.username)
+                                            if (post.author == widget.session.user.username || widget.session.user.isAdmin)
                                               ListTile(
                                                 contentPadding: EdgeInsets.zero,
                                                 leading: const Icon(
@@ -1262,17 +1299,18 @@ class _HomePageState extends State<HomePage> {
                                                   await _deletePost(post);
                                                 },
                                               ),
-                                            const ListTile(
+                                            ListTile(
                                               contentPadding: EdgeInsets.zero,
-                                              leading: Icon(
-                                                Icons.visibility_off_outlined,
-                                              ),
-                                              title: Text('Hide post'),
-                                            ),
-                                            const ListTile(
-                                              contentPadding: EdgeInsets.zero,
-                                              leading: Icon(Icons.flag_outlined),
-                                              title: Text('Report post'),
+                                              leading: const Icon(Icons.flag_outlined),
+                                              title: const Text('Report post'),
+                                              onTap: () {
+                                                Navigator.of(context).pop();
+                                                showReportPostSheet(
+                                                  context,
+                                                  postId: post.id,
+                                                  token: widget.session.token,
+                                                );
+                                              },
                                             ),
                                           ],
                                         ),
@@ -2806,17 +2844,23 @@ class _ComposeAction extends StatelessWidget {
 // ── Compose media item ───────────────────────────────────────────────────────
 
 class _ComposeMedia {
-  _ComposeMedia.image({required this.url, required this.imageBytes})
+  _ComposeMedia.localImage({required this.imageBytes})
       : type = 'image',
-        videoPath = null;
-  _ComposeMedia.video({required this.url, required this.videoPath})
+        videoPath = null,
+        externalUrl = null;
+  _ComposeMedia.localVideo({required this.videoPath})
       : type = 'video',
-        imageBytes = null;
+        imageBytes = null,
+        externalUrl = null;
+  _ComposeMedia.external({required this.externalUrl, required String mediaType})
+      : type = mediaType,
+        imageBytes = null,
+        videoPath = null;
 
-  final String type; // 'image' or 'video'
-  final String url; // data: URL sent to backend
-  final Uint8List? imageBytes; // pre-decoded bytes for fast preview (images)
-  final String? videoPath; // local file path for video preview
+  final String type;
+  final Uint8List? imageBytes; // local image bytes: used for preview and upload
+  final String? videoPath;     // local video file path: streamed for upload
+  final String? externalUrl;   // Giphy / remote URL: sent as-is
 
   bool get isVideo => type == 'video';
 }

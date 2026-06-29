@@ -1,4 +1,4 @@
- import 'dart:convert';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../core/api.dart';
 import '../core/models.dart';
 import '../map/city_map_view.dart';
+import 'forgot_password_screen.dart';
 
 class AuthScreen extends StatefulWidget {
 const AuthScreen({
@@ -170,6 +171,23 @@ FilledButton(
 onPressed: _loading ? null : _submit,
 child: Text(_signup ? 'Sign up' : 'Sign in'),
 ),
+if (!_signup) ...[
+  const SizedBox(height: 4),
+  TextButton(
+    onPressed: _loading ? null : () => Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ForgotPasswordScreen(
+          onAuthenticated: widget.onAuthenticated,
+          themeMode: widget.themeMode,
+        ),
+      ),
+    ),
+    child: const Text(
+      'Forgot password?',
+      style: TextStyle(color: Color(0xff1479ff), fontWeight: FontWeight.w600),
+    ),
+  ),
+],
 TextButton(
 onPressed: _loading
 ? null

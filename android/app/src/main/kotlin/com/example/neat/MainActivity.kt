@@ -17,15 +17,39 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARE_CHANNEL)
             .setMethodCallHandler { call, result ->
-                if (call.method == "share") {
-                    val text = call.argument<String>("text") ?: ""
-                    val imageBytes = call.argument<ByteArray>("imageBytes")
-                    nativeShare(text, imageBytes)
-                    result.success(null)
-                } else {
-                    result.notImplemented()
+                when (call.method) {
+                    "share" -> {
+                        val text = call.argument<String>("text") ?: ""
+                        val imageBytes = call.argument<ByteArray>("imageBytes")
+                        nativeShare(text, imageBytes)
+                        result.success(null)
+                    }
+                    "shareToInstagramDm" -> {
+                        val text = call.argument<String>("text") ?: ""
+                        shareToInstagramDm(text)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun shareToInstagramDm(text: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            setPackage("com.instagram.android")
+        }
+        if (intent.resolveActivity(packageManager) != null) {
+            startActivity(intent)
+        } else {
+            // Instagram not installed — fall back to generic share sheet
+            val fallback = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            startActivity(Intent.createChooser(fallback, "Share via"))
+        }
     }
 
     private fun nativeShare(text: String, imageBytes: ByteArray?) {

@@ -43,6 +43,10 @@
 	<string>Neat needs access to your photo library to send photos.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Neat uses your camera to take photos for messages.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>instagram</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

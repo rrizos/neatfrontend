@@ -31,9 +31,26 @@ Uri postSaveEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/save/');
 Uri postCommentsEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/posts/$id/comments/');
 Uri postDeleteEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/delete/');
+Uri postReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/report/');
+
+// Admin endpoints
+Uri get adminReportsEndpoint => Uri.parse('$apiBaseUrl/api/auth/admin/reports/');
+Uri adminDismissReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/auth/admin/reports/$id/');
+Uri adminDeletePostEndpoint(int id) => Uri.parse('$apiBaseUrl/api/auth/admin/posts/$id/');
+Uri adminUsersEndpoint([String query = '']) {
+  final uri = Uri.parse('$apiBaseUrl/api/auth/admin/users/');
+  if (query.trim().isEmpty) return uri;
+  return uri.replace(queryParameters: {'q': query.trim()});
+}
+Uri adminVerifyUserEndpoint(String username) =>
+    Uri.parse('$apiBaseUrl/api/auth/admin/users/$username/verify/');
+Uri adminDeleteUserEndpoint(String username) =>
+    Uri.parse('$apiBaseUrl/api/auth/admin/users/$username/delete/');
 Uri commentLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/like/');
 Uri get savedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/saved/');
 Uri get likedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/liked/');
+Uri get forgotPasswordEndpoint => Uri.parse('$apiBaseUrl/api/auth/forgot-password/');
+Uri get resetPasswordEndpoint => Uri.parse('$apiBaseUrl/api/auth/reset-password/');
 Uri get signupEndpoint => Uri.parse('$apiBaseUrl/api/auth/signup/');
 Uri get loginEndpoint => Uri.parse('$apiBaseUrl/api/auth/login/');
 Uri get logoutEndpoint => Uri.parse('$apiBaseUrl/api/auth/logout/');

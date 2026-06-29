@@ -1114,12 +1114,21 @@ class _FeedPostCardState extends State<FeedPostCard> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            widget.post.author,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: isLight ? Colors.black : Colors.white,
-                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                widget.post.author,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: isLight ? Colors.black : Colors.white,
+                                ),
+                              ),
+                              if (widget.post.authorVerified) ...[
+                                const SizedBox(width: 3),
+                                const Icon(Icons.verified_rounded, size: 14, color: Color(0xff0095f6)),
+                              ],
+                            ],
                           ),
                           Text(
                             postAge(widget.post.minutesAgo),

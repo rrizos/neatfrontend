@@ -273,6 +273,18 @@ class _ShareSheetState extends State<_ShareSheet> {
     } catch (_) {}
   }
 
+  Future<void> _shareToInstagramDm() async {
+    if (kIsWeb) {
+      await _copyLink();
+      return;
+    }
+    try {
+      await _shareChannel.invokeMethod<void>('shareToInstagramDm', {'text': _shareLink});
+    } catch (_) {
+      await _nativeShare();
+    }
+  }
+
   // ── build ───────────────────────────────────────────────────────────────────
 
   @override
@@ -414,7 +426,7 @@ class _ShareSheetState extends State<_ShareSheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    _ExtBtn(label: 'Instagram', onTap: _nativeShare, child: const _IgIcon()),
+                    _ExtBtn(label: 'Instagram', onTap: _shareToInstagramDm, child: const _IgIcon()),
                     const SizedBox(width: 16),
                     _ExtBtn(label: 'WhatsApp', onTap: () => _launch('https://wa.me/?text=${Uri.encodeComponent('$_shareText\n$_shareLink')}'), child: const _WhatsAppIcon()),
                     const SizedBox(width: 16),
