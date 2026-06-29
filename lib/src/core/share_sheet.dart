@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -558,101 +559,81 @@ class _ExtBtn extends StatelessWidget {
 
 // ── brand icons ───────────────────────────────────────────────────────────────
 
+Widget _brandIcon({required String asset, required Decoration decoration, double size = 28}) {
+  return Container(
+    width: 56, height: 56,
+    decoration: decoration,
+    child: Center(
+      child: SvgPicture.asset(
+        asset,
+        width: size, height: size,
+        colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+      ),
+    ),
+  );
+}
+
 class _IgIcon extends StatelessWidget {
   const _IgIcon();
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 56, height: 56,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xfff09433), Color(0xffe6683c), Color(0xffdc2743), Color(0xffcc2366), Color(0xffbc1888)],
-          begin: Alignment.bottomLeft, end: Alignment.topRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
+  Widget build(BuildContext context) => _brandIcon(
+    asset: 'assets/instagram.svg',
+    size: 26,
+    decoration: BoxDecoration(
+      gradient: const LinearGradient(
+        colors: [Color(0xfffeda77), Color(0xfff58529), Color(0xffdd2a7b), Color(0xff8134af), Color(0xff515bd4)],
+        stops: [0.0, 0.25, 0.5, 0.75, 1.0],
+        begin: Alignment.bottomLeft, end: Alignment.topRight,
       ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Container(
-            width: 24, height: 24,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white, width: 2.5),
-              borderRadius: BorderRadius.circular(7),
-            ),
-          ),
-          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
-          Positioned(
-            top: 12, right: 13,
-            child: Container(width: 4, height: 4, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
-          ),
-        ],
-      ),
-    );
-  }
+      borderRadius: BorderRadius.circular(16),
+    ),
+  );
 }
 
 class _WhatsAppIcon extends StatelessWidget {
   const _WhatsAppIcon();
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 56, height: 56,
-      decoration: BoxDecoration(color: const Color(0xff25D366), borderRadius: BorderRadius.circular(16)),
-      child: Center(
-        child: Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 28),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => _brandIcon(
+    asset: 'assets/whatsapp.svg',
+    size: 28,
+    decoration: BoxDecoration(color: const Color(0xff25d366), borderRadius: BorderRadius.circular(16)),
+  );
 }
 
 class _XIcon extends StatelessWidget {
   const _XIcon();
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 56, height: 56,
-      decoration: BoxDecoration(color: const Color(0xff000000), borderRadius: BorderRadius.circular(16)),
-      child: const Center(
-        child: Text(
-          'X',
-          style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -1),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => _brandIcon(
+    asset: 'assets/x.svg',
+    size: 24,
+    decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(16)),
+  );
 }
 
 class _TelegramIcon extends StatelessWidget {
   const _TelegramIcon();
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 56, height: 56,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xff2AABEE), Color(0xff229ED9)],
-          begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        ),
-        borderRadius: BorderRadius.circular(16),
+  Widget build(BuildContext context) => _brandIcon(
+    asset: 'assets/telegram.svg',
+    size: 28,
+    decoration: BoxDecoration(
+      gradient: const LinearGradient(
+        colors: [Color(0xff2aabee), Color(0xff229ed9)],
+        begin: Alignment.topCenter, end: Alignment.bottomCenter,
       ),
-      child: const Icon(Icons.near_me_rounded, color: Colors.white, size: 26),
-    );
-  }
+      borderRadius: BorderRadius.circular(16),
+    ),
+  );
 }
 
 class _FbIcon extends StatelessWidget {
   const _FbIcon();
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 56, height: 56,
-      decoration: BoxDecoration(color: const Color(0xff1877F2), borderRadius: BorderRadius.circular(16)),
-      child: const Center(
-        child: Text('f', style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900, height: 1.1)),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => _brandIcon(
+    asset: 'assets/facebook.svg',
+    size: 26,
+    decoration: BoxDecoration(color: const Color(0xff1877f2), borderRadius: BorderRadius.circular(16)),
+  );
 }
 
 class _LinkIcon extends StatelessWidget {

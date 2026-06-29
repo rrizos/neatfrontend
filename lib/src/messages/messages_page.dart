@@ -5,6 +5,11 @@ import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_content_type.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_media.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_settings.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_theme.dart';
+import 'package:giphy_flutter_sdk/giphy_dialog.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -368,30 +373,50 @@ class _MessagesPageState extends State<MessagesPage> {
                 ),
               ),
             ),
-            if (widget.suggestedUsers.isNotEmpty && q.isEmpty) ...[
-              SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 90,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    itemCount: widget.suggestedUsers.length,
-                    separatorBuilder: (_, i) => const SizedBox(width: 18),
-                    itemBuilder: (_, i) {
-                      final u = widget.suggestedUsers[i];
-                      return _QuickChip(
-                        user: u,
-                        isLight: isLight,
-                        onTap: () => _startChatWith(u.username),
-                      );
-                    },
+            if (q.isEmpty) ...() {
+                final activeConvs = _convs
+                    .where((c) => _isActiveNow(c.otherLastActive))
+                    .toList();
+                if (activeConvs.isEmpty) return const <Widget>[];
+                return [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 0, 6),
+                      child: Text(
+                        'Active Now',
+                        style: TextStyle(
+                          color: isLight ? Colors.black : Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: Divider(height: 1, color: isLight ? _kDivLgt : _kDivDark),
-              ),
-            ],
+                  SliverToBoxAdapter(
+                    child: SizedBox(
+                      height: 90,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        itemCount: activeConvs.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 18),
+                        itemBuilder: (_, i) {
+                          final c = activeConvs[i];
+                          return _ActiveChip(
+                            username: c.otherUser,
+                            avatarUrl: c.otherAvatarUrl,
+                            isLight: isLight,
+                            onTap: () => _open(c),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: Divider(height: 1, color: isLight ? _kDivLgt : _kDivDark),
+                  ),
+                ];
+              }(),
             if (_loading)
               const SliverFillRemaining(
                 child: Center(child: CircularProgressIndicator(color: _kBlue)),
@@ -555,6 +580,63 @@ class _InboxRow extends StatelessWidget {
 }
 
 // ─── Quick-start chip ─────────────────────────────────────────────────────────
+
+class _ActiveChip extends StatelessWidget {
+  const _ActiveChip({required this.username, required this.avatarUrl, required this.isLight, required this.onTap});
+  final String username;
+  final String avatarUrl;
+  final bool isLight;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 62,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _avatar(username: username, url: avatarUrl, radius: 26, isLight: isLight),
+                Positioned(
+                  right: 1,
+                  bottom: 1,
+                  child: Container(
+                    width: 13,
+                    height: 13,
+                    decoration: BoxDecoration(
+                      color: const Color(0xff4cd964),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isLight ? Colors.white : Colors.black,
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Text(
+              username,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isLight ? Colors.black : Colors.white,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _QuickChip extends StatelessWidget {
   const _QuickChip({required this.user, required this.isLight, required this.onTap});
@@ -820,11 +902,49 @@ class _ConversationPageState extends State<ConversationPage> {
   Timer? _presenceTimer;
   DateTime? _otherLastActive;
 
+  // ── Local message cache ───────────────────────────────────────────────────
+
+  Future<File> get _cacheFile async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/neat_conv_${widget.conversationId}.json');
+  }
+
+  Future<void> _saveCache(List<MessageItem> msgs) async {
+    try {
+      final file = await _cacheFile;
+      final data = msgs.map((m) => {
+        'id': m.id,
+        'sender': m.sender,
+        'text': m.text,
+        'created': m.created.toIso8601String(),
+      }).toList();
+      await file.writeAsString(jsonEncode(data));
+    } catch (_) {}
+  }
+
+  Future<void> _loadCache() async {
+    try {
+      final file = await _cacheFile;
+      if (!await file.exists()) return;
+      final data = jsonDecode(await file.readAsString()) as List;
+      final msgs = data.whereType<Map<String, dynamic>>().map((m) => MessageItem(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        sender: m['sender']?.toString() ?? '',
+        text: m['text']?.toString() ?? '',
+        created: DateTime.tryParse(m['created']?.toString() ?? '') ?? DateTime.now(),
+      )).toList();
+      if (!mounted || msgs.isEmpty) return;
+      setState(() { _messages = msgs; _loading = false; });
+      _scrollToBottom(jump: true);
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
     _otherLastActive = widget.otherLastActive;
-    _load(initial: true);
+    _loadCache();          // show cached messages instantly
+    _load(initial: true);  // then sync with server
     _pingPresence();
     _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
   }
@@ -877,16 +997,26 @@ class _ConversationPageState extends State<ConversationPage> {
         headers: authGetHeaders(widget.token),
       );
       if (res.statusCode == 401) return widget.onLogout();
-      if (res.statusCode != 200) return;
+      if (res.statusCode != 200) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final msgs = (body['messages'] as List? ?? [])
           .whereType<Map<String, dynamic>>()
           .map(MessageItem.fromJson)
           .toList();
       if (!mounted) return;
-      setState(() { _messages = msgs; _loading = false; });
+      // Merge: keep any locally-cached messages the server didn't return
+      final serverIds = msgs.map((m) => m.id).toSet();
+      final localOnly = _messages.where((m) => !serverIds.contains(m.id)).toList();
+      final merged = [...msgs, ...localOnly]
+        ..sort((a, b) => a.created.compareTo(b.created));
+      setState(() { _messages = merged; _loading = false; });
+      _saveCache(merged);
       _scrollToBottom(jump: initial);
     } catch (_) {
+      // keep whatever messages are already loaded rather than blanking the screen
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -901,7 +1031,9 @@ class _ConversationPageState extends State<ConversationPage> {
       text: text,
       created: DateTime.now(),
     );
-    setState(() { _messages = [..._messages, opt]; _sending = true; });
+    final newList = [..._messages, opt];
+    setState(() { _messages = newList; _sending = true; });
+    _saveCache(newList);
     _scrollToBottom();
 
     try {
@@ -911,7 +1043,6 @@ class _ConversationPageState extends State<ConversationPage> {
         body: jsonEncode({'text': text}),
       );
       if (res.statusCode == 401) return widget.onLogout();
-      if (res.statusCode == 201) await _load();
     } catch (_) {
       if (mounted) setState(() => _messages.removeWhere((m) => m.id == opt.id));
     } finally {
@@ -1403,53 +1534,55 @@ class _ComposerState extends State<_Composer> {
   // ── Image picker ──────────────────────────────────────────────────────────
 
   Future<void> _pickImage(ImageSource source) async {
-    Navigator.of(context).pop(); // close bottom sheet first
-    final xfile = await ImagePicker().pickImage(
-      source: source,
-      imageQuality: 70,
-      maxWidth: 1200,
-    );
-    if (xfile == null) return;
-    final bytes = await xfile.readAsBytes();
-    await widget.onSendImage(bytes);
+    try {
+      final xfile = await ImagePicker().pickImage(
+        source: source,
+        imageQuality: 70,
+        maxWidth: 1200,
+      );
+      if (xfile == null) return;
+      final bytes = await xfile.readAsBytes();
+      await widget.onSendImage(bytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        );
+      }
+    }
   }
 
-  void _showImageOptions() {
-    final isLight = widget.isLight;
-    final textClr = isLight ? Colors.black : Colors.white;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: isLight ? Colors.white : const Color(0xff1c1c1e),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
-      ),
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 10),
-              width: 36, height: 4,
-              decoration: BoxDecoration(
-                color: isLight ? const Color(0xffd0d0d0) : const Color(0xff444444),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            ListTile(
-              leading: Icon(Icons.camera_alt_rounded, color: textClr),
-              title: Text('Camera', style: TextStyle(color: textClr, fontWeight: FontWeight.w500)),
-              onTap: () => _pickImage(ImageSource.camera),
-            ),
-            ListTile(
-              leading: Icon(Icons.photo_library_rounded, color: textClr),
-              title: Text('Gallery', style: TextStyle(color: textClr, fontWeight: FontWeight.w500)),
-              onTap: () => _pickImage(ImageSource.gallery),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
+  Future<void> _pickGif() async {
+    final completer = Completer<String?>();
+    final listener = _GiphyListener(
+      onSelect: (GiphyMedia media) {
+        final url = media.images.fixedWidth?.gifUrl ??
+            media.images.original?.gifUrl ??
+            '';
+        if (!completer.isCompleted) completer.complete(url.isNotEmpty ? url : null);
+      },
+      onDismissed: () {
+        if (!completer.isCompleted) completer.complete(null);
+      },
+    );
+    GiphyDialog.instance.addListener(listener);
+    GiphyDialog.instance.configure(
+      settings: GiphySettings(
+        theme: GiphyTheme.automaticTheme,
+        mediaTypeConfig: [GiphyContentType.gif, GiphyContentType.sticker],
+        selectedContentType: GiphyContentType.gif,
+        showSuggestionsBar: true,
+        showConfirmationScreen: false,
       ),
     );
+    GiphyDialog.instance.show();
+    final url = await completer.future;
+    GiphyDialog.instance.removeListener(listener);
+    if (!mounted || url == null) return;
+    try {
+      final res = await http.get(Uri.parse(url));
+      if (res.statusCode == 200) await widget.onSendImage(res.bodyBytes);
+    } catch (_) {}
   }
 
   // ── Voice recording ───────────────────────────────────────────────────────
@@ -1543,83 +1676,147 @@ class _ComposerState extends State<_Composer> {
   }
 
   Widget _buildNormalBar() {
-    final hasText  = widget.controller.text.trim().isNotEmpty;
-    final iconClr  = widget.isLight ? Colors.black : Colors.white;
-    final fillClr  = widget.isLight ? _kInputLgt : _kInputDark;
+    final hasText = widget.controller.text.trim().isNotEmpty;
+    final iconClr = widget.isLight ? Colors.black : Colors.white;
+    final pillBg  = widget.isLight ? _kInputLgt : _kInputDark;
+    final border  = widget.isLight
+        ? Border.all(color: const Color(0xffd0d0d0))
+        : Border.all(color: const Color(0xff2e2e2e));
 
     return Container(
       key: const ValueKey('normal'),
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // Gallery / camera
-          IconButton(
-            icon: Icon(Icons.image_rounded, color: iconClr, size: 26),
-            padding: EdgeInsets.zero,
-            onPressed: _showImageOptions,
-          ),
-          const SizedBox(width: 4),
-          // Text input
-          Expanded(
-            child: Container(
-              constraints: const BoxConstraints(maxHeight: 120),
-              decoration: BoxDecoration(
-                color: fillClr,
-                borderRadius: BorderRadius.circular(22),
-                border: widget.isLight ? Border.all(color: const Color(0xffd8d8d8)) : null,
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: pillBg,
+          borderRadius: BorderRadius.circular(28),
+          border: border,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Camera inside pill with circle background
+            GestureDetector(
+              onTap: () => _pickImage(ImageSource.camera),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(6, 6, 0, 6),
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: widget.isLight
+                        ? const Color(0xffd0d0d0)
+                        : const Color(0xff3a3a3a),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.camera_alt_rounded, color: iconClr, size: 18),
+                ),
               ),
+            ),
+            // Text field
+            Expanded(
               child: TextField(
                 controller: widget.controller,
                 maxLines: null,
                 keyboardType: TextInputType.multiline,
                 textCapitalization: TextCapitalization.sentences,
-                style: TextStyle(color: widget.isLight ? Colors.black : Colors.white, fontSize: 15),
+                style: TextStyle(
+                  color: widget.isLight ? Colors.black : Colors.white,
+                  fontSize: 15,
+                ),
                 cursorColor: _kBlue,
                 decoration: InputDecoration(
-                  hintText: 'Message...',
-                  hintStyle: TextStyle(color: widget.isLight ? _kSubLgt : _kSubDark, fontSize: 15),
+                  hintText: 'Μήνυμα...',
+                  hintStyle: TextStyle(
+                    color: widget.isLight ? _kSubLgt : _kSubDark,
+                    fontSize: 15,
+                  ),
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          // Send button (has text) or mic (no text)
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
-            child: hasText
-                ? GestureDetector(
-                    key: const ValueKey('send'),
-                    onTap: widget.sending ? null : widget.onSendText,
-                    child: Container(
-                      width: 36, height: 36,
-                      decoration: const BoxDecoration(color: _kBlue, shape: BoxShape.circle),
-                      child: widget.sending
-                          ? const Center(
-                              child: SizedBox(
-                                width: 16, height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                              ),
-                            )
-                          : const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
+            // Right side: send OR mic + gallery + gif
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              transitionBuilder: (child, anim) =>
+                  ScaleTransition(scale: anim, child: child),
+              child: hasText
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 6, 8, 6),
+                      child: GestureDetector(
+                        key: const ValueKey('send'),
+                        onTap: widget.sending ? null : widget.onSendText,
+                        child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: const BoxDecoration(
+                              color: _kBlue, shape: BoxShape.circle),
+                          child: widget.sending
+                              ? const Center(
+                                  child: SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2, color: Colors.white),
+                                  ),
+                                )
+                              : const Icon(Icons.arrow_upward_rounded,
+                                  color: Colors.white, size: 20),
+                        ),
+                      ),
+                    )
+                  : Padding(
+                      key: const ValueKey('actions'),
+                      padding: const EdgeInsets.fromLTRB(4, 6, 8, 6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          GestureDetector(
+                            onTap: _startRecording,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 5),
+                              child: Icon(Icons.mic_none_rounded, color: iconClr, size: 26),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () => _pickImage(ImageSource.gallery),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 5),
+                              child: Icon(Icons.photo_outlined, color: iconClr, size: 24),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: _pickGif,
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 5, right: 2),
+                              child: Icon(Icons.gif_box_outlined, color: iconClr, size: 28),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  )
-                : GestureDetector(
-                    key: const ValueKey('mic'),
-                    onTap: _startRecording,
-                    child: Padding(
-                      padding: const EdgeInsets.all(5),
-                      child: Icon(Icons.mic_rounded, color: iconClr, size: 26),
-                    ),
-                  ),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
+}
+
+// ─── Giphy listener ──────────────────────────────────────────────────────────
+
+class _GiphyListener implements GiphyMediaSelectionListener {
+  _GiphyListener({required this.onSelect, required this.onDismissed});
+  final void Function(GiphyMedia media) onSelect;
+  final VoidCallback onDismissed;
+
+  @override
+  void onMediaSelect(GiphyMedia media) => onSelect(media);
+
+  @override
+  void onDismiss() => onDismissed();
 }
 
 // ─── Pulsing red dot for recording indicator ──────────────────────────────────

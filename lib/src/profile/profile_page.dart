@@ -1106,10 +1106,11 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
         return;
       }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final updated = UserProfile.fromJson(
+      final userJson = Map<String, dynamic>.from(
         decoded['user'] as Map<String, dynamic>,
       );
-      widget.onSaved(updated);
+      userJson['avatarZoomable'] = _avatarZoomable;
+      widget.onSaved(UserProfile.fromJson(userJson));
       if (mounted) Navigator.of(context).pop();
     } finally {
       if (mounted) setState(() => _saving = false);

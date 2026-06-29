@@ -44,6 +44,7 @@ dependencies:
   path_provider: ^2.1.5
   video_player: ^2.9.2
   giphy_flutter_sdk: ^1.1.0
+  flutter_svg: ^2.0.10+1
   share_plus: ^10.1.4
   app_links: ^6.3.4
 
@@ -72,6 +73,11 @@ flutter:
   assets:
     - assets/neat_logo.png
     - assets/mapkit.js
+    - assets/instagram.svg
+    - assets/whatsapp.svg
+    - assets/x.svg
+    - assets/telegram.svg
+    - assets/facebook.svg
 
   # To add assets to your application, add an assets section, like this:
   # assets:
