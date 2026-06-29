@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'auth/auth_gate.dart';
+import 'core/post_deep_link_page.dart';
 
 class NeatApp extends StatefulWidget {
   const NeatApp({super.key});
@@ -14,11 +16,16 @@ class _NeatAppState extends State<NeatApp> {
   static const _themeKey = 'neat_theme_mode';
   ThemeMode _themeMode = ThemeMode.dark;
   bool _loading = true;
+  int? _deepLinkPostId;
 
   @override
   void initState() {
     super.initState();
     _restoreTheme();
+    if (kIsWeb) {
+      final match = RegExp(r'^/post/(\d+)$').firstMatch(Uri.base.path);
+      if (match != null) _deepLinkPostId = int.tryParse(match.group(1)!);
+    }
   }
 
   Future<void> _restoreTheme() async {
@@ -105,10 +112,12 @@ class _NeatAppState extends State<NeatApp> {
       theme: _lightTheme(),
       darkTheme: _darkTheme(),
       themeMode: _themeMode,
-      home: AuthGate(
-        themeMode: _themeMode,
-        onThemeModeChanged: _setTheme,
-      ),
+      home: _deepLinkPostId != null
+          ? PostDeepLinkPage(postId: _deepLinkPostId!, themeMode: _themeMode)
+          : AuthGate(
+              themeMode: _themeMode,
+              onThemeModeChanged: _setTheme,
+            ),
     );
   }
 }

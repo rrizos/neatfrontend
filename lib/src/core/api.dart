@@ -7,6 +7,13 @@ const String apiBaseUrl = String.fromEnvironment(
   defaultValue: 'http://63.181.201.175',
 );
 
+const String webBaseUrl = String.fromEnvironment(
+  'NEAT_WEB_BASE_URL',
+  defaultValue: 'https://splendid-sunburst-899ead.netlify.app',
+);
+
+Uri postDetailEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/');
+
 Uri postsEndpoint({bool fresh = false, String? city}) {
   final uri = Uri.parse('$apiBaseUrl/api/posts/');
   final params = <String, String>{};

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -244,7 +245,7 @@ class _ShareSheetState extends State<_ShareSheet> {
     return '@${widget.post.author} on Neat: "$snippet"';
   }
 
-  String get _shareLink => '$apiBaseUrl/posts/${widget.post.id}';
+  String get _shareLink => '$webBaseUrl/post/${widget.post.id}';
 
   Future<void> _launch(String url) async {
     final uri = Uri.parse(url);
@@ -263,6 +264,10 @@ class _ShareSheetState extends State<_ShareSheet> {
   static const _shareChannel = MethodChannel('com.neat/share');
 
   Future<void> _nativeShare() async {
+    if (kIsWeb) {
+      await _copyLink();
+      return;
+    }
     final text = '$_shareText\n$_shareLink';
     try {
       await _shareChannel.invokeMethod<void>('share', {'text': text});
