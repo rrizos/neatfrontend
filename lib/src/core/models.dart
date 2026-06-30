@@ -1,3 +1,24 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'api.dart' show apiBaseUrl, webBaseUrl;
+
+// Resolves media URLs so they are always HTTPS on web (avoids mixed-content
+// blocks when the app is served from Netlify). Handles three cases:
+//   1. Relative path (/media/...)          → prepend webBaseUrl or apiBaseUrl
+//   2. Absolute HTTP server URL (http://IP) → rewrite to webBaseUrl path on web
+//   3. Everything else (https:, data:, …)  → return unchanged
+String _resolveMediaUrl(String url) {
+  if (url.startsWith('/')) {
+    return kIsWeb ? '$webBaseUrl$url' : '$apiBaseUrl$url';
+  }
+  if (kIsWeb && url.startsWith('http://')) {
+    // Strip the HTTP origin and prepend the HTTPS Netlify origin so the
+    // request goes through the Netlify proxy instead of being mixed-content.
+    final uri = Uri.tryParse(url);
+    if (uri != null) return '$webBaseUrl${uri.path}';
+  }
+  return url;
+}
+
 class MutualUser {
   const MutualUser({
     required this.username,
@@ -164,7 +185,7 @@ class FeedPost {
           .whereType<Map<String, dynamic>>()
           .map((m) => MediaItem(
                 type: m['type']?.toString() ?? 'image',
-                url: m['url']?.toString() ?? '',
+                url: _resolveMediaUrl(m['url']?.toString() ?? ''),
                 duration: (m['duration'] as num?)?.toDouble(),
               ))
           .where((m) => m.url.isNotEmpty)
@@ -172,7 +193,7 @@ class FeedPost {
     } else {
       final imageUrl = json['imageUrl']?.toString() ?? '';
       media = imageUrl.isNotEmpty
-          ? [MediaItem(type: 'image', url: imageUrl)]
+          ? [MediaItem(type: 'image', url: _resolveMediaUrl(imageUrl))]
           : [];
     }
 

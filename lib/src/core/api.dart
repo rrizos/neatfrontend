@@ -1,11 +1,17 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
-const String apiBaseUrl = String.fromEnvironment(
+const String _kServerUrl = String.fromEnvironment(
   'NEAT_API_BASE_URL',
   defaultValue: 'http://63.181.201.175',
 );
+
+// On web the app runs on Netlify (HTTPS). Using empty base means all paths
+// are relative and get handled by Netlify's proxy rules, avoiding mixed-content
+// errors. On mobile the full server URL is used directly.
+final String apiBaseUrl = kIsWeb ? '' : _kServerUrl;
 
 const String webBaseUrl = String.fromEnvironment(
   'NEAT_WEB_BASE_URL',

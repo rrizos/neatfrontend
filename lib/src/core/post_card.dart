@@ -183,6 +183,7 @@ class _FeedVideoPlayer extends StatefulWidget {
 class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
   VideoPlayerController? _ctrl;
   bool _ready = false;
+  bool _failed = false;
   bool _muted = true;
   bool _showControls = false;
   Timer? _hideTimer;
@@ -219,7 +220,10 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
       ctrl.addListener(_onVideoUpdate);
       if (!mounted) { ctrl.dispose(); return; }
       setState(() { _ctrl = ctrl; _ready = true; });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[VideoPlayer] failed to load ${widget.url}: $e');
+      if (mounted) setState(() => _failed = true);
+    }
   }
 
   void _onVideoUpdate() {
@@ -283,6 +287,17 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    if (_failed) {
+      return GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          color: Colors.black,
+          child: const Center(
+            child: Icon(Icons.videocam_off_outlined, color: Colors.white38, size: 36),
+          ),
+        ),
+      );
+    }
     if (!_ready || _ctrl == null) {
       return GestureDetector(
         onTap: widget.onTap,

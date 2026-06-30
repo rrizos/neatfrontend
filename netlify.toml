@@ -13,6 +13,12 @@
   force = true
 
 [[redirects]]
+  from = "/media/*"
+  to = "http://63.181.201.175/media/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
