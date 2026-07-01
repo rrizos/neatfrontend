@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
+import '../core/media_cache.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
 import '../admin/admin_panel_page.dart';
@@ -57,7 +59,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   bool? _followingOverride;
   bool _loading = true;
   final ImagePicker _imagePicker = ImagePicker();
-  final ScrollController _scrollController = ScrollController();
   final Map<int, GlobalKey> _postKeys = {};
   late final TabController _tabController;
   List<FeedPost>? _likedPosts;
@@ -78,7 +79,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   @override
   void dispose() {
     _tabController.dispose();
-    _scrollController.dispose();
     super.dispose();
   }
 
@@ -478,7 +478,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final bytes = _dataUrlBytes(profile.avatarUrl);
     final Widget image = bytes != null
         ? Image.memory(bytes, fit: BoxFit.contain)
-        : Image.network(profile.avatarUrl, fit: BoxFit.contain);
+        : CachedNetworkImage(
+            imageUrl: profile.avatarUrl,
+            cacheManager: imageCacheManager,
+            fit: BoxFit.contain,
+            fadeInDuration: Duration.zero,
+          );
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
@@ -567,8 +572,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         : rawUsers;
     if (!mounted) return;
     widget.onHideNavBar?.call();
-    final navTarget = await Navigator.of(context).push<String?>(
-      MaterialPageRoute<String?>(
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
         builder: (_) => _UserListPage(
           title: title,
           users: users,
@@ -577,15 +582,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           themeMode: widget.themeMode,
           onSessionUpdated: widget.onSessionUpdated,
           onProfileRefresh: _load,
+          onOpenProfile: widget.onOpenUserProfile,
         ),
       ),
     );
-    // Show bar BEFORE navigating so _navBarHideCount is already 0 when
-    // _pushProfileRoute captures its savedCount. If we called onOpenUserProfile
-    // inside the ListTile.onTap (synchronously with pop()), savedCount would
-    // be 1 and the tab bar would get stuck hidden after returning.
     widget.onShowNavBar?.call();
-    if (navTarget != null) widget.onOpenUserProfile(navTarget);
   }
 
   @override
@@ -648,175 +649,185 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: (profile.avatarZoomable && profile.avatarUrl.isNotEmpty)
-                      ? () => _openAvatarFullscreen(profile)
-                      : null,
-                  child: CircleAvatar(
-                    radius: 40,
-                    backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                    foregroundImage: _dataUrlBytes(profile.avatarUrl) != null
-                        ? MemoryImage(_dataUrlBytes(profile.avatarUrl)!)
-                        : null,
-                    child: _dataUrlBytes(profile.avatarUrl) == null
-                        ? Text(
-                            initialFor(profile.username),
-                            style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                          )
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: 24),
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _Metric(label: 'posts', value: '${userPosts.length}', onTap: null),
-                      _Metric(
-                        label: 'followers',
-                        value: '${profile.followers}',
-                        onTap: () => _openUserList(
-                          title: 'Followers',
-                          endpoint: followersEndpoint(profile.username),
-                          markFollowsYou: profile.username == widget.currentUser.username,
-                        ),
-                      ),
-                      _Metric(
-                        label: 'following',
-                        value: '${profile.following}',
-                        onTap: () => _openUserList(
-                          title: 'Following',
-                          endpoint: followingEndpoint(profile.username),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+      body: NestedScrollView(
+        headerSliverBuilder: (_, _) => [
+          SliverToBoxAdapter(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      profile.fullName.isEmpty ? profile.username : profile.fullName,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: isLight ? Colors.black : Colors.white,
-                      ),
-                    ),
-                    if (profile.isVerified) ...[
-                      const SizedBox(width: 5),
-                      const Icon(Icons.verified_rounded, size: 18, color: Color(0xff0095f6)),
-                    ],
-                  ],
-                ),
-                if (profile.bio.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    profile.bio,
-                    style: TextStyle(
-                      color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
-                    ),
-                  ),
-                ],
-                if (!isOwn && profile.mutualsCount > 0) ...[
-                  const SizedBox(height: 8),
-                  _MutualsRow(
-                    mutuals: profile.mutuals,
-                    mutualsCount: profile.mutualsCount,
-                    isLight: isLight,
-                    onTap: widget.onOpenUserProfile,
-                  ),
-                ],
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: profile.username == widget.currentUser.username
-                ? OutlinedButton(onPressed: _openEditProfile, child: const Text('Edit profile'))
-                : Row(
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Row(
                     children: [
-                      Expanded(
-                        child: (_followingOverride ?? profile.isFollowing)
-                            ? OutlinedButton(
-                                onPressed: widget.followEnabled ? _toggleFollow : null,
-                                style: OutlinedButton.styleFrom(
-                                  side: BorderSide(color: isLight ? Colors.black : Colors.white),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  foregroundColor: isLight ? Colors.black : Colors.white,
-                                ),
-                                child: const Text('Following', style: TextStyle(fontWeight: FontWeight.w600)),
-                              )
-                            : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? 'Follow Back' : 'Follow')),
+                      GestureDetector(
+                        onTap: (profile.avatarZoomable && profile.avatarUrl.isNotEmpty)
+                            ? () => _openAvatarFullscreen(profile)
+                            : null,
+                        child: CircleAvatar(
+                          radius: 40,
+                          backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+                          foregroundImage: _dataUrlBytes(profile.avatarUrl) != null
+                              ? MemoryImage(_dataUrlBytes(profile.avatarUrl)!)
+                              : null,
+                          child: _dataUrlBytes(profile.avatarUrl) == null
+                              ? Text(
+                                  initialFor(profile.username),
+                                  style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                                )
+                              : null,
+                        ),
                       ),
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        height: 42,
-                        width: 42,
-                        child: OutlinedButton(
-                          onPressed: _startDirectMessage,
-                          style: OutlinedButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          ),
-                          child: const Icon(Icons.send_outlined, size: 18),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            _Metric(label: 'posts', value: '${userPosts.length}', onTap: null),
+                            _Metric(
+                              label: 'followers',
+                              value: '${profile.followers}',
+                              onTap: () => _openUserList(
+                                title: 'Followers',
+                                endpoint: followersEndpoint(profile.username),
+                                markFollowsYou: profile.username == widget.currentUser.username,
+                              ),
+                            ),
+                            _Metric(
+                              label: 'following',
+                              value: '${profile.following}',
+                              onTap: () => _openUserList(
+                                title: 'Following',
+                                endpoint: followingEndpoint(profile.username),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
-          ),
-          TabBar(
-            controller: _tabController,
-            dividerColor: Colors.transparent,
-            indicatorColor: isLight ? Colors.black : Colors.white,
-            indicatorSize: TabBarIndicatorSize.tab,
-            labelColor: isLight ? Colors.black : Colors.white,
-            unselectedLabelColor: isLight ? const Color(0xff9e9e9e) : const Color(0xff666666),
-            tabs: const [
-              Tab(icon: Icon(Icons.grid_on_rounded, size: 22)),
-              Tab(icon: Icon(Icons.favorite_border_rounded, size: 22)),
-              Tab(icon: Icon(Icons.bookmark_border_rounded, size: 22)),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                // Tab 0: Posts
-                userPosts.isEmpty
-                    ? const Center(child: Text('No posts yet.', style: TextStyle(color: Color(0xffb3b3b3))))
-                    : ListView.builder(
-                        controller: _scrollController,
-                        itemCount: userPosts.length,
-                        itemBuilder: (_, i) {
-                          final post = userPosts[i];
-                          final key = _postKeys.putIfAbsent(post.id, () => GlobalKey());
-                          return _buildPostCard(post, key: key);
-                        },
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            profile.fullName.isEmpty ? profile.username : profile.fullName,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: isLight ? Colors.black : Colors.white,
+                            ),
+                          ),
+                          if (profile.isVerified) ...[
+                            const SizedBox(width: 5),
+                            const Icon(Icons.verified_rounded, size: 18, color: Color(0xff0095f6)),
+                          ],
+                        ],
                       ),
-                // Tab 1: Liked
-                _buildLikedTab(isOwn),
-                // Tab 2: Saved
-                _buildSavedTab(isOwn),
+                      if (profile.bio.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          profile.bio,
+                          style: TextStyle(
+                            color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
+                          ),
+                        ),
+                      ],
+                      if (!isOwn && profile.mutualsCount > 0) ...[
+                        const SizedBox(height: 8),
+                        _MutualsRow(
+                          mutuals: profile.mutuals,
+                          mutualsCount: profile.mutualsCount,
+                          isLight: isLight,
+                          onTap: widget.onOpenUserProfile,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: profile.username == widget.currentUser.username
+                      ? OutlinedButton(onPressed: _openEditProfile, child: const Text('Edit profile'))
+                      : Row(
+                          children: [
+                            Expanded(
+                              child: (_followingOverride ?? profile.isFollowing)
+                                  ? OutlinedButton(
+                                      onPressed: widget.followEnabled ? _toggleFollow : null,
+                                      style: OutlinedButton.styleFrom(
+                                        side: BorderSide(color: isLight ? Colors.black : Colors.white),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        foregroundColor: isLight ? Colors.black : Colors.white,
+                                      ),
+                                      child: const Text('Following', style: TextStyle(fontWeight: FontWeight.w600)),
+                                    )
+                                  : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? 'Follow Back' : 'Follow')),
+                            ),
+                            const SizedBox(width: 12),
+                            SizedBox(
+                              height: 42,
+                              width: 42,
+                              child: OutlinedButton(
+                                onPressed: _startDirectMessage,
+                                style: OutlinedButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                ),
+                                child: const Icon(Icons.send_outlined, size: 18),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
               ],
+            ),
+          ),
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _ProfileTabBarDelegate(
+              TabBar(
+                controller: _tabController,
+                dividerColor: Colors.transparent,
+                indicatorColor: isLight ? Colors.black : Colors.white,
+                indicatorSize: TabBarIndicatorSize.tab,
+                labelColor: isLight ? Colors.black : Colors.white,
+                unselectedLabelColor: isLight ? const Color(0xff9e9e9e) : const Color(0xff666666),
+                tabs: const [
+                  Tab(icon: Icon(Icons.grid_on_rounded, size: 22)),
+                  Tab(icon: Icon(Icons.favorite_border_rounded, size: 22)),
+                  Tab(icon: Icon(Icons.bookmark_border_rounded, size: 22)),
+                ],
+              ),
+              isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
             ),
           ),
         ],
+        body: TabBarView(
+          controller: _tabController,
+          children: [
+            // Tab 0: Posts
+            userPosts.isEmpty
+                ? const CustomScrollView(slivers: [SliverFillRemaining(hasScrollBody: false, child: Center(child: Text('No posts yet.', style: TextStyle(color: Color(0xffb3b3b3)))))])
+                : ListView.builder(
+                    key: const PageStorageKey('posts'),
+                    itemCount: userPosts.length,
+                    itemBuilder: (_, i) {
+                      final post = userPosts[i];
+                      final key = _postKeys.putIfAbsent(post.id, () => GlobalKey());
+                      return _buildPostCard(post, key: key);
+                    },
+                  ),
+            // Tab 1: Liked
+            _buildLikedTab(isOwn),
+            // Tab 2: Saved
+            _buildSavedTab(isOwn),
+          ],
+        ),
       ),
     );
   }
@@ -1090,7 +1101,12 @@ class _AvatarPreview extends StatelessWidget {
         } catch (_) {}
       }
     }
-    return Image.network(url, fit: BoxFit.cover);
+    return CachedNetworkImage(
+      imageUrl: url,
+      cacheManager: imageCacheManager,
+      fit: BoxFit.cover,
+      fadeInDuration: Duration.zero,
+    );
   }
 }
 
@@ -1576,6 +1592,7 @@ class _UserListPage extends StatefulWidget {
     required this.themeMode,
     required this.onSessionUpdated,
     required this.onProfileRefresh,
+    required this.onOpenProfile,
   });
 
   final String title;
@@ -1585,6 +1602,7 @@ class _UserListPage extends StatefulWidget {
   final ThemeMode themeMode;
   final ValueChanged<AuthSession> onSessionUpdated;
   final Future<void> Function() onProfileRefresh;
+  final ValueChanged<String> onOpenProfile;
 
   @override
   State<_UserListPage> createState() => _UserListPageState();
@@ -1745,7 +1763,8 @@ class _UserListPageState extends State<_UserListPage> {
                           foregroundImage: user.avatarUrl.isNotEmpty
                               ? (_dataUrlBytes(user.avatarUrl) != null
                                   ? MemoryImage(_dataUrlBytes(user.avatarUrl)!)
-                                  : NetworkImage(user.avatarUrl) as ImageProvider)
+                                  : CachedNetworkImageProvider(user.avatarUrl, cacheManager: imageCacheManager)
+                                      as ImageProvider)
                               : null,
                           child: Text(
                             initialFor(user.username),
@@ -1815,7 +1834,7 @@ class _UserListPageState extends State<_UserListPage> {
                                     child: Text(user.followsYou ? 'Follow Back' : 'Follow'),
                                   ))
                             : null,
-                        onTap: () => Navigator.of(context).pop<String?>(user.username),
+                        onTap: () => widget.onOpenProfile(user.username),
                       );
                     },
                   ),
@@ -1824,4 +1843,23 @@ class _UserListPageState extends State<_UserListPage> {
       ),
     );
   }
+}
+
+class _ProfileTabBarDelegate extends SliverPersistentHeaderDelegate {
+  const _ProfileTabBarDelegate(this.tabBar, this.bg);
+  final TabBar tabBar;
+  final Color bg;
+
+  @override
+  Widget build(context, _, _) => ColoredBox(color: bg, child: tabBar);
+
+  @override
+  double get minExtent => tabBar.preferredSize.height;
+
+  @override
+  double get maxExtent => tabBar.preferredSize.height;
+
+  @override
+  bool shouldRebuild(_ProfileTabBarDelegate old) =>
+      old.tabBar != tabBar || old.bg != bg;
 }

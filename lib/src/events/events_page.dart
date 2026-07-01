@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -6,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/api.dart';
+import '../core/media_cache.dart';
 import '../core/models.dart';
 
 class EventsPage extends StatefulWidget {
@@ -1310,7 +1312,12 @@ class _EventMedia extends StatelessWidget {
         } catch (_) {}
       }
     }
-    return Image.network(url, fit: BoxFit.cover);
+    return CachedNetworkImage(
+      imageUrl: url,
+      cacheManager: imageCacheManager,
+      fit: BoxFit.cover,
+      fadeInDuration: Duration.zero,
+    );
   }
 }
 

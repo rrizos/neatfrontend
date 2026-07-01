@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
+import 'media_cache.dart';
 import 'models.dart';
 
 Future<void> showShareSheet({
@@ -498,7 +500,14 @@ class _PostPreview extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               child: SizedBox(
                 width: 48, height: 48,
-                child: bytes != null ? Image.memory(bytes, fit: BoxFit.cover) : Image.network(post.imageUrl, fit: BoxFit.cover),
+                child: bytes != null
+                    ? Image.memory(bytes, fit: BoxFit.cover)
+                    : CachedNetworkImage(
+                        imageUrl: post.imageUrl,
+                        cacheManager: imageCacheManager,
+                        fit: BoxFit.cover,
+                        fadeInDuration: Duration.zero,
+                      ),
               ),
             ),
           ],

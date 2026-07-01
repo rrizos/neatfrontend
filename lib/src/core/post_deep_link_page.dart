@@ -1,12 +1,14 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 import 'api.dart';
+import 'media_cache.dart';
 import 'models.dart';
 
 const _iosUrl = 'https://apps.apple.com/gr/app/neat-connect-with-your-city/id6748038152';
@@ -608,7 +610,14 @@ class _ImageMedia extends StatelessWidget {
     if (bytes != null) {
       return Image.memory(bytes, fit: BoxFit.contain, width: double.infinity, height: double.infinity);
     }
-    return Image.network(url, fit: BoxFit.contain, width: double.infinity, height: double.infinity);
+    return CachedNetworkImage(
+      imageUrl: url,
+      cacheManager: imageCacheManager,
+      fit: BoxFit.contain,
+      width: double.infinity,
+      height: double.infinity,
+      fadeInDuration: Duration.zero,
+    );
   }
 }
 
@@ -629,7 +638,10 @@ class _VideoMediaState extends State<_VideoMedia> {
 
   Future<void> _init() async {
     try {
-      final ctrl = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+      final cached = kIsWeb ? null : await getCachedVideoFile(widget.url);
+      final ctrl = cached != null
+          ? VideoPlayerController.file(cached)
+          : VideoPlayerController.networkUrl(Uri.parse(widget.url));
       await ctrl.initialize();
       ctrl.setLooping(true);
       ctrl.setVolume(0);

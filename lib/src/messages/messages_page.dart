@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_content_type.dart';
@@ -15,6 +16,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../core/api.dart';
+import '../core/media_cache.dart';
 import '../core/models.dart';
 
 // ─── Colour tokens ────────────────────────────────────────────────────────────
@@ -51,7 +53,7 @@ ImageProvider? _imgProvider(String url) {
   if (url.isEmpty) return null;
   final b = _dataUrlBytes(url);
   if (b != null) return MemoryImage(b);
-  return NetworkImage(url);
+  return CachedNetworkImageProvider(url, cacheManager: imageCacheManager);
 }
 
 Widget _avatar({
@@ -329,9 +331,10 @@ class _MessagesPageState extends State<MessagesPage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final bg = isLight ? _kBgLgt : _kBgDark;
     final q  = _search.text.toLowerCase().trim();
+    final nonSelf = _convs.where((c) => c.otherUser != widget.currentUsername).toList();
     final filtered = q.isEmpty
-        ? _convs
-        : _convs.where((c) =>
+        ? nonSelf
+        : nonSelf.where((c) =>
             c.otherUser.toLowerCase().contains(q) ||
             c.otherFullName.toLowerCase().contains(q)).toList();
 
@@ -387,7 +390,7 @@ class _MessagesPageState extends State<MessagesPage> {
             ),
             if (q.isEmpty) ...() {
                 final activeConvs = _convs
-                    .where((c) => _isActiveNow(c.otherLastActive))
+                    .where((c) => c.otherUser != widget.currentUsername && _isActiveNow(c.otherLastActive))
                     .toList();
                 if (activeConvs.isEmpty) return const <Widget>[];
                 return [
@@ -2009,7 +2012,12 @@ class _SharedPostCard extends StatelessWidget {
                 aspectRatio: 1.6,
                 child: imgBytes != null
                     ? Image.memory(imgBytes, fit: BoxFit.cover)
-                    : Image.network(imageUrl, fit: BoxFit.cover),
+                    : CachedNetworkImage(
+                        imageUrl: imageUrl,
+                        cacheManager: imageCacheManager,
+                        fit: BoxFit.cover,
+                        fadeInDuration: Duration.zero,
+                      ),
               ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),

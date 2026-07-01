@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:io' show Platform;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../core/media_cache.dart';
 import 'greece_cities.dart';
 
 // MapKit JS JWT — origin: netnest.net
@@ -446,12 +448,13 @@ class _CityCard extends StatelessWidget {
                           height: 190,
                           width: double.infinity,
                           child: imageUrl != null
-                              ? Image.network(
-                                  imageUrl!,
+                              ? CachedNetworkImage(
+                                  imageUrl: imageUrl!,
+                                  cacheManager: imageCacheManager,
                                   fit: BoxFit.cover,
-                                  loadingBuilder: (ctx, child, progress) =>
-                                      progress == null ? child : _placeholder(),
-                                  errorBuilder: (ctx, err, stack) {
+                                  fadeInDuration: Duration.zero,
+                                  placeholder: (ctx, _) => _placeholder(),
+                                  errorWidget: (ctx, url, err) {
                                     debugPrint('[CityCard] image failed: $err');
                                     return _placeholder();
                                   },

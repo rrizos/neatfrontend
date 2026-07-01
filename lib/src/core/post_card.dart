@@ -1,14 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 import 'api.dart';
 import 'icons.dart';
+import 'media_cache.dart';
 import 'models.dart';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -138,13 +141,14 @@ class _FeedMedia extends StatelessWidget {
         } catch (_) {}
       }
     }
-    return Image.network(
-      url,
+    return CachedNetworkImage(
+      imageUrl: url,
+      cacheManager: imageCacheManager,
       fit: fit,
       width: double.infinity,
       height: double.infinity,
-      loadingBuilder: (context, child, progress) {
-        if (progress == null) return child;
+      fadeInDuration: Duration.zero,
+      placeholder: (context, _) {
         final isLight = Theme.of(context).brightness == Brightness.light;
         return Container(
           width: double.infinity,
@@ -153,7 +157,7 @@ class _FeedMedia extends StatelessWidget {
           child: const Center(child: CircularProgressIndicator()),
         );
       },
-      errorBuilder: (context, _, _) {
+      errorWidget: (context, _, _) {
         final isLight = Theme.of(context).brightness == Brightness.light;
         return Container(
           width: double.infinity,
@@ -188,10 +192,30 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
   bool _showControls = false;
   Timer? _hideTimer;
 
-  @override
-  void initState() {
-    super.initState();
-    _init();
+  // Video is only fetched/decoded once it's actually about to be on screen,
+  // and playback is suspended while scrolled away — this keeps the feed from
+  // downloading or decoding videos the user never actually looks at.
+  final _visibilityKey = UniqueKey();
+  bool _initStarted = false;
+  bool _autoPaused = false;
+
+  void _onVisibilityChanged(VisibilityInfo info) {
+    if (!_initStarted && info.visibleFraction > 0) {
+      _initStarted = true;
+      _init();
+      return;
+    }
+    final ctrl = _ctrl;
+    if (ctrl == null || !_ready) return;
+    if (info.visibleFraction < 0.1) {
+      if (ctrl.value.isPlaying) {
+        _autoPaused = true;
+        ctrl.pause();
+      }
+    } else if (_autoPaused) {
+      _autoPaused = false;
+      ctrl.play();
+    }
   }
 
   Future<void> _init() async {
@@ -211,7 +235,13 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
         }
         ctrl = VideoPlayerController.file(File(path));
       } else {
-        ctrl = VideoPlayerController.networkUrl(Uri.parse(url));
+        // Cache the video to disk once so scrolling away and back (or
+        // reopening the same post) replays from local storage instead of
+        // re-streaming from the server every time.
+        final cached = await getCachedVideoFile(url);
+        ctrl = cached != null
+            ? VideoPlayerController.file(cached)
+            : VideoPlayerController.networkUrl(Uri.parse(url));
       }
       await ctrl.initialize();
       ctrl.setLooping(true);
@@ -287,6 +317,14 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    return VisibilityDetector(
+      key: _visibilityKey,
+      onVisibilityChanged: _onVisibilityChanged,
+      child: _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     if (_failed) {
       return GestureDetector(
         onTap: widget.onTap,

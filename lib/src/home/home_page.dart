@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:flutter/gestures.dart';
@@ -16,6 +17,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
+import '../core/media_cache.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
 import '../core/report_post_sheet.dart';
@@ -56,6 +58,7 @@ class _HomePageState extends State<HomePage> {
   final List<UserProfile> _followingProfiles = [];
   final Set<String> _followerAuthors = {};
   final ScrollController _feedScroll = ScrollController();
+  final Map<int, double> _tabScrollOffsets = {0: 0.0, 1: 0.0};
   int _nav = 0;
   int _selectedTab = 0;
   final Set<int> _visitedTabs = <int>{0};
@@ -675,7 +678,12 @@ class _HomePageState extends State<HomePage> {
             } else if (item.imageBytes != null) {
               preview = Image.memory(item.imageBytes!, fit: BoxFit.cover);
             } else if (item.externalUrl != null) {
-              preview = Image.network(item.externalUrl!, fit: BoxFit.cover);
+              preview = CachedNetworkImage(
+                imageUrl: item.externalUrl!,
+                cacheManager: imageCacheManager,
+                fit: BoxFit.cover,
+                fadeInDuration: Duration.zero,
+              );
             } else {
               preview = const ColoredBox(color: Color(0xff1a1a1a));
             }
@@ -730,7 +738,12 @@ class _HomePageState extends State<HomePage> {
               } else if (item.imageBytes != null) {
                 preview = Image.memory(item.imageBytes!, fit: BoxFit.cover);
               } else if (item.externalUrl != null) {
-                preview = Image.network(item.externalUrl!, fit: BoxFit.cover);
+                preview = CachedNetworkImage(
+                  imageUrl: item.externalUrl!,
+                  cacheManager: imageCacheManager,
+                  fit: BoxFit.cover,
+                  fadeInDuration: Duration.zero,
+                );
               } else {
                 preview = const ColoredBox(color: Color(0xff1a1a1a));
               }
@@ -818,7 +831,7 @@ class _HomePageState extends State<HomePage> {
                             TextButton(
                               onPressed: () => Navigator.of(pageContext).pop(),
                               style: TextButton.styleFrom(
-                                foregroundColor: const Color(0xff606060),
+                                foregroundColor: isLight ? Colors.black : Colors.white,
                                 padding: EdgeInsets.zero,
                                 textStyle: const TextStyle(fontSize: 16),
                               ),
@@ -1235,10 +1248,15 @@ class _HomePageState extends State<HomePage> {
                                   showFollowing: _activeCity == null,
                                   scrollController: _feedScroll,
                                   onTabChanged: (value) {
-                                    setState(() => _selectedTab = value);
                                     if (_feedScroll.hasClients) {
-                                      _feedScroll.jumpTo(0);
+                                      _tabScrollOffsets[_selectedTab] = _feedScroll.offset;
                                     }
+                                    setState(() => _selectedTab = value);
+                                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                                      if (_feedScroll.hasClients) {
+                                        _feedScroll.jumpTo(_tabScrollOffsets[value] ?? 0.0);
+                                      }
+                                    });
                                   },
                                 ),
                               ),
@@ -3130,10 +3148,12 @@ class _NotifTile extends StatelessWidget {
           child: SizedBox(
             width: 44,
             height: 44,
-            child: Image.network(
-              eventImageUrl,
+            child: CachedNetworkImage(
+              imageUrl: eventImageUrl,
+              cacheManager: imageCacheManager,
               fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              fadeInDuration: Duration.zero,
+              errorWidget: (_, _, _) => const SizedBox.shrink(),
             ),
           ),
         );
@@ -3154,12 +3174,14 @@ class _NotifTile extends StatelessWidget {
             ? Image.memory(bytes, width: 44, height: 44, fit: BoxFit.cover)
             : Container(width: 44, height: 44, color: thumbBg);
       } else if (imgUrl.isNotEmpty) {
-        thumb = Image.network(
-          imgUrl,
+        thumb = CachedNetworkImage(
+          imageUrl: imgUrl,
+          cacheManager: imageCacheManager,
           width: 44,
           height: 44,
           fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => Container(width: 44, height: 44, color: thumbBg),
+          fadeInDuration: Duration.zero,
+          errorWidget: (_, _, _) => Container(width: 44, height: 44, color: thumbBg),
         );
       } else {
         thumb = Container(width: 44, height: 44, color: thumbBg);
