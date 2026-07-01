@@ -329,9 +329,10 @@ class _MessagesPageState extends State<MessagesPage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final bg = isLight ? _kBgLgt : _kBgDark;
     final q  = _search.text.toLowerCase().trim();
+    final nonSelf = _convs.where((c) => c.otherUser != widget.currentUsername).toList();
     final filtered = q.isEmpty
-        ? _convs
-        : _convs.where((c) =>
+        ? nonSelf
+        : nonSelf.where((c) =>
             c.otherUser.toLowerCase().contains(q) ||
             c.otherFullName.toLowerCase().contains(q)).toList();
 
@@ -387,7 +388,7 @@ class _MessagesPageState extends State<MessagesPage> {
             ),
             if (q.isEmpty) ...() {
                 final activeConvs = _convs
-                    .where((c) => _isActiveNow(c.otherLastActive))
+                    .where((c) => c.otherUser != widget.currentUsername && _isActiveNow(c.otherLastActive))
                     .toList();
                 if (activeConvs.isEmpty) return const <Widget>[];
                 return [

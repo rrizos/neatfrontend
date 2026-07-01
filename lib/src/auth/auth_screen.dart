@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -253,22 +254,49 @@ Navigator.of(context).pop(city);
 },
 ),
 Positioned(
-bottom: 24,
-left: 16,
-right: 16,
+bottom: 56,
+left: 20,
+right: 20,
+child: ClipRRect(
+borderRadius: BorderRadius.circular(18),
+child: BackdropFilter(
+filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
 child: Container(
-padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
 decoration: BoxDecoration(
-color: Colors.black.withValues(alpha: 0.62),
-borderRadius: BorderRadius.circular(14),
+color: Colors.black.withValues(alpha: 0.52),
+borderRadius: BorderRadius.circular(18),
+border: Border.all(
+color: Colors.white.withValues(alpha: 0.12),
+width: 0.8,
 ),
-child: const Text(
+),
+child: Row(
+crossAxisAlignment: CrossAxisAlignment.center,
+children: [
+Container(
+padding: const EdgeInsets.all(7),
+decoration: BoxDecoration(
+color: Colors.white.withValues(alpha: 0.12),
+shape: BoxShape.circle,
+),
+child: const Icon(Icons.location_on_rounded, color: Color(0xffff4a4a), size: 20),
+),
+const SizedBox(width: 12),
+const Expanded(
+child: Text(
 'Συνδεθείτε στο For You της περιοχής σας, πατώντας την πινέζα της.',
-textAlign: TextAlign.center,
 style: TextStyle(
 color: Colors.white,
 fontSize: 14,
-height: 1.5,
+height: 1.45,
+fontWeight: FontWeight.w500,
+letterSpacing: 0.1,
+),
+),
+),
+],
+),
 ),
 ),
 ),

@@ -56,6 +56,7 @@ class _HomePageState extends State<HomePage> {
   final List<UserProfile> _followingProfiles = [];
   final Set<String> _followerAuthors = {};
   final ScrollController _feedScroll = ScrollController();
+  final Map<int, double> _tabScrollOffsets = {0: 0.0, 1: 0.0};
   int _nav = 0;
   int _selectedTab = 0;
   final Set<int> _visitedTabs = <int>{0};
@@ -818,7 +819,7 @@ class _HomePageState extends State<HomePage> {
                             TextButton(
                               onPressed: () => Navigator.of(pageContext).pop(),
                               style: TextButton.styleFrom(
-                                foregroundColor: const Color(0xff606060),
+                                foregroundColor: isLight ? Colors.black : Colors.white,
                                 padding: EdgeInsets.zero,
                                 textStyle: const TextStyle(fontSize: 16),
                               ),
@@ -1235,10 +1236,15 @@ class _HomePageState extends State<HomePage> {
                                   showFollowing: _activeCity == null,
                                   scrollController: _feedScroll,
                                   onTabChanged: (value) {
-                                    setState(() => _selectedTab = value);
                                     if (_feedScroll.hasClients) {
-                                      _feedScroll.jumpTo(0);
+                                      _tabScrollOffsets[_selectedTab] = _feedScroll.offset;
                                     }
+                                    setState(() => _selectedTab = value);
+                                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                                      if (_feedScroll.hasClients) {
+                                        _feedScroll.jumpTo(_tabScrollOffsets[value] ?? 0.0);
+                                      }
+                                    });
                                   },
                                 ),
                               ),
