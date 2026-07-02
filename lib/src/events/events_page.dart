@@ -1,14 +1,28 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
+
+const _kMapToken =
+    'eyJraWQiOiIySDdDRjVUOVRSIiwidHlwIjoiSldUIiwiYWxnIjoiRVMyNTYifQ'
+    '.eyJpc3MiOiJSWjM2UE5XUzgyIiwiaWF0IjoxNzUyMDkwNjM2LCJvcmlnaW4iO'
+    'iJuZXRuZXN0Lm5ldCJ9.r9qHYkpSBP65h1O9HkVJcxiYN4rHgtwdHgLyhbS0f'
+    'FnbZOlvx5LcYZELtt4Q7MBQEGDFICKLp-9nUpsMlA-ZuQ';
+const _kMapKitCdn = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
+
+String? _eventMapkitJs;
 
 class EventsPage extends StatefulWidget {
   const EventsPage({
@@ -943,6 +957,7 @@ class _CreateEventSheet extends StatefulWidget {
 class _CreateEventSheetState extends State<_CreateEventSheet> {
   final _title = TextEditingController();
   final _desc = TextEditingController();
+  final _location = TextEditingController();
   bool _official = false;
   bool _tickets = false;
   String _category = _kEventCategories[1];
@@ -955,6 +970,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   void dispose() {
     _title.dispose();
     _desc.dispose();
+    _location.dispose();
     super.dispose();
   }
 
@@ -1022,6 +1038,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       'hasTickets': _tickets,
                       'date': _date!.toIso8601String().substring(0, 10),
                       if (_official) 'category': _category,
+                      if (_official && _location.text.trim().isNotEmpty) 'location': _location.text.trim(),
                       if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
                     });
                   },
@@ -1114,6 +1131,14 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     );
                   },
                 ),
+              ),
+            ],
+            if (_official) ...[
+              const SizedBox(height: 10),
+              TextField(
+                controller: _location,
+                style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                decoration: _dec('Venue / Address', isLight),
               ),
             ],
             const SizedBox(height: 12),
@@ -1425,10 +1450,13 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                         const SizedBox(height: 8),
                       ],
                       if (event.location.isNotEmpty || event.city.isNotEmpty) ...[
-                        _DetailRow(
-                          icon: Icons.location_on_outlined,
-                          text: event.location.isNotEmpty ? event.location : event.city,
-                        ),
+                        if (official && event.location.isNotEmpty)
+                          _MapCard(location: event.location)
+                        else
+                          _DetailRow(
+                            icon: Icons.location_on_outlined,
+                            text: event.location.isNotEmpty ? event.location : event.city,
+                          ),
                         const SizedBox(height: 8),
                       ],
                       _DetailRow(
@@ -1562,6 +1590,222 @@ class _DetailRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _MapCard extends StatelessWidget {
+  const _MapCard({required this.location});
+
+  final String location;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final encoded = Uri.encodeComponent(location);
+    final appleMapsUri = Uri.parse('https://maps.apple.com/?q=$encoded');
+    final googleMapsUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encoded');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: SizedBox(
+            height: 160,
+            child: IgnorePointer(
+              child: _EventMapView(location: location, isLight: isLight),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            const Icon(Icons.location_on_outlined, size: 14, color: Color(0xff8f8f8f)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                location,
+                style: const TextStyle(color: Color(0xff8f8f8f), fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _MapButton(
+                label: 'Apple Maps',
+                icon: Icons.map_outlined,
+                onTap: () => launchUrl(appleMapsUri, mode: LaunchMode.externalApplication),
+                isLight: isLight,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _MapButton(
+                label: 'Google Maps',
+                icon: Icons.map_outlined,
+                onTap: () => launchUrl(googleMapsUri, mode: LaunchMode.externalApplication),
+                isLight: isLight,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _EventMapView extends StatefulWidget {
+  const _EventMapView({required this.location, required this.isLight});
+  final String location;
+  final bool isLight;
+
+  @override
+  State<_EventMapView> createState() => _EventMapViewState();
+}
+
+class _EventMapViewState extends State<_EventMapView> {
+  WebViewController? _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!kIsWeb) _init();
+  }
+
+  Future<void> _init() async {
+    if (_eventMapkitJs == null) {
+      try {
+        _eventMapkitJs = await rootBundle.loadString('assets/mapkit.js');
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    final ctrl = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(widget.isLight ? const Color(0xfff0f2f5) : const Color(0xff1a1a1b))
+      ..setNavigationDelegate(NavigationDelegate(
+        onWebResourceError: (e) => debugPrint('[eventmap] ${e.description}'),
+      ))
+      ..loadHtmlString(
+        _buildMapHtml(widget.location, inlineJs: _eventMapkitJs),
+        baseUrl: 'https://netnest.net',
+      );
+    if (mounted) setState(() => _ctrl = ctrl);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (kIsWeb || _ctrl == null) {
+      return ColoredBox(
+        color: widget.isLight ? const Color(0xfff0f2f5) : const Color(0xff1a1a1b),
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    return WebViewWidget(controller: _ctrl!);
+  }
+}
+
+String _buildMapHtml(String address, {String? inlineJs}) {
+  final escaped = address.replaceAll("'", "\\'");
+  final buf = StringBuffer();
+  buf.write('''<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="initial-scale=1.0,width=device-width">
+  <style>
+    html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    function initMap() {
+      mapkit.init({ authorizationCallback: function(done) { done('$_kMapToken'); } });
+      var map = new mapkit.Map('map', {
+        colorScheme: mapkit.Map.ColorSchemes.Dark,
+        showsCompass: mapkit.FeatureVisibility.Hidden,
+        showsScale: mapkit.FeatureVisibility.Hidden,
+        showsMapTypeControl: false,
+        showsZoomControl: false,
+        showsUserLocationControl: false,
+      });
+      map.isScrollEnabled = false;
+      map.isZoomEnabled = false;
+      map.isRotationEnabled = false;
+      map.isPitchEnabled = false;
+      try { map.pointOfInterestFilter = mapkit.PointOfInterestFilter.excludingAllCategories; } catch(_) {}
+
+      var geocoder = new mapkit.Geocoder({ language: 'en-GB' });
+      geocoder.lookup('$escaped', function(err, data) {
+        if (err || !data.results || !data.results.length) return;
+        var coord = data.results[0].coordinate;
+        var pin = new mapkit.MarkerAnnotation(coord, { color: '#ff3040', calloutEnabled: false });
+        map.addAnnotation(pin);
+        map.setRegionAnimated(new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.008, 0.008)));
+      });
+    }
+  </script>
+''');
+
+  if (inlineJs != null) {
+    buf.write('<script>$inlineJs</script>\n<script>initMap();</script>\n');
+  } else {
+    buf.write('''<script>
+(function(){
+  var s=document.createElement('script');
+  s.src='$_kMapKitCdn';
+  s.onload=initMap;
+  document.head.appendChild(s);
+})();
+</script>
+''');
+  }
+
+  buf.write('</body></html>');
+  return buf.toString();
+}
+
+class _MapButton extends StatelessWidget {
+  const _MapButton({required this.label, required this.icon, required this.onTap, required this.isLight});
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 15, color: isLight ? Colors.black : Colors.white),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: isLight ? Colors.black : Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

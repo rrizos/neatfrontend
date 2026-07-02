@@ -488,18 +488,27 @@ class _InboxRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final unread   = summary.unreadCount > 0;
-    final name     = summary.otherFullName.isNotEmpty ? summary.otherFullName : summary.otherUser;
-    final presence = _presenceLabel(summary.otherLastActive);
+    final unread    = summary.unreadCount > 0;
+    final name      = summary.otherFullName.isNotEmpty ? summary.otherFullName : summary.otherUser;
     final activeNow = _isActiveNow(summary.otherLastActive);
+    final count     = summary.unreadCount;
+    final timeStr   = _inboxTime(summary.updated);
+
+    // 2+ unread → "X new messages · time", 1 unread or read → preview · time
+    final previewText = (unread && count >= 2)
+        ? '$count new messages · $timeStr'
+        : '$_preview · $timeStr';
+    final previewColor = unread
+        ? (isLight ? Colors.black87 : Colors.white)
+        : (isLight ? _kSubLgt : _kSubDark);
 
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         child: Row(
           children: [
-            // Avatar with optional green active-now dot
+            // Avatar — active-now dot only, no ring/badge
             Stack(
               clipBehavior: Clip.none,
               children: [
@@ -508,7 +517,7 @@ class _InboxRow extends StatelessWidget {
                   url: summary.otherAvatarUrl,
                   radius: 28,
                   isLight: isLight,
-                  ring: unread,
+                  ring: false,
                 ),
                 if (activeNow)
                   Positioned(
@@ -530,6 +539,7 @@ class _InboxRow extends StatelessWidget {
               ],
             ),
             const SizedBox(width: 12),
+            // Name + inline-time preview
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -542,52 +552,33 @@ class _InboxRow extends StatelessWidget {
                       fontSize: 15,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  // Presence label OR last-message preview
-                  if (presence != null)
-                    Text(
-                      presence,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: activeNow ? _kGreen : (isLight ? _kSubLgt : _kSubDark),
-                        fontWeight: activeNow ? FontWeight.w600 : FontWeight.w400,
-                        fontSize: 12.5,
-                      ),
-                    )
-                  else
-                    Text(
-                      _preview,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: unread
-                            ? (isLight ? Colors.black87 : Colors.white)
-                            : (isLight ? _kSubLgt : _kSubDark),
-                        fontWeight: unread ? FontWeight.w600 : FontWeight.w400,
-                        fontSize: 13.5,
-                      ),
+                  const SizedBox(height: 3),
+                  Text(
+                    previewText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: previewColor,
+                      fontWeight: unread ? FontWeight.w600 : FontWeight.w400,
+                      fontSize: 13.5,
                     ),
+                  ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  _inboxTime(summary.updated),
-                  style: TextStyle(color: isLight ? _kSubLgt : _kSubDark, fontSize: 12),
+            // Blue dot for unread
+            if (unread) ...[
+              const SizedBox(width: 10),
+              Container(
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(
+                  color: _kBlue,
+                  shape: BoxShape.circle,
                 ),
-                if (unread) ...[
-                  const SizedBox(height: 5),
-                  Container(
-                    width: 9, height: 9,
-                    decoration: const BoxDecoration(color: _kBlue, shape: BoxShape.circle),
-                  ),
-                ],
-              ],
-            ),
+              ),
+            ] else
+              const SizedBox(width: 20),
           ],
         ),
       ),

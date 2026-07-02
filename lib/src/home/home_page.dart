@@ -68,6 +68,8 @@ class _HomePageState extends State<HomePage> {
   final _composeMedia = <_ComposeMedia>[];
   bool _composeMediaLoading = false;
   bool _posting = false;
+  int _unreadMessages = 0;
+  bool _hasOfficialEvents = false;
   bool _showInlineProfile = false;
   String _inlineProfileUsername = '';
   int? _inlinePostId;
@@ -134,10 +136,49 @@ class _HomePageState extends State<HomePage> {
           ..addAll(posts);
         _loading = false;
       });
-      await Future.wait([_loadFollowingAuthors(), _loadFollowerAuthors()]);
+      await Future.wait([_loadFollowingAuthors(), _loadFollowerAuthors(), _loadUnreadMessages(), _loadOfficialEventsBadge()]);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _loadUnreadMessages() async {
+    try {
+      final res = await http.get(inboxEndpoint, headers: authGetHeaders(widget.session.token));
+      if (res.statusCode != 200 || !mounted) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final convs = (decoded['conversations'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>();
+      final unread = convs
+          .where((c) => c['otherUser']?.toString() != widget.session.user.username)
+          .fold<int>(0, (sum, c) => sum + (int.tryParse(c['unreadCount']?.toString() ?? '') ?? 0));
+      if (mounted) setState(() => _unreadMessages = unread);
+    } catch (_) {}
+  }
+
+  Future<void> _loadOfficialEventsBadge() async {
+    try {
+      final city = _activeCity ?? widget.session.user.city;
+      if (city.isEmpty) return;
+      final res = await http.get(
+        eventsEndpoint(city: city, type: 'official'),
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (res.statusCode != 200 || !mounted) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final events = (decoded['events'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>();
+      final today = DateTime.now();
+      final todayMidnight = DateTime(today.year, today.month, today.day);
+      final hasUpcoming = events.any((e) {
+        final dateStr = e['date']?.toString() ?? e['eventDate']?.toString() ?? e['event_date']?.toString() ?? e['scheduledAt']?.toString() ?? '';
+        if (dateStr.isEmpty) return true;
+        final d = DateTime.tryParse(dateStr);
+        if (d == null) return true;
+        return !DateTime(d.year, d.month, d.day).isBefore(todayMidnight);
+      });
+      if (mounted) setState(() => _hasOfficialEvents = hasUpcoming);
+    } catch (_) {}
   }
 
   Future<void> _loadFollowingAuthors() async {
@@ -572,6 +613,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openEvents({int initialTab = 0}) async {
+    setState(() => _hasOfficialEvents = false);
     _hideNativeBar();
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -1226,6 +1268,8 @@ class _HomePageState extends State<HomePage> {
               notifications: _notificationsList
                   .where((item) => !item.isRead)
                   .length,
+              unreadMessages: _unreadMessages,
+              hasOfficialEvents: _hasOfficialEvents,
               activeCity: _activeCity,
               homeCity: widget.session.user.city,
               onReturnHome: _goHome,
@@ -1249,6 +1293,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 );
                 _showNativeBar();
+                _loadUnreadMessages();
               },
             ),
             Divider(
@@ -1584,6 +1629,8 @@ class _HomePageState extends State<HomePage> {
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.notifications,
+    required this.unreadMessages,
+    required this.hasOfficialEvents,
     required this.onEventsTap,
     required this.onNotificationsTap,
     required this.onMessagesTap,
@@ -1592,6 +1639,8 @@ class _TopBar extends StatelessWidget {
     this.onReturnHome,
   });
   final int notifications;
+  final int unreadMessages;
+  final bool hasOfficialEvents;
   final VoidCallback onEventsTap;
   final VoidCallback onNotificationsTap;
   final VoidCallback onMessagesTap;
@@ -1642,98 +1691,75 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              GestureDetector(
+              _iconWithDot(
+                isLight: isLight,
+                showDot: hasOfficialEvents,
                 onTap: onEventsTap,
-                child: SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: Center(
-                    child: Icon(
-                      Icons.event_note_outlined,
-                      color: isLight ? Colors.black : Colors.white,
-                      size: 26,
-                    ),
-                  ),
-                ),
+                icon: Icons.event_note_outlined,
               ),
             ],
             if (activeCity == null) ...[
-              GestureDetector(
+              _iconWithDot(
+                isLight: isLight,
+                showDot: hasOfficialEvents,
                 onTap: onEventsTap,
-                child: SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: Center(
-                    child: Icon(
-                      Icons.event_note_outlined,
-                      color: isLight ? Colors.black : Colors.white,
-                      size: 26,
-                    ),
-                  ),
-                ),
+                icon: Icons.event_note_outlined,
               ),
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  GestureDetector(
-                    onTap: onNotificationsTap,
-                    child: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: Center(
-                        child: Icon(
-                          Icons.favorite_border_rounded,
-                          color: isLight ? Colors.black : Colors.white,
-                          size: 26,
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (notifications > 0)
-                    Positioned(
-                      right: 2,
-                      top: 2,
-                      child: Container(
-                        width: 16,
-                        height: 16,
-                        decoration: BoxDecoration(
-                          color: const Color(0xfff66c6c),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: isLight ? Colors.white : const Color(0xff121212),
-                            width: 1.5,
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          notifications > 9 ? '9+' : '$notifications',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
+              _iconWithDot(
+                isLight: isLight,
+                showDot: notifications > 0,
+                onTap: onNotificationsTap,
+                icon: Icons.favorite_border_rounded,
               ),
-              GestureDetector(
+              _iconWithDot(
+                isLight: isLight,
+                showDot: unreadMessages > 0,
                 onTap: onMessagesTap,
-                child: SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: Center(
-                    child: PostShareIcon(
-                      color: isLight ? Colors.black : Colors.white,
-                      size: 26,
-                    ),
-                  ),
+                child: PostShareIcon(
+                  color: isLight ? Colors.black : Colors.white,
+                  size: 26,
                 ),
               ),
             ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _dot(bool isLight) => Container(
+    width: 10,
+    height: 10,
+    decoration: BoxDecoration(
+      color: const Color(0xffff3040),
+      shape: BoxShape.circle,
+      border: Border.all(
+        color: isLight ? Colors.white : Colors.black,
+        width: 1.5,
+      ),
+    ),
+  );
+
+  Widget _iconWithDot({
+    required bool isLight,
+    required bool showDot,
+    required VoidCallback onTap,
+    IconData? icon,
+    Widget? child,
+  }) {
+    final iconWidget = icon != null
+        ? Icon(icon, color: isLight ? Colors.black : Colors.white, size: 26)
+        : child!;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: SizedBox(width: 40, height: 40, child: Center(child: iconWidget)),
+        ),
+        if (showDot)
+          Positioned(right: 6, top: 6, child: _dot(isLight)),
+      ],
     );
   }
 }
@@ -3364,6 +3390,7 @@ class _CommentSheetState extends State<_CommentSheet> {
       if (mounted) setState(() => _picking = false);
     }
   }
+
 
   Future<void> _send() async {
     final text = _controller.text.trim();
