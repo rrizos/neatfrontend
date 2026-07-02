@@ -15,6 +15,7 @@ import 'package:giphy_flutter_sdk/dto/giphy_settings.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api.dart';
 import '../core/media_cache.dart';
@@ -170,14 +171,41 @@ class _HomePageState extends State<HomePage> {
           .whereType<Map<String, dynamic>>();
       final today = DateTime.now();
       final todayMidnight = DateTime(today.year, today.month, today.day);
-      final hasUpcoming = events.any((e) {
-        final dateStr = e['date']?.toString() ?? e['eventDate']?.toString() ?? e['event_date']?.toString() ?? e['scheduledAt']?.toString() ?? '';
-        if (dateStr.isEmpty) return true;
-        final d = DateTime.tryParse(dateStr);
-        if (d == null) return true;
-        return !DateTime(d.year, d.month, d.day).isBefore(todayMidnight);
-      });
-      if (mounted) setState(() => _hasOfficialEvents = hasUpcoming);
+      final upcomingIds = events
+          .where((e) {
+            final dateStr = e['date']?.toString() ?? e['eventDate']?.toString() ?? e['event_date']?.toString() ?? e['scheduledAt']?.toString() ?? '';
+            if (dateStr.isEmpty) return true;
+            final d = DateTime.tryParse(dateStr);
+            if (d == null) return true;
+            return !DateTime(d.year, d.month, d.day).isBefore(todayMidnight);
+          })
+          .map((e) => e['id']?.toString() ?? e['eventId']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final prefs = await SharedPreferences.getInstance();
+      final seenIds = (prefs.getStringList('seen_official_event_ids_$city') ?? []).toSet();
+      final hasNew = upcomingIds.any((id) => !seenIds.contains(id));
+      if (mounted) setState(() => _hasOfficialEvents = hasNew);
+    } catch (_) {}
+  }
+
+  Future<void> _markOfficialEventsSeen() async {
+    try {
+      final city = _activeCity ?? widget.session.user.city;
+      if (city.isEmpty) return;
+      final res = await http.get(
+        eventsEndpoint(city: city, type: 'official'),
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (res.statusCode != 200) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final ids = (decoded['events'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((e) => e['id']?.toString() ?? e['eventId']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('seen_official_event_ids_$city', ids);
     } catch (_) {}
   }
 
@@ -614,6 +642,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _openEvents({int initialTab = 0}) async {
     setState(() => _hasOfficialEvents = false);
+    unawaited(_markOfficialEventsSeen());
     _hideNativeBar();
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
