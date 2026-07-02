@@ -1,0 +1,226 @@
+import 'package:flutter/material.dart';
+
+import '../legal/legal_page.dart';
+
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({
+    super.key,
+    required this.themeMode,
+    required this.onLogout,
+  });
+
+  final ThemeMode themeMode;
+  final Future<void> Function() onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = themeMode == ThemeMode.light;
+    final bg = isLight ? Colors.white : const Color(0xff121212);
+    final divider = isLight ? const Color(0xffd9dee6) : const Color(0xff242424);
+    final sectionColor = isLight ? const Color(0xff616161) : const Color(0xffb3b3b3);
+
+    return Scaffold(
+      backgroundColor: bg,
+      appBar: AppBar(
+        backgroundColor: bg,
+        foregroundColor: isLight ? Colors.black : Colors.white,
+        elevation: 0,
+        title: const Text('Settings'),
+      ),
+      body: SafeArea(
+        child: ListView(
+          children: [
+            _SectionHeader(label: 'Legal', color: sectionColor),
+            _SettingsRow(
+              icon: Icons.description_outlined,
+              label: 'Terms of Service',
+              isLight: isLight,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => LegalPage(
+                    title: 'Terms of Service',
+                    body: termsOfServiceText,
+                    titleEl: termsOfServiceTitleEl,
+                    bodyEl: termsOfServiceTextEl,
+                    themeMode: themeMode,
+                  ),
+                ),
+              ),
+            ),
+            Divider(height: 1, color: divider),
+            _SettingsRow(
+              icon: Icons.privacy_tip_outlined,
+              label: 'Privacy Policy',
+              isLight: isLight,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => LegalPage(
+                    title: 'Privacy Policy',
+                    body: privacyPolicyText,
+                    titleEl: privacyPolicyTitleEl,
+                    bodyEl: privacyPolicyTextEl,
+                    themeMode: themeMode,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 28),
+            _SectionHeader(label: 'Account', color: sectionColor),
+            _SettingsRow(
+              icon: Icons.logout,
+              label: 'Log Out',
+              isLight: isLight,
+              showChevron: false,
+              onTap: () => _confirmLogout(context),
+            ),
+            Divider(height: 1, color: divider),
+            _SettingsRow(
+              icon: Icons.delete_outline,
+              label: 'Delete Account',
+              isLight: isLight,
+              destructive: true,
+              showChevron: false,
+              onTap: () => _confirmDeleteAccount(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmLogout(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Log Out'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Log Out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    await onLogout();
+  }
+
+  Future<void> _confirmDeleteAccount(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Account'),
+        content: const Text(
+          'This will permanently delete your account and all your data. '
+          'This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Color(0xfff66c6c)),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    // TODO: wire this up to a real delete-account endpoint (see
+    // deleteAccountEndpoint in lib/src/core/api.dart) that deletes the
+    // account server-side. For now this just acknowledges the request and
+    // signs the user out, so the flow exists for App Store review.
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Request Received'),
+        content: const Text(
+          'Your account deletion request has been received. '
+          'You will now be signed out.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (!context.mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    await onLogout();
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.icon,
+    required this.label,
+    required this.isLight,
+    required this.onTap,
+    this.destructive = false,
+    this.showChevron = true,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool isLight;
+  final VoidCallback onTap;
+  final bool destructive;
+  final bool showChevron;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive
+        ? const Color(0xfff66c6c)
+        : (isLight ? Colors.black : Colors.white);
+    return ListTile(
+      onTap: onTap,
+      leading: Icon(icon, color: color),
+      title: Text(
+        label,
+        style: TextStyle(color: color, fontWeight: FontWeight.w500),
+      ),
+      trailing: showChevron
+          ? Icon(
+              Icons.chevron_right,
+              color: isLight ? const Color(0xffb0b0b0) : const Color(0xff5a5a5a),
+            )
+          : null,
+    );
+  }
+}

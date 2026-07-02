@@ -15,6 +15,7 @@ import '../admin/admin_panel_page.dart';
 import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../messages/messages_page.dart';
+import '../settings/settings_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
@@ -661,8 +662,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ),
           if (profile.username == widget.currentUser.username)
             IconButton(
-              onPressed: () async => widget.onLogout(),
-              icon: Icon(Icons.logout, color: isLight ? Colors.black : Colors.white),
+              tooltip: 'Settings',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => SettingsPage(
+                    themeMode: widget.themeMode,
+                    onLogout: widget.onLogout,
+                  ),
+                ),
+              ),
+              icon: Icon(Icons.settings_rounded, color: isLight ? Colors.black : Colors.white),
             ),
         ],
       ),

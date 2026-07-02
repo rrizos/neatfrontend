@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:ui';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/api.dart';
 import '../core/models.dart';
+import '../legal/legal_page.dart';
 import '../map/city_map_view.dart';
 import 'forgot_password_screen.dart';
 
@@ -32,6 +34,35 @@ final _fullName = TextEditingController();
 late bool _signup = widget.initialSignup;
 bool _loading = false;
 String? _error;
+final _termsRecognizer = TapGestureRecognizer();
+final _privacyRecognizer = TapGestureRecognizer();
+
+@override
+void initState() {
+super.initState();
+_termsRecognizer.onTap = () => Navigator.of(context).push(
+  MaterialPageRoute(
+    builder: (_) => LegalPage(
+      title: 'Terms of Service',
+      body: termsOfServiceText,
+      titleEl: termsOfServiceTitleEl,
+      bodyEl: termsOfServiceTextEl,
+      themeMode: widget.themeMode,
+    ),
+  ),
+);
+_privacyRecognizer.onTap = () => Navigator.of(context).push(
+  MaterialPageRoute(
+    builder: (_) => LegalPage(
+      title: 'Privacy Policy',
+      body: privacyPolicyText,
+      titleEl: privacyPolicyTitleEl,
+      bodyEl: privacyPolicyTextEl,
+      themeMode: widget.themeMode,
+    ),
+  ),
+);
+}
 
 @override
 void dispose() {
@@ -39,6 +70,8 @@ _username.dispose();
 _email.dispose();
 _password.dispose();
 _fullName.dispose();
+_termsRecognizer.dispose();
+_privacyRecognizer.dispose();
 super.dispose();
 }
 
@@ -172,6 +205,34 @@ FilledButton(
 onPressed: _loading ? null : _submit,
 child: Text(_signup ? 'Sign up' : 'Sign in'),
 ),
+if (_signup) ...[
+  const SizedBox(height: 12),
+  Text.rich(
+    TextSpan(
+      style: TextStyle(
+        color: isLight ? const Color(0xff6b7280) : const Color(0xffb7b7b7),
+        fontSize: 13,
+        height: 1.4,
+      ),
+      children: [
+        const TextSpan(text: 'By signing up you agree to our '),
+        TextSpan(
+          text: 'Terms of Service',
+          style: const TextStyle(color: Color(0xff1479ff), fontWeight: FontWeight.w600),
+          recognizer: _termsRecognizer,
+        ),
+        const TextSpan(text: ' and '),
+        TextSpan(
+          text: 'Privacy Policy',
+          style: const TextStyle(color: Color(0xff1479ff), fontWeight: FontWeight.w600),
+          recognizer: _privacyRecognizer,
+        ),
+        const TextSpan(text: '.'),
+      ],
+    ),
+    textAlign: TextAlign.center,
+  ),
+],
 if (!_signup) ...[
   const SizedBox(height: 4),
   TextButton(

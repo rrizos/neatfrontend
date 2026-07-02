@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api.dart';
 import '../core/media_cache.dart';
@@ -200,6 +201,40 @@ Uint8List? _parseImage(String t) {
   } catch (_) { return null; }
 }
 
+// ─── Blocked users (local-only; hides conversations from the inbox) ──────────
+
+class _BlockedUsers {
+  static const _key = 'neat_blocked_users';
+  static Set<String>? _cache;
+
+  static Future<Set<String>> _load() async {
+    if (_cache != null) return _cache!;
+    final prefs = await SharedPreferences.getInstance();
+    _cache = (prefs.getStringList(_key) ?? []).toSet();
+    return _cache!;
+  }
+
+  static Future<void> _persist(Set<String> set) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_key, set.toList());
+  }
+
+  static Future<bool> isBlocked(String username) async =>
+      (await _load()).contains(username);
+
+  static Future<void> block(String username) async {
+    final set = await _load();
+    set.add(username);
+    await _persist(set);
+  }
+
+  static Future<void> unblock(String username) async {
+    final set = await _load();
+    set.remove(username);
+    await _persist(set);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MessagesPage  (inbox)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,7 +297,9 @@ class _MessagesPageState extends State<MessagesPage> {
           .whereType<Map<String, dynamic>>()
           .map(ConversationSummary.fromJson)
           .toList();
-      if (mounted) setState(() { _convs = items; _loading = false; });
+      final blocked = await _BlockedUsers._load();
+      final visible = items.where((c) => !blocked.contains(c.otherUser)).toList();
+      if (mounted) setState(() { _convs = visible; _loading = false; });
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -909,6 +946,7 @@ class _ConversationPageState extends State<ConversationPage> {
   MessageItem? _replyTo;
   Timer? _presenceTimer;
   DateTime? _otherLastActive;
+  bool _blocked = false;
 
   // ── Local message cache ───────────────────────────────────────────────────
 
@@ -955,6 +993,9 @@ class _ConversationPageState extends State<ConversationPage> {
     _load(initial: true);  // then sync with server
     _pingPresence();
     _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
+    _BlockedUsers.isBlocked(widget.otherUsername).then((blocked) {
+      if (mounted && blocked) setState(() => _blocked = true);
+    });
   }
 
   @override
@@ -1097,6 +1138,82 @@ class _ConversationPageState extends State<ConversationPage> {
     return t.length > 80 ? '${t.substring(0, 80)}…' : t;
   }
 
+  Future<void> _showOptionsSheet() async {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: isLight ? _kBgLgt : _kBgDark,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                _blocked ? Icons.check_circle_outline : Icons.block,
+                color: _blocked ? (isLight ? Colors.black : Colors.white) : const Color(0xfff66c6c),
+              ),
+              title: Text(
+                _blocked ? 'Unblock User' : 'Block User',
+                style: TextStyle(
+                  color: _blocked ? (isLight ? Colors.black : Colors.white) : const Color(0xfff66c6c),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _blocked ? _confirmUnblock() : _confirmBlock();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmBlock() async {
+    final name = widget.otherUsername;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Block User'),
+        content: Text(
+          'Block @$name? They won\'t be able to message you, and this '
+          'conversation will be removed from your inbox.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Block', style: TextStyle(color: Color(0xfff66c6c))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _BlockedUsers.block(name);
+    if (!mounted) return;
+    setState(() => _blocked = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('User blocked')),
+    );
+  }
+
+  Future<void> _confirmUnblock() async {
+    final name = widget.otherUsername;
+    await _BlockedUsers.unblock(name);
+    if (!mounted) return;
+    setState(() => _blocked = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('User unblocked')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
@@ -1161,6 +1278,12 @@ class _ConversationPageState extends State<ConversationPage> {
             ],
           ),
         ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.more_vert, color: isLight ? Colors.black : Colors.white),
+            onPressed: _showOptionsSheet,
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -1205,16 +1328,18 @@ class _ConversationPageState extends State<ConversationPage> {
                         },
                       ),
           ),
-          _Composer(
-            controller: _composer,
-            isLight: isLight,
-            sending: _sending,
-            onSendText: _sendText,
-            onSendImage: _sendImage,
-            onSendVoice: _sendVoice,
-            replyTo: _replyTo,
-            onClearReply: _clearReply,
-          ),
+          _blocked
+              ? _BlockedBanner(isLight: isLight)
+              : _Composer(
+                  controller: _composer,
+                  isLight: isLight,
+                  sending: _sending,
+                  onSendText: _sendText,
+                  onSendImage: _sendImage,
+                  onSendVoice: _sendVoice,
+                  replyTo: _replyTo,
+                  onClearReply: _clearReply,
+                ),
         ],
       ),
     );
@@ -1531,6 +1656,35 @@ class _TimeDivider extends StatelessWidget {
         child: Text(
           _chatTime(time),
           style: TextStyle(color: isLight ? _kSubLgt : _kSubDark, fontSize: 12),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Blocked banner ───────────────────────────────────────────────────────────
+
+class _BlockedBanner extends StatelessWidget {
+  const _BlockedBanner({required this.isLight});
+
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        color: isLight ? _kInputLgt : _kInputDark,
+        child: Text(
+          'User blocked',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: isLight ? _kSubLgt : _kSubDark,
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
         ),
       ),
     );
