@@ -67,6 +67,7 @@ class _HomePageState extends State<HomePage> {
   String? _activeCity;
   final _composeMedia = <_ComposeMedia>[];
   bool _composeMediaLoading = false;
+  bool _posting = false;
   bool _showInlineProfile = false;
   String _inlineProfileUsername = '';
   int? _inlinePostId;
@@ -263,9 +264,12 @@ class _HomePageState extends State<HomePage> {
   static const _kMaxImageBytes = 6 * 1024 * 1024; // 6 MB per image
   static const _kMaxVideoBytes = 20 * 1024 * 1024; // 20 MB per video
 
-  Future<void> _createPost() async {
+  Future<void> _createPost(StateSetter setPageState) async {
     final text = _compose.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _posting) return;
+    setState(() => _posting = true);
+    setPageState(() {});
+    var popped = false;
     try {
       final request = http.MultipartRequest('POST', postsEndpoint())
         ..headers['Authorization'] = 'Token ${widget.session.token}';
@@ -296,12 +300,13 @@ class _HomePageState extends State<HomePage> {
       }
       request.fields['media'] = jsonEncode(mediaInfo);
 
-      final streamed = await request.send().timeout(const Duration(seconds: 120));
+      final streamed = await request.send().timeout(const Duration(seconds: 180));
       final res = await http.Response.fromStream(streamed);
       if (!mounted) return;
       if (res.statusCode == 201) {
         _compose.clear();
         setState(() => _composeMedia.clear());
+        popped = true;
         Navigator.of(context).pop();
         _load();
       } else if (res.statusCode == 413) {
@@ -319,6 +324,11 @@ class _HomePageState extends State<HomePage> {
             ? 'Upload timed out. Please try again.'
             : 'Network error. Please try again.';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } finally {
+      if (!popped && mounted) {
+        setState(() => _posting = false);
+        setPageState(() {});
       }
     }
   }
@@ -815,7 +825,9 @@ class _HomePageState extends State<HomePage> {
             );
           }
 
-              return Scaffold(
+              return PopScope(
+                canPop: !_posting,
+                child: Scaffold(
                 backgroundColor:
                     isLight ? Colors.white : const Color(0xff111111),
                 body: SafeArea(
@@ -829,9 +841,12 @@ class _HomePageState extends State<HomePage> {
                         child: Row(
                           children: [
                             TextButton(
-                              onPressed: () => Navigator.of(pageContext).pop(),
+                              onPressed: _posting
+                                  ? null
+                                  : () => Navigator.of(pageContext).pop(),
                               style: TextButton.styleFrom(
                                 foregroundColor: isLight ? Colors.black : Colors.white,
+                                disabledForegroundColor: const Color(0xff8a8a8a),
                                 padding: EdgeInsets.zero,
                                 textStyle: const TextStyle(fontSize: 16),
                               ),
@@ -852,7 +867,11 @@ class _HomePageState extends State<HomePage> {
                               builder: (_, value, _) {
                                 final canPost = value.text.trim().isNotEmpty;
                                 return FilledButton(
-                                  onPressed: canPost ? _createPost : null,
+                                  onPressed: canPost
+                                      ? (_posting
+                                          ? () {}
+                                          : () => _createPost(setPageState))
+                                      : null,
                                   style: FilledButton.styleFrom(
                                     backgroundColor: dimColor,
                                     foregroundColor: isLight
@@ -870,7 +889,19 @@ class _HomePageState extends State<HomePage> {
                                           BorderRadius.circular(999),
                                     ),
                                   ),
-                                  child: const Text('Post'),
+                                  child: _posting
+                                      ? SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                              isLight ? Colors.white : Colors.black,
+                                            ),
+                                          ),
+                                        )
+                                      : const Text('Post'),
                                 );
                               },
                             ),
@@ -1116,6 +1147,7 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ],
                   ),
+                ),
                 ),
               );
             },

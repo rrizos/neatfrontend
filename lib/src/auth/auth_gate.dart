@@ -86,7 +86,7 @@ class _AuthGateState extends State<AuthGate> {
       return MaterialApp(
         themeMode: widget.themeMode,
         home: Scaffold(
-          backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+          backgroundColor: isLight ? Colors.white : const Color(0xff121212),
           body: const Center(child: CircularProgressIndicator()),
         ),
       );

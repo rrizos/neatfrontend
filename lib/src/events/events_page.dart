@@ -359,7 +359,7 @@ class _EventsPageState extends State<EventsPage> {
     final visible = _tab == 0 ? _filteredOfficial : _community;
 
     return Scaffold(
-      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff0f0f10),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0f0f10),
       appBar: AppBar(
         backgroundColor: isLight ? Colors.white : const Color(0xff0f0f10),
         title: Row(

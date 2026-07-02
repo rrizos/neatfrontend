@@ -1,21 +1,15 @@
 PODS:
   - Flutter (1.0.0)
-  - record (0.0.1):
-    - Flutter
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
-  - record (from `.symlinks/plugins/record/ios`)
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
-  record:
-    :path: ".symlinks/plugins/record/ios"
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  record: 426d0643542aaca81f738c5d214ad99626b2f134
 
 PODFILE CHECKSUM: e30f02f9d1c72c47bb6344a0a748c9d268180865
 

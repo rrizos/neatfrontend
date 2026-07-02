@@ -109,7 +109,7 @@ class _NeatAppState extends State<NeatApp> {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
-      scaffoldBackgroundColor: const Color(0xfff3f4f6),
+      scaffoldBackgroundColor: Colors.white,
       colorScheme: const ColorScheme.light(
         primary: Colors.black,
         secondary: Color(0xff1479ff),

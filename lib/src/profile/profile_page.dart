@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
+import '../core/legacy_nav_bar.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
@@ -33,6 +34,8 @@ class ProfilePage extends StatefulWidget {
     this.onHideNavBar,
     this.onShowNavBar,
     this.followEnabled = true,
+    this.onNavTap,
+    this.activeNavIndex = 0,
   });
   final String username;
   final UserProfile currentUser;
@@ -49,6 +52,12 @@ class ProfilePage extends StatefulWidget {
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
   final bool followEnabled;
+  /// When set, this page renders its own bottom nav bar (mirroring
+  /// HomePage's legacy bar) instead of relying on one from underneath —
+  /// used when this page was pushed on top of HomePage's Scaffold, which
+  /// would otherwise hide HomePage's bottomNavigationBar entirely.
+  final ValueChanged<int>? onNavTap;
+  final int activeNavIndex;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -601,7 +610,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         .where((p) => p.author == profile.username)
         .toList();
     return Scaffold(
-      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+      backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+      bottomNavigationBar: widget.onNavTap == null
+          ? null
+          : LegacyNavBar(
+              isLight: isLight,
+              currentIndex: widget.activeNavIndex,
+              onTap: widget.onNavTap!,
+              avatarUrl: widget.currentUser.avatarUrl,
+            ),
       appBar: AppBar(
         backgroundColor: isLight ? Colors.white : const Color(0xff121212),
         titleSpacing: 12,
@@ -803,7 +820,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   Tab(icon: Icon(Icons.bookmark_border_rounded, size: 22)),
                 ],
               ),
-              isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+              isLight ? Colors.white : const Color(0xff121212),
             ),
           ),
         ],
@@ -1221,7 +1238,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     final avatarBytes = _dataUrlBytes(_avatarUrl);
     return Container(
       decoration: BoxDecoration(
-        color: isLight ? const Color(0xfff3f4f6) : const Color(0xff111111),
+        color: isLight ? Colors.white : const Color(0xff111111),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: SafeArea(
@@ -1417,7 +1434,7 @@ class _SavedPostsPageState extends State<_SavedPostsPage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     return Scaffold(
       backgroundColor:
-          isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+          isLight ? Colors.white : const Color(0xff121212),
       appBar: AppBar(
         backgroundColor: isLight ? Colors.white : const Color(0xff121212),
         iconTheme: IconThemeData(color: isLight ? Colors.black : Colors.white),
@@ -1666,7 +1683,7 @@ class _UserListPageState extends State<_UserListPage> {
     final filtered = _filtered;
     return Scaffold(
       backgroundColor:
-          isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+          isLight ? Colors.white : const Color(0xff121212),
       appBar: AppBar(
         backgroundColor: isLight ? Colors.white : const Color(0xff121212),
         iconTheme: IconThemeData(color: isLight ? Colors.black : Colors.white),

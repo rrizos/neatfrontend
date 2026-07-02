@@ -1576,7 +1576,7 @@ class _Composer extends StatefulWidget {
 }
 
 class _ComposerState extends State<_Composer> {
-  final _recorder = Record();
+  final _recorder = AudioRecorder();
   bool _recording  = false;
   int  _recSecs    = 0;
   Timer? _timer;
@@ -1660,7 +1660,7 @@ class _ComposerState extends State<_Composer> {
     if (!ok || !mounted) return;
     final dir = await getTemporaryDirectory();
     _recPath = '${dir.path}/neat_voice_${DateTime.now().millisecondsSinceEpoch}.aac';
-    await _recorder.start(path: _recPath!, encoder: AudioEncoder.aacLc);
+    await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: _recPath!);
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _recSecs++);
     });

@@ -113,7 +113,7 @@ setState(() => _loading = false);
 Widget build(BuildContext context) {
 final isLight = widget.themeMode == ThemeMode.light;
 return Scaffold(
-backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+backgroundColor: isLight ? Colors.white : const Color(0xff121212),
 body: SafeArea(
 child: Center(
 child: SingleChildScrollView(
@@ -240,7 +240,7 @@ final String token;
 Widget build(BuildContext context) {
 final isLight = Theme.of(context).brightness == Brightness.light;
 return Scaffold(
-backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+backgroundColor: isLight ? Colors.white : const Color(0xff121212),
 body: SafeArea(
 child: Stack(
 children: [
