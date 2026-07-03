@@ -66,6 +66,9 @@ Uri profileEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/profiles/$username/');
 Uri followEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/profiles/$username/follow/');
+Uri userBlockEndpoint(String username) =>
+    Uri.parse('$apiBaseUrl/api/auth/profiles/$username/block/');
+Uri get blockedUsersEndpoint => Uri.parse('$apiBaseUrl/api/auth/blocked/');
 Uri followersEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/profiles/$username/followers/');
 Uri followingEndpoint(String username) =>
@@ -98,12 +101,20 @@ Uri eventAttendEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/attend/');
 Uri eventDeleteEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/delete/');
+Uri eventReportEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/$id/report/');
 Uri get inboxEndpoint => Uri.parse('$apiBaseUrl/api/messages/inbox/');
 Uri get presenceEndpoint => Uri.parse('$apiBaseUrl/api/messages/presence/');
 Uri get startConversationEndpoint =>
     Uri.parse('$apiBaseUrl/api/messages/start/');
 Uri messageConversationEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/messages/$id/');
+Uri messageReactEndpoint(int conversationId, int messageId) =>
+    Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/react/');
+Uri messageDeleteEndpoint(int conversationId, int messageId) =>
+    Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/delete/');
+Uri messageReportEndpoint(int conversationId, int messageId) =>
+    Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/report/');
 
 const jsonHeaders = {
   'Content-Type': 'application/json; charset=utf-8',

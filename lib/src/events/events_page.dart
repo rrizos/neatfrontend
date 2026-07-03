@@ -15,6 +15,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
+import '../core/report_post_sheet.dart';
 
 const _kMapToken =
     'eyJraWQiOiIySDdDRjVUOVRSIiwidHlwIjoiSldUIiwiYWxnIjoiRVMyNTYifQ'
@@ -54,8 +55,6 @@ class _EventsPageState extends State<EventsPage> {
   List<EventItem> _events = [];
   final ImagePicker _picker = ImagePicker();
   String _selectedCategory = 'All';
-  final Map<int, String> _localCategories = {};
-  final Map<int, String> _localDates = {};
   final Set<int> _localAttending = {};
 
   String get _cacheKey => 'neat_events_cache_${widget.city}';
@@ -64,8 +63,7 @@ class _EventsPageState extends State<EventsPage> {
   void initState() {
     super.initState();
     if (widget.preferredTab != null) _tab = widget.preferredTab!;
-    Future.wait([_loadLocalCategories(), _loadLocalDates(), _loadLocalAttending()])
-        .then((_) async {
+    _loadLocalAttending().then((_) async {
       await _loadEventsCache();
       await _load();
     });
@@ -85,17 +83,15 @@ class _EventsPageState extends State<EventsPage> {
       if (raw == null || !mounted) return;
       final list = (jsonDecode(raw) as List).whereType<Map<String, dynamic>>().toList();
       final events = list.map(EventItem.fromJson).map((e) {
-        final localCat  = _localCategories[e.id];
-        final localDate = _localDates[e.id];
         return EventItem(
           id: e.id, city: e.city, eventType: e.eventType,
-          category: (localCat != null && localCat.isNotEmpty) ? localCat : e.category,
+          category: e.category,
           title: e.title, description: e.description,
           location: e.location, imageUrl: e.imageUrl, creator: e.creator,
           organizer: e.organizer, hasTickets: e.hasTickets,
           ticketsUrl: e.ticketsUrl, attendees: e.attendees,
           isAttending: _localAttending.contains(e.id),
-          date: (localDate != null && localDate.isNotEmpty) ? localDate : e.date,
+          date: e.date,
         );
       }).toList();
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
@@ -111,50 +107,6 @@ class _EventsPageState extends State<EventsPage> {
         widget.preferredTab != oldWidget.preferredTab) {
       setState(() => _tab = widget.preferredTab!);
     }
-  }
-
-  Future<void> _loadLocalCategories() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('event_categories') ?? '{}';
-    try {
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      _localCategories.clear();
-      for (final entry in map.entries) {
-        final id = int.tryParse(entry.key);
-        if (id != null) _localCategories[id] = entry.value.toString();
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _saveLocalCategory(int eventId, String category) async {
-    _localCategories[eventId] = category;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'event_categories',
-      jsonEncode({for (final e in _localCategories.entries) '${e.key}': e.value}),
-    );
-  }
-
-  Future<void> _loadLocalDates() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('event_dates') ?? '{}';
-    try {
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      _localDates.clear();
-      for (final entry in map.entries) {
-        final id = int.tryParse(entry.key);
-        if (id != null) _localDates[id] = entry.value.toString();
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _saveLocalDate(int eventId, String date) async {
-    _localDates[eventId] = date;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'event_dates',
-      jsonEncode({for (final e in _localDates.entries) '${e.key}': e.value}),
-    );
   }
 
   Future<void> _loadLocalAttending() async {
@@ -192,20 +144,16 @@ class _EventsPageState extends State<EventsPage> {
       unawaited(_saveEventsCache(rawList));
       final events = rawList
           .map(EventItem.fromJson)
-          .map((e) {
-            final localCat = _localCategories[e.id];
-            final localDate = _localDates[e.id];
-            return EventItem(
-              id: e.id, city: e.city, eventType: e.eventType,
-              category: (localCat != null && localCat.isNotEmpty) ? localCat : e.category,
-              title: e.title, description: e.description,
-              location: e.location, imageUrl: e.imageUrl, creator: e.creator,
-              organizer: e.organizer, hasTickets: e.hasTickets,
-              ticketsUrl: e.ticketsUrl, attendees: e.attendees,
-              isAttending: _localAttending.contains(e.id),
-              date: (localDate != null && localDate.isNotEmpty) ? localDate : e.date,
-            );
-          })
+          .map((e) => EventItem(
+                id: e.id, city: e.city, eventType: e.eventType,
+                category: e.category,
+                title: e.title, description: e.description,
+                location: e.location, imageUrl: e.imageUrl, creator: e.creator,
+                organizer: e.organizer, hasTickets: e.hasTickets,
+                ticketsUrl: e.ticketsUrl, attendees: e.attendees,
+                isAttending: _localAttending.contains(e.id),
+                date: e.date,
+              ))
           .toList();
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
       if (!mounted) return;
@@ -237,38 +185,7 @@ class _EventsPageState extends State<EventsPage> {
       body: jsonEncode({...result, 'city': widget.city}),
     );
     if (res.statusCode == 201) {
-      final category = result['category'] as String?;
-      final date = result['date'] as String?;
-      int? id;
-      try {
-        final decoded = jsonDecode(res.body);
-        if (decoded is Map<String, dynamic>) {
-          final evt = (() {
-            final v = decoded['event'] ?? decoded['data'] ?? decoded;
-            return v is Map<String, dynamic> ? v : decoded;
-          })();
-          id = int.tryParse(evt['id']?.toString() ?? '')
-              ?? int.tryParse(evt['eventId']?.toString() ?? '')
-              ?? int.tryParse(decoded['id']?.toString() ?? '')
-              ?? int.tryParse(decoded['eventId']?.toString() ?? '');
-        }
-      } catch (_) {}
-      if (id != null) {
-        if (category != null && category.isNotEmpty) await _saveLocalCategory(id, category);
-        if (date != null && date.isNotEmpty) await _saveLocalDate(id, date);
-      }
       await _load();
-      if (id == null) {
-        final title = result['title']?.toString().trim() ?? '';
-        if (title.isNotEmpty) {
-          final found = _events.where((e) => e.title == title).firstOrNull;
-          if (found != null) {
-            if (category != null && category.isNotEmpty) await _saveLocalCategory(found.id, category);
-            if (date != null && date.isNotEmpty) await _saveLocalDate(found.id, date);
-            await _load();
-          }
-        }
-      }
     }
   }
 
@@ -320,6 +237,10 @@ class _EventsPageState extends State<EventsPage> {
     }
   }
 
+  void _reportEvent(EventItem event) {
+    showReportEventSheet(context, eventId: event.id, token: widget.token);
+  }
+
   void _showEventDetail(EventItem event) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
@@ -337,6 +258,10 @@ class _EventsPageState extends State<EventsPage> {
         onDelete: () {
           Navigator.of(context).pop();
           _deleteEvent(event);
+        },
+        onReport: () {
+          Navigator.of(context).pop();
+          _reportEvent(event);
         },
         attendEnabled: widget.attendEnabled,
         isAdmin: widget.currentUser.isAdmin,
@@ -395,6 +320,7 @@ class _EventsPageState extends State<EventsPage> {
                       currentUsername: widget.currentUser.username,
                       onAttend: () => _attend(event),
                       onDelete: () => _deleteEvent(event),
+                      onReport: () => _reportEvent(event),
                       onTap: () => _showEventDetail(event),
                       attendEnabled: widget.attendEnabled,
                       isAdmin: widget.currentUser.isAdmin,
@@ -666,6 +592,7 @@ class _EventCard extends StatelessWidget {
     required this.currentUsername,
     required this.onAttend,
     required this.onDelete,
+    required this.onReport,
     required this.onTap,
     this.attendEnabled = true,
     this.isAdmin = false,
@@ -675,6 +602,7 @@ class _EventCard extends StatelessWidget {
   final String currentUsername;
   final VoidCallback onAttend;
   final VoidCallback onDelete;
+  final VoidCallback onReport;
   final VoidCallback onTap;
   final bool attendEnabled;
   final bool isAdmin;
@@ -884,17 +812,18 @@ class _EventCard extends StatelessWidget {
                       style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3)),
                     ),
                     const Spacer(),
-                    if (event.creator == currentUsername || isAdmin)
-                      PopupMenuButton<String>(
-                        icon: const Icon(
-                          Icons.more_horiz_rounded,
-                          color: Colors.white,
-                        ),
-                        constraints: const BoxConstraints(),
-                        onSelected: (value) async {
-                          if (value == 'delete') onDelete();
-                        },
-                        itemBuilder: (context) => [
+                    PopupMenuButton<String>(
+                      icon: const Icon(
+                        Icons.more_horiz_rounded,
+                        color: Colors.white,
+                      ),
+                      constraints: const BoxConstraints(),
+                      onSelected: (value) async {
+                        if (value == 'delete') onDelete();
+                        if (value == 'report') onReport();
+                      },
+                      itemBuilder: (context) => [
+                        if (event.creator == currentUsername || isAdmin)
                           const PopupMenuItem(
                             value: 'delete',
                             padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
@@ -903,8 +832,13 @@ class _EventCard extends StatelessWidget {
                               style: TextStyle(color: Color(0xfff66c6c)),
                             ),
                           ),
-                        ],
-                      ),
+                        const PopupMenuItem(
+                          value: 'report',
+                          padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+                          child: Text('Report event'),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
                 Row(
@@ -1424,6 +1358,7 @@ class _EventDetailSheet extends StatefulWidget {
     required this.currentUsername,
     required this.onAttend,
     required this.onDelete,
+    required this.onReport,
     this.attendEnabled = true,
     this.isAdmin = false,
   });
@@ -1432,6 +1367,7 @@ class _EventDetailSheet extends StatefulWidget {
   final String currentUsername;
   final VoidCallback onAttend;
   final VoidCallback onDelete;
+  final VoidCallback onReport;
   final bool attendEnabled;
   final bool isAdmin;
 
@@ -1627,6 +1563,19 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                               padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                             child: const Text('Delete event'),
+                          ),
+                        ),
+                      ] else ...[
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: TextButton(
+                            onPressed: widget.onReport,
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xfff66c6c),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: const Text('Report event'),
                           ),
                         ),
                       ],

@@ -16,6 +16,7 @@ import 'package:giphy_flutter_sdk/dto/giphy_theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_player/video_player.dart';
 
 import '../core/api.dart';
 import '../core/media_cache.dart';
@@ -384,6 +385,7 @@ class _HomePageState extends State<HomePage> {
               targetId: item.targetId,
               targetText: item.targetText,
               imageUrl: item.imageUrl,
+              videoUrl: item.videoUrl,
               isRead: true,
               created: item.created,
             );
@@ -3338,19 +3340,23 @@ class _NotifTile extends StatelessWidget {
       }
       // no image → trailing stays null (nothing shown)
     } else {
-      // post notification — show actual thumbnail or video placeholder
+      // post notification — show the real photo/video thumbnail; show
+      // nothing at all for a text-only post (no blank placeholder box).
       final imgUrl = item.imageUrl;
+      final videoUrl = item.videoUrl;
       final thumbBg = isLight ? const Color(0xffe8e8e8) : const Color(0xff2a2a2a);
-      Widget thumb;
-      if (imgUrl.startsWith('data:')) {
+      Widget? thumb;
+      if (videoUrl.isNotEmpty) {
+        thumb = _NotifVideoThumb(url: videoUrl, background: thumbBg);
+      } else if (imgUrl.startsWith('data:')) {
         final comma = imgUrl.indexOf(',');
         Uint8List? bytes;
         if (comma > -1) {
           try { bytes = base64Decode(imgUrl.substring(comma + 1)); } catch (_) {}
         }
-        thumb = bytes != null
-            ? Image.memory(bytes, width: 44, height: 44, fit: BoxFit.cover)
-            : Container(width: 44, height: 44, color: thumbBg);
+        if (bytes != null) {
+          thumb = Image.memory(bytes, width: 44, height: 44, fit: BoxFit.cover);
+        }
       } else if (imgUrl.isNotEmpty) {
         thumb = CachedNetworkImage(
           imageUrl: imgUrl,
@@ -3359,15 +3365,16 @@ class _NotifTile extends StatelessWidget {
           height: 44,
           fit: BoxFit.cover,
           fadeInDuration: Duration.zero,
-          errorWidget: (_, _, _) => Container(width: 44, height: 44, color: thumbBg),
+          errorWidget: (_, _, _) => const SizedBox.shrink(),
         );
-      } else {
-        thumb = Container(width: 44, height: 44, color: thumbBg);
       }
-      trailing = ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: thumb,
-      );
+      if (thumb != null) {
+        trailing = ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: thumb,
+        );
+      }
+      // else: text-only post → trailing stays null, nothing shown
     }
 
     return InkWell(
@@ -3427,6 +3434,75 @@ class _NotifTile extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+// Small paused/muted first-frame thumbnail for video-post notifications.
+// No server-side thumbnail exists, so this decodes just enough of the
+// video to grab frame 0 — acceptable for a single 44x44 icon per row.
+class _NotifVideoThumb extends StatefulWidget {
+  const _NotifVideoThumb({required this.url, required this.background});
+  final String url;
+  final Color background;
+
+  @override
+  State<_NotifVideoThumb> createState() => _NotifVideoThumbState();
+}
+
+class _NotifVideoThumbState extends State<_NotifVideoThumb> {
+  VideoPlayerController? _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final cached = await getCachedVideoFile(widget.url);
+      final ctrl = cached != null
+          ? VideoPlayerController.file(cached)
+          : VideoPlayerController.networkUrl(Uri.parse(widget.url));
+      await ctrl.initialize();
+      if (!mounted) {
+        ctrl.dispose();
+        return;
+      }
+      setState(() => _ctrl = ctrl);
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = _ctrl;
+    return Container(
+      width: 44,
+      height: 44,
+      color: widget.background,
+      child: Stack(
+        alignment: Alignment.center,
+        fit: StackFit.expand,
+        children: [
+          if (ctrl != null && ctrl.value.isInitialized)
+            FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: ctrl.value.size.width,
+                height: ctrl.value.size.height,
+                child: VideoPlayer(ctrl),
+              ),
+            ),
+          const Icon(Icons.play_circle_fill, color: Colors.white, size: 18),
+        ],
       ),
     );
   }

@@ -76,6 +76,8 @@ class UserProfile {
     this.avatarZoomable = true,
     this.isVerified = false,
     this.isAdmin = false,
+    this.isBlocked = false,
+    this.hasBlockedYou = false,
   });
   final int id;
   final String username;
@@ -93,8 +95,16 @@ class UserProfile {
   final bool avatarZoomable;
   final bool isVerified;
   final bool isAdmin;
+  final bool isBlocked;
+  final bool hasBlockedYou;
 
-  UserProfile copyWith({bool? isFollowing, bool? followsYou, int? followers}) => UserProfile(
+  UserProfile copyWith({
+    bool? isFollowing,
+    bool? followsYou,
+    int? followers,
+    bool? isBlocked,
+    bool? hasBlockedYou,
+  }) => UserProfile(
     id: id, username: username, email: email, fullName: fullName,
     bio: bio, city: city, avatarUrl: avatarUrl,
     followers: followers ?? this.followers,
@@ -103,6 +113,8 @@ class UserProfile {
     followsYou: followsYou ?? this.followsYou,
     mutuals: mutuals, mutualsCount: mutualsCount, avatarZoomable: avatarZoomable,
     isVerified: isVerified, isAdmin: isAdmin,
+    isBlocked: isBlocked ?? this.isBlocked,
+    hasBlockedYou: hasBlockedYou ?? this.hasBlockedYou,
   );
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -130,6 +142,8 @@ class UserProfile {
       avatarZoomable: json['avatarZoomable'] != false,
       isVerified: json['isVerified'] == true,
       isAdmin: json['isAdmin'] == true,
+      isBlocked: json['isBlocked'] == true,
+      hasBlockedYou: json['hasBlockedYou'] == true,
     );
   }
 }
@@ -274,6 +288,7 @@ class NotificationItem {
     required this.targetId,
     required this.targetText,
     required this.imageUrl,
+    required this.videoUrl,
     required this.isRead,
     required this.created,
   });
@@ -285,6 +300,7 @@ class NotificationItem {
   final String targetId;
   final String targetText;
   final String imageUrl;
+  final String videoUrl;
   final bool isRead;
   final DateTime created;
 
@@ -297,7 +313,8 @@ class NotificationItem {
       targetType: json['targetType']?.toString() ?? '',
       targetId: json['targetId']?.toString() ?? '',
       targetText: json['targetText']?.toString() ?? '',
-      imageUrl: json['imageUrl']?.toString() ?? '',
+      imageUrl: _resolveMediaUrl(json['imageUrl']?.toString() ?? ''),
+      videoUrl: _resolveMediaUrl(json['videoUrl']?.toString() ?? ''),
       isRead: json['isRead'] == true,
       created:
           DateTime.tryParse(json['created']?.toString() ?? '') ??
@@ -356,15 +373,32 @@ class MessageItem {
     required this.sender,
     required this.text,
     required this.created,
+    this.reactions = const {},
   });
 
   final int id;
   final String sender;
   final String text;
   final DateTime created;
+  final Map<String, List<String>> reactions;
+
+  String? reactionFor(String username) {
+    for (final entry in reactions.entries) {
+      if (entry.value.contains(username)) return entry.key;
+    }
+    return null;
+  }
 
   factory MessageItem.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
+    final rawReactions = json['reactions'];
+    final reactions = <String, List<String>>{
+      if (rawReactions is Map)
+        for (final entry in rawReactions.entries)
+          entry.key.toString(): (entry.value as List? ?? const [])
+              .map((v) => v.toString())
+              .toList(),
+    };
     return MessageItem(
       id: parseInt(json['id']),
       sender: json['sender']?.toString() ?? '',
@@ -372,6 +406,7 @@ class MessageItem {
       created:
           DateTime.tryParse(json['created']?.toString() ?? '') ??
           DateTime.now(),
+      reactions: reactions,
     );
   }
 }

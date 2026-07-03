@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 
 import '../core/api.dart';
 import '../legal/legal_page.dart';
+import 'blocked_accounts_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
@@ -10,13 +11,11 @@ class SettingsPage extends StatelessWidget {
     required this.themeMode,
     required this.onLogout,
     required this.token,
-    required this.username,
   });
 
   final ThemeMode themeMode;
   final Future<void> Function() onLogout;
   final String token;
-  final String username;
 
   @override
   Widget build(BuildContext context) {
@@ -73,6 +72,17 @@ class SettingsPage extends StatelessWidget {
             const SizedBox(height: 28),
             _SectionHeader(label: 'Account', color: sectionColor),
             _SettingsRow(
+              icon: Icons.block,
+              label: 'Blocked Accounts',
+              isLight: isLight,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => BlockedAccountsPage(token: token),
+                ),
+              ),
+            ),
+            Divider(height: 1, color: divider),
+            _SettingsRow(
               icon: Icons.logout,
               label: 'Log Out',
               isLight: isLight,
@@ -123,8 +133,9 @@ class SettingsPage extends StatelessWidget {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete Account'),
         content: const Text(
-          'This will permanently delete your account and all your data. '
-          'This action cannot be undone.',
+          'This will permanently delete your account and everything in it — '
+          'your profile, posts, events, and messages. This action cannot be '
+          'undone.',
         ),
         actions: [
           TextButton(
@@ -145,7 +156,7 @@ class SettingsPage extends StatelessWidget {
 
     try {
       final res = await http.delete(
-        adminDeleteUserEndpoint(username),
+        deleteAccountEndpoint,
         headers: authGetHeaders(token),
       );
       if (!context.mounted) return;

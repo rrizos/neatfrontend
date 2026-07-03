@@ -19,6 +19,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
+import '../core/report_post_sheet.dart';
 
 // ─── Colour tokens ────────────────────────────────────────────────────────────
 
@@ -201,40 +202,6 @@ Uint8List? _parseImage(String t) {
   } catch (_) { return null; }
 }
 
-// ─── Blocked users (local-only; hides conversations from the inbox) ──────────
-
-class _BlockedUsers {
-  static const _key = 'neat_blocked_users';
-  static Set<String>? _cache;
-
-  static Future<Set<String>> _load() async {
-    if (_cache != null) return _cache!;
-    final prefs = await SharedPreferences.getInstance();
-    _cache = (prefs.getStringList(_key) ?? []).toSet();
-    return _cache!;
-  }
-
-  static Future<void> _persist(Set<String> set) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_key, set.toList());
-  }
-
-  static Future<bool> isBlocked(String username) async =>
-      (await _load()).contains(username);
-
-  static Future<void> block(String username) async {
-    final set = await _load();
-    set.add(username);
-    await _persist(set);
-  }
-
-  static Future<void> unblock(String username) async {
-    final set = await _load();
-    set.remove(username);
-    await _persist(set);
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // MessagesPage  (inbox)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,10 +266,8 @@ class _MessagesPageState extends State<MessagesPage> {
           .whereType<Map<String, dynamic>>()
           .toList();
       final items = rawList.map(ConversationSummary.fromJson).toList();
-      final blocked = await _BlockedUsers._load();
-      final visible = items.where((c) => !blocked.contains(c.otherUser)).toList();
       unawaited(_saveInboxCache(rawList));
-      if (mounted) setState(() { _convs = visible; _loading = false; _isOffline = false; });
+      if (mounted) setState(() { _convs = items; _loading = false; _isOffline = false; });
     } catch (e) {
       final offline = e is SocketException || e is HandshakeException || e is HttpException;
       if (mounted) setState(() { _loading = false; _isOffline = offline; });
@@ -323,10 +288,8 @@ class _MessagesPageState extends State<MessagesPage> {
       if (raw == null || !mounted) return;
       final list = (jsonDecode(raw) as List).whereType<Map<String, dynamic>>().toList();
       final items = list.map(ConversationSummary.fromJson).toList();
-      final blocked = await _BlockedUsers._load();
-      final visible = items.where((c) => !blocked.contains(c.otherUser)).toList();
-      if (!mounted || visible.isEmpty) return;
-      setState(() { _convs = visible; _loading = false; });
+      if (!mounted || items.isEmpty) return;
+      setState(() { _convs = items; _loading = false; });
     } catch (_) {}
   }
 
@@ -991,14 +954,47 @@ class _ConversationPageState extends State<ConversationPage> {
   Timer? _presenceTimer;
   DateTime? _otherLastActive;
   bool _blocked = false;
-  final Map<int, String> _reactions = {};
+  bool _unavailable = false;
   bool _isOffline = false;
 
-  void _react(int msgId, String emoji) {
+  Future<void> _react(int msgId, String emoji) async {
+    final index = _messages.indexWhere((m) => m.id == msgId);
+    if (index == -1) return;
+    final previous = _messages[index];
+    final wasSet = previous.reactionFor(widget.currentUsername) == emoji;
+    final optimisticReactions = {
+      for (final entry in previous.reactions.entries)
+        entry.key: entry.value.where((u) => u != widget.currentUsername).toList(),
+    }..removeWhere((_, users) => users.isEmpty);
+    if (!wasSet) {
+      optimisticReactions.putIfAbsent(emoji, () => []).add(widget.currentUsername);
+    }
     setState(() {
-      if (_reactions[msgId] == emoji) _reactions.remove(msgId);
-      else _reactions[msgId] = emoji;
+      _messages[index] = MessageItem(
+        id: previous.id, sender: previous.sender, text: previous.text,
+        created: previous.created, reactions: optimisticReactions,
+      );
     });
+    try {
+      final res = await http.post(
+        messageReactEndpoint(widget.conversationId, msgId),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'emoji': emoji}),
+      );
+      if (res.statusCode == 200 && mounted) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final updated = MessageItem.fromJson(body['message'] as Map<String, dynamic>);
+        final idx = _messages.indexWhere((m) => m.id == msgId);
+        if (idx != -1) setState(() => _messages[idx] = updated);
+      } else if (mounted) {
+        final idx = _messages.indexWhere((m) => m.id == msgId);
+        if (idx != -1) setState(() => _messages[idx] = previous);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      final idx = _messages.indexWhere((m) => m.id == msgId);
+      if (idx != -1) setState(() => _messages[idx] = previous);
+    }
   }
 
   void _showReactionPicker(BuildContext context, MessageItem msg, Offset pos) {
@@ -1013,7 +1009,7 @@ class _ConversationPageState extends State<ConversationPage> {
       pageBuilder: (ctx, _, __) => _ReactionPickerOverlay(
         pos: pos,
         screenSize: size,
-        current: _reactions[msg.id],
+        current: msg.reactionFor(widget.currentUsername),
         onSelect: (emoji) { Navigator.of(ctx).pop(); _react(msg.id, emoji); },
         onMore: () {
           Navigator.of(ctx).pop();
@@ -1033,6 +1029,84 @@ class _ConversationPageState extends State<ConversationPage> {
     );
   }
 
+  void _showMessageOptionsSheet(MessageItem msg) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final mine = msg.sender == widget.currentUsername;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isLight ? _kBgLgt : _kBgDark,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (mine)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
+                title: const Text('Delete message', style: TextStyle(color: Color(0xfff66c6c))),
+                onTap: () async {
+                  Navigator.of(sheetContext).pop();
+                  await _deleteMessage(msg);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined),
+              title: const Text('Report message'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                showReportMessageSheet(
+                  context,
+                  conversationId: widget.conversationId,
+                  messageId: msg.id,
+                  token: widget.token,
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteMessage(MessageItem msg) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Message?'),
+        content: const Text('This can\'t be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete', style: TextStyle(color: Color(0xfff66c6c))),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final previous = _messages;
+    setState(() => _messages = _messages.where((m) => m.id != msg.id).toList());
+    try {
+      final res = await http.delete(
+        messageDeleteEndpoint(widget.conversationId, msg.id),
+        headers: authJsonHeaders(widget.token),
+      );
+      if (res.statusCode != 200) {
+        if (mounted) setState(() => _messages = previous);
+        return;
+      }
+      _saveCache(_messages);
+    } catch (_) {
+      if (mounted) setState(() => _messages = previous);
+    }
+  }
+
   // ── Local message cache ───────────────────────────────────────────────────
 
   Future<File> get _cacheFile async {
@@ -1048,6 +1122,7 @@ class _ConversationPageState extends State<ConversationPage> {
         'sender': m.sender,
         'text': m.text,
         'created': m.created.toIso8601String(),
+        'reactions': m.reactions,
       }).toList();
       await file.writeAsString(jsonEncode(data));
     } catch (_) {}
@@ -1058,12 +1133,7 @@ class _ConversationPageState extends State<ConversationPage> {
       final file = await _cacheFile;
       if (!await file.exists()) return;
       final data = jsonDecode(await file.readAsString()) as List;
-      final msgs = data.whereType<Map<String, dynamic>>().map((m) => MessageItem(
-        id: (m['id'] as num?)?.toInt() ?? 0,
-        sender: m['sender']?.toString() ?? '',
-        text: m['text']?.toString() ?? '',
-        created: DateTime.tryParse(m['created']?.toString() ?? '') ?? DateTime.now(),
-      )).toList();
+      final msgs = data.whereType<Map<String, dynamic>>().map(MessageItem.fromJson).toList();
       if (!mounted || msgs.isEmpty) return;
       setState(() { _messages = msgs; _loading = false; });
       _scrollToBottom(jump: true);
@@ -1078,9 +1148,6 @@ class _ConversationPageState extends State<ConversationPage> {
     _load(initial: true);  // then sync with server
     _pingPresence();
     _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
-    _BlockedUsers.isBlocked(widget.otherUsername).then((blocked) {
-      if (mounted && blocked) setState(() => _blocked = true);
-    });
   }
 
   @override
@@ -1131,11 +1198,16 @@ class _ConversationPageState extends State<ConversationPage> {
         headers: authGetHeaders(widget.token),
       );
       if (res.statusCode == 401) return widget.onLogout();
+      if (res.statusCode == 404) {
+        if (mounted) setState(() { _loading = false; _unavailable = true; });
+        return;
+      }
       if (res.statusCode != 200) {
         if (mounted) setState(() => _loading = false);
         return;
       }
       final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final conv = body['conversation'] as Map<String, dynamic>?;
       final msgs = (body['messages'] as List? ?? [])
           .whereType<Map<String, dynamic>>()
           .map(MessageItem.fromJson)
@@ -1154,7 +1226,11 @@ class _ConversationPageState extends State<ConversationPage> {
           .toList();
       final merged = [...msgs, ...localOnly]
         ..sort((a, b) => a.created.compareTo(b.created));
-      setState(() { _messages = merged; _loading = false; });
+      setState(() {
+        _messages = merged;
+        _loading = false;
+        if (conv != null) _blocked = conv['viewerBlockedOther'] == true;
+      });
       _saveCache(merged);
       _scrollToBottom(jump: initial);
     } catch (e) {
@@ -1266,8 +1342,9 @@ class _ConversationPageState extends State<ConversationPage> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Block User'),
         content: Text(
-          'Block @$name? They won\'t be able to message you, and this '
-          'conversation will be removed from your inbox.',
+          'Block @$name? They won\'t be able to message you or find your '
+          'profile or posts, and this conversation will be removed from '
+          'your inbox.',
         ),
         actions: [
           TextButton(
@@ -1282,22 +1359,36 @@ class _ConversationPageState extends State<ConversationPage> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    await _BlockedUsers.block(name);
-    if (!mounted) return;
-    setState(() => _blocked = true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('User blocked')),
-    );
+    await _toggleBlock(blockedMessage: 'User blocked');
   }
 
   Future<void> _confirmUnblock() async {
-    final name = widget.otherUsername;
-    await _BlockedUsers.unblock(name);
-    if (!mounted) return;
-    setState(() => _blocked = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('User unblocked')),
-    );
+    await _toggleBlock(blockedMessage: 'User unblocked');
+  }
+
+  Future<void> _toggleBlock({required String blockedMessage}) async {
+    try {
+      final res = await http.post(
+        userBlockEndpoint(widget.otherUsername),
+        headers: authJsonHeaders(widget.token),
+      );
+      if (!mounted) return;
+      if (res.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_extractError(res.body) ?? 'Something went wrong')),
+        );
+        return;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final target = body['user'] as Map<String, dynamic>?;
+      setState(() => _blocked = target?['isBlocked'] == true);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(blockedMessage)));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Something went wrong')),
+      );
+    }
   }
 
   @override
@@ -1409,9 +1500,10 @@ class _ConversationPageState extends State<ConversationPage> {
                                     ? () => widget.onOpenUserProfile!(widget.otherUsername)
                                     : null,
                                 onReply: mine ? null : () => _setReplyTo(msg),
-                                reaction: _reactions[msg.id],
+                                reaction: msg.reactionFor(widget.currentUsername),
                                 onDoubleTap: () => _react(msg.id, '❤️'),
                                 onLongPressStart: (pos) => _showReactionPicker(context, msg, pos),
+                                onMore: msg.id >= 0 ? () => _showMessageOptionsSheet(msg) : null,
                               ),
                             ],
                           );
@@ -1419,18 +1511,21 @@ class _ConversationPageState extends State<ConversationPage> {
                       ),
           ),
           if (_isOffline) _ConvOfflineBanner(isLight: isLight),
-          _blocked
-              ? _BlockedBanner(isLight: isLight)
-              : _Composer(
-                  controller: _composer,
-                  isLight: isLight,
-                  sending: _sending,
-                  onSendText: _sendText,
-                  onSendImage: _sendImage,
-                  onSendVoice: _sendVoice,
-                  replyTo: _replyTo,
-                  onClearReply: _clearReply,
-                ),
+          if (_unavailable)
+            _BlockedBanner(isLight: isLight, message: 'This conversation is no longer available')
+          else if (_blocked)
+            _BlockedBanner(isLight: isLight, message: 'User blocked')
+          else
+            _Composer(
+              controller: _composer,
+              isLight: isLight,
+              sending: _sending,
+              onSendText: _sendText,
+              onSendImage: _sendImage,
+              onSendVoice: _sendVoice,
+              replyTo: _replyTo,
+              onClearReply: _clearReply,
+            ),
         ],
       ),
     );
@@ -1453,6 +1548,7 @@ class _MessageRow extends StatelessWidget {
     this.reaction,
     this.onDoubleTap,
     this.onLongPressStart,
+    this.onMore,
   });
 
   final MessageItem message;
@@ -1467,6 +1563,20 @@ class _MessageRow extends StatelessWidget {
   final String? reaction;
   final VoidCallback? onDoubleTap;
   final void Function(Offset)? onLongPressStart;
+  final VoidCallback? onMore;
+
+  Widget _moreButton() => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onMore,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Icon(
+            Icons.more_horiz,
+            size: 18,
+            color: isLight ? const Color(0xff8e8e8e) : const Color(0xff8e8e8e),
+          ),
+        ),
+      );
 
   Widget _content() {
     final replyData = _parseReply(message.text);
@@ -1546,6 +1656,7 @@ class _MessageRow extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                if (onMore != null) _moreButton(),
                 _wrapGesture(
                   ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()),
                 ),
@@ -1582,6 +1693,7 @@ class _MessageRow extends StatelessWidget {
                 const SizedBox(width: 32),
               const SizedBox(width: 6),
               _wrapGesture(bubble),
+              if (onMore != null) _moreButton(),
             ],
           ),
           if (reaction != null) _reactionBadge(),
@@ -1835,9 +1947,10 @@ class _TimeDivider extends StatelessWidget {
 // ─── Blocked banner ───────────────────────────────────────────────────────────
 
 class _BlockedBanner extends StatelessWidget {
-  const _BlockedBanner({required this.isLight});
+  const _BlockedBanner({required this.isLight, this.message = 'User blocked'});
 
   final bool isLight;
+  final String message;
 
   @override
   Widget build(BuildContext context) {
@@ -1848,7 +1961,7 @@ class _BlockedBanner extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         color: isLight ? _kInputLgt : _kInputDark,
         child: Text(
-          'User blocked',
+          message,
           textAlign: TextAlign.center,
           style: TextStyle(
             color: isLight ? _kSubLgt : _kSubDark,

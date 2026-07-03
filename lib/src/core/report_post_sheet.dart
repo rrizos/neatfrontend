@@ -121,6 +121,51 @@ Future<void> showReportPostSheet(
   required int postId,
   required String token,
 }) {
+  return _showReportSheet(
+    context,
+    submit: (reason, subReason) => http.post(
+      postReportEndpoint(postId),
+      headers: authJsonHeaders(token),
+      body: jsonEncode({'reason': reason, 'sub_reason': subReason}),
+    ),
+  );
+}
+
+Future<void> showReportMessageSheet(
+  BuildContext context, {
+  required int conversationId,
+  required int messageId,
+  required String token,
+}) {
+  return _showReportSheet(
+    context,
+    submit: (reason, subReason) => http.post(
+      messageReportEndpoint(conversationId, messageId),
+      headers: authJsonHeaders(token),
+      body: jsonEncode({'reason': reason}),
+    ),
+  );
+}
+
+Future<void> showReportEventSheet(
+  BuildContext context, {
+  required int eventId,
+  required String token,
+}) {
+  return _showReportSheet(
+    context,
+    submit: (reason, subReason) => http.post(
+      eventReportEndpoint(eventId),
+      headers: authJsonHeaders(token),
+      body: jsonEncode({'reason': reason}),
+    ),
+  );
+}
+
+Future<void> _showReportSheet(
+  BuildContext context, {
+  required Future<void> Function(String reason, String subReason) submit,
+}) {
   final isLight = Theme.of(context).brightness == Brightness.light;
   return showModalBottomSheet(
     context: context,
@@ -130,35 +175,27 @@ Future<void> showReportPostSheet(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
     ),
-    builder: (_) => _ReportPostSheet(postId: postId, token: token),
+    builder: (_) => _ReportSheet(submit: submit),
   );
 }
 
-class _ReportPostSheet extends StatefulWidget {
-  final int postId;
-  final String token;
+class _ReportSheet extends StatefulWidget {
+  final Future<void> Function(String reason, String subReason) submit;
 
-  const _ReportPostSheet({required this.postId, required this.token});
+  const _ReportSheet({required this.submit});
 
   @override
-  State<_ReportPostSheet> createState() => _ReportPostSheetState();
+  State<_ReportSheet> createState() => _ReportSheetState();
 }
 
-class _ReportPostSheetState extends State<_ReportPostSheet> {
+class _ReportSheetState extends State<_ReportSheet> {
   _Step _step = _Step.reason;
   _ReportReason? _reason;
 
   Future<void> _submit(String subReason) async {
     setState(() => _step = _Step.submitting);
     try {
-      await http.post(
-        postReportEndpoint(widget.postId),
-        headers: authJsonHeaders(widget.token),
-        body: jsonEncode({
-          'reason': _reason!.key,
-          'sub_reason': subReason,
-        }),
-      );
+      await widget.submit(_reason!.key, subReason);
     } catch (_) {}
     if (mounted) setState(() => _step = _Step.done);
   }

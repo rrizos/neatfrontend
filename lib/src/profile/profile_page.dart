@@ -267,6 +267,99 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
   }
 
+  Future<void> _toggleBlock() async {
+    final profile = _profile;
+    if (profile == null) return;
+    final res = await http.post(
+      userBlockEndpoint(profile.username),
+      headers: authJsonHeaders(widget.token),
+    );
+    if (res.statusCode == 401) {
+      await widget.onLogout();
+      return;
+    }
+    if (res.statusCode != 200) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Something went wrong')),
+      );
+      return;
+    }
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    final updated = UserProfile.fromJson(decoded['user'] as Map<String, dynamic>);
+    if (!mounted) return;
+    setState(() => _profile = updated);
+    widget.onSessionUpdated(
+      AuthSession(
+        token: widget.token,
+        user: UserProfile.fromJson(decoded['viewer'] as Map<String, dynamic>),
+      ),
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(updated.isBlocked ? 'User blocked' : 'User unblocked')),
+    );
+  }
+
+  void _openProfileMoreSheet() {
+    final profile = _profile;
+    if (profile == null) return;
+    widget.onHideNavBar?.call();
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      showDragHandle: true,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                profile.isBlocked ? Icons.check_circle_outline : Icons.block,
+                color: profile.isBlocked ? (isLight ? Colors.black : Colors.white) : const Color(0xfff66c6c),
+              ),
+              title: Text(
+                profile.isBlocked ? 'Unblock @${profile.username}' : 'Block @${profile.username}',
+                style: TextStyle(
+                  color: profile.isBlocked ? (isLight ? Colors.black : Colors.white) : const Color(0xfff66c6c),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              onTap: () async {
+                Navigator.of(context).pop();
+                if (profile.isBlocked) {
+                  await _toggleBlock();
+                  return;
+                }
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                    title: const Text('Block User'),
+                    content: Text(
+                      'Block @${profile.username}? They won\'t be able to '
+                      'find your profile, see your posts, or message you.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(true),
+                        child: const Text('Block', style: TextStyle(color: Color(0xfff66c6c))),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirmed == true) await _toggleBlock();
+              },
+            ),
+          ],
+        ),
+      ),
+    ).whenComplete(() => widget.onShowNavBar?.call());
+  }
+
   Future<void> _startDirectMessage() async {
     final profile = _profile;
     if (profile == null || profile.username == widget.currentUser.username) return;
@@ -669,11 +762,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     themeMode: widget.themeMode,
                     onLogout: widget.onLogout,
                     token: widget.token,
-                    username: widget.currentUser.username,
                   ),
                 ),
               ),
               icon: Icon(Icons.settings_rounded, color: isLight ? Colors.black : Colors.white),
+            ),
+          if (!isOwn)
+            IconButton(
+              tooltip: 'More options',
+              onPressed: _openProfileMoreSheet,
+              icon: Icon(Icons.more_vert, color: isLight ? Colors.black : Colors.white),
             ),
         ],
       ),
@@ -781,36 +879,50 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                   child: profile.username == widget.currentUser.username
                       ? OutlinedButton(onPressed: _openEditProfile, child: const Text('Edit profile'))
-                      : Row(
-                          children: [
-                            Expanded(
-                              child: (_followingOverride ?? profile.isFollowing)
-                                  ? OutlinedButton(
-                                      onPressed: widget.followEnabled ? _toggleFollow : null,
-                                      style: OutlinedButton.styleFrom(
-                                        side: BorderSide(color: isLight ? Colors.black : Colors.white),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                        foregroundColor: isLight ? Colors.black : Colors.white,
-                                      ),
-                                      child: const Text('Following', style: TextStyle(fontWeight: FontWeight.w600)),
-                                    )
-                                  : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? 'Follow Back' : 'Follow')),
-                            ),
-                            const SizedBox(width: 12),
-                            SizedBox(
-                              height: 42,
-                              width: 42,
+                      : profile.isBlocked
+                          ? SizedBox(
+                              width: double.infinity,
                               child: OutlinedButton(
-                                onPressed: _startDirectMessage,
+                                onPressed: _toggleBlock,
                                 style: OutlinedButton.styleFrom(
-                                  padding: EdgeInsets.zero,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  side: const BorderSide(color: Color(0xfff66c6c)),
+                                  foregroundColor: const Color(0xfff66c6c),
                                 ),
-                                child: const Icon(Icons.send_outlined, size: 18),
+                                child: const Text('Unblock', style: TextStyle(fontWeight: FontWeight.w600)),
                               ),
-                            ),
-                          ],
-                        ),
+                            )
+                          : profile.hasBlockedYou
+                              ? const SizedBox.shrink()
+                              : Row(
+                                  children: [
+                                    Expanded(
+                                      child: (_followingOverride ?? profile.isFollowing)
+                                          ? OutlinedButton(
+                                              onPressed: widget.followEnabled ? _toggleFollow : null,
+                                              style: OutlinedButton.styleFrom(
+                                                side: BorderSide(color: isLight ? Colors.black : Colors.white),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                foregroundColor: isLight ? Colors.black : Colors.white,
+                                              ),
+                                              child: const Text('Following', style: TextStyle(fontWeight: FontWeight.w600)),
+                                            )
+                                          : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? 'Follow Back' : 'Follow')),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    SizedBox(
+                                      height: 42,
+                                      width: 42,
+                                      child: OutlinedButton(
+                                        onPressed: _startDirectMessage,
+                                        style: OutlinedButton.styleFrom(
+                                          padding: EdgeInsets.zero,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                        ),
+                                        child: const Icon(Icons.send_outlined, size: 18),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                 ),
               ],
             ),
