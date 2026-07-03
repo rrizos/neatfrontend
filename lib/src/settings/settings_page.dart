@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
+import '../core/api.dart';
 import '../legal/legal_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -7,10 +9,14 @@ class SettingsPage extends StatelessWidget {
     super.key,
     required this.themeMode,
     required this.onLogout,
+    required this.token,
+    required this.username,
   });
 
   final ThemeMode themeMode;
   final Future<void> Function() onLogout;
+  final String token;
+  final String username;
 
   @override
   Widget build(BuildContext context) {
@@ -137,26 +143,26 @@ class SettingsPage extends StatelessWidget {
     );
     if (confirmed != true || !context.mounted) return;
 
-    // TODO: wire this up to a real delete-account endpoint (see
-    // deleteAccountEndpoint in lib/src/core/api.dart) that deletes the
-    // account server-side. For now this just acknowledges the request and
-    // signs the user out, so the flow exists for App Store review.
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Request Received'),
-        content: const Text(
-          'Your account deletion request has been received. '
-          'You will now be signed out.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
+    try {
+      final res = await http.delete(
+        adminDeleteUserEndpoint(username),
+        headers: authGetHeaders(token),
+      );
+      if (!context.mounted) return;
+      if (res.statusCode != 200 && res.statusCode != 204) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed (${res.statusCode}): ${res.body}')),
+        );
+        return;
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+      return;
+    }
+
     if (!context.mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
     await onLogout();

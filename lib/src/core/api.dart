@@ -61,6 +61,7 @@ Uri get signupEndpoint => Uri.parse('$apiBaseUrl/api/auth/signup/');
 Uri get loginEndpoint => Uri.parse('$apiBaseUrl/api/auth/login/');
 Uri get logoutEndpoint => Uri.parse('$apiBaseUrl/api/auth/logout/');
 Uri get meEndpoint => Uri.parse('$apiBaseUrl/api/auth/me/');
+Uri get deleteAccountEndpoint => Uri.parse('$apiBaseUrl/api/auth/me/');
 Uri profileEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/profiles/$username/');
 Uri followEndpoint(String username) =>

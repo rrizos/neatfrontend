@@ -264,12 +264,14 @@ class MessagesPage extends StatefulWidget {
 class _MessagesPageState extends State<MessagesPage> {
   List<ConversationSummary> _convs = [];
   bool _loading = true;
+  bool _isOffline = false;
   final _search = TextEditingController();
   Timer? _presenceTimer;
 
   @override
   void initState() {
     super.initState();
+    _loadInboxCache();
     _load();
     _pingPresence();
     _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
@@ -293,16 +295,39 @@ class _MessagesPageState extends State<MessagesPage> {
       final res = await http.get(inboxEndpoint, headers: authGetHeaders(widget.token));
       if (res.statusCode == 401) return widget.onLogout();
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      final items = (body['conversations'] as List? ?? [])
+      final rawList = (body['conversations'] as List? ?? [])
           .whereType<Map<String, dynamic>>()
-          .map(ConversationSummary.fromJson)
           .toList();
+      final items = rawList.map(ConversationSummary.fromJson).toList();
       final blocked = await _BlockedUsers._load();
       final visible = items.where((c) => !blocked.contains(c.otherUser)).toList();
-      if (mounted) setState(() { _convs = visible; _loading = false; });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      unawaited(_saveInboxCache(rawList));
+      if (mounted) setState(() { _convs = visible; _loading = false; _isOffline = false; });
+    } catch (e) {
+      final offline = e is SocketException || e is HandshakeException || e is HttpException;
+      if (mounted) setState(() { _loading = false; _isOffline = offline; });
     }
+  }
+
+  Future<void> _saveInboxCache(List<dynamic> raw) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('neat_inbox_cache', jsonEncode(raw));
+    } catch (_) {}
+  }
+
+  Future<void> _loadInboxCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('neat_inbox_cache');
+      if (raw == null || !mounted) return;
+      final list = (jsonDecode(raw) as List).whereType<Map<String, dynamic>>().toList();
+      final items = list.map(ConversationSummary.fromJson).toList();
+      final blocked = await _BlockedUsers._load();
+      final visible = items.where((c) => !blocked.contains(c.otherUser)).toList();
+      if (!mounted || visible.isEmpty) return;
+      setState(() { _convs = visible; _loading = false; });
+    } catch (_) {}
   }
 
   Future<void> _open(ConversationSummary s) async {
@@ -425,6 +450,8 @@ class _MessagesPageState extends State<MessagesPage> {
                 ),
               ),
             ),
+            if (_isOffline)
+              const SliverToBoxAdapter(child: _InboxOfflineBanner()),
             if (q.isEmpty) ...() {
                 final activeConvs = _convs
                     .where((c) => c.otherUser != widget.currentUsername && _isActiveNow(c.otherLastActive))
@@ -475,7 +502,7 @@ class _MessagesPageState extends State<MessagesPage> {
               )
             else if (filtered.isEmpty)
               SliverFillRemaining(
-                child: _EmptyInbox(isLight: isLight, hasSearch: q.isNotEmpty),
+                child: _EmptyInbox(isLight: isLight, hasSearch: q.isNotEmpty, isOffline: _isOffline),
               )
             else
               SliverList.separated(
@@ -862,12 +889,31 @@ class _NewMessageSheetState extends State<_NewMessageSheet> {
 // ─── Empty inbox ──────────────────────────────────────────────────────────────
 
 class _EmptyInbox extends StatelessWidget {
-  const _EmptyInbox({required this.isLight, required this.hasSearch});
+  const _EmptyInbox({required this.isLight, required this.hasSearch, this.isOffline = false});
   final bool isLight;
   final bool hasSearch;
+  final bool isOffline;
 
   @override
   Widget build(BuildContext context) {
+    final IconData icon;
+    final String title;
+    final String subtitle;
+
+    if (isOffline && !hasSearch) {
+      icon = Icons.wifi_off_rounded;
+      title = 'No connection';
+      subtitle = 'Your conversations will appear here once you\'re back online.';
+    } else if (hasSearch) {
+      icon = Icons.chat_bubble_outline_rounded;
+      title = 'No results';
+      subtitle = 'No conversations match your search.';
+    } else {
+      icon = Icons.chat_bubble_outline_rounded;
+      title = 'Your messages';
+      subtitle = 'Send a private message to someone in your city.';
+    }
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -875,13 +921,13 @@ class _EmptyInbox extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              Icons.chat_bubble_outline_rounded,
+              icon,
               size: 60,
               color: isLight ? const Color(0xffbdbdbd) : const Color(0xff444444),
             ),
             const SizedBox(height: 14),
             Text(
-              hasSearch ? 'No results' : 'Your messages',
+              title,
               style: TextStyle(
                 color: isLight ? Colors.black : Colors.white,
                 fontSize: 20,
@@ -890,9 +936,7 @@ class _EmptyInbox extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              hasSearch
-                  ? 'No conversations match your search.'
-                  : 'Send a private message to someone in your city.',
+              subtitle,
               textAlign: TextAlign.center,
               style: TextStyle(color: isLight ? _kSubLgt : _kSubDark, fontSize: 14),
             ),
@@ -947,6 +991,47 @@ class _ConversationPageState extends State<ConversationPage> {
   Timer? _presenceTimer;
   DateTime? _otherLastActive;
   bool _blocked = false;
+  final Map<int, String> _reactions = {};
+  bool _isOffline = false;
+
+  void _react(int msgId, String emoji) {
+    setState(() {
+      if (_reactions[msgId] == emoji) _reactions.remove(msgId);
+      else _reactions[msgId] = emoji;
+    });
+  }
+
+  void _showReactionPicker(BuildContext context, MessageItem msg, Offset pos) {
+    final size = MediaQuery.sizeOf(context);
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 160),
+      transitionBuilder: (ctx, a1, a2, child) => FadeTransition(opacity: a1, child: child),
+      pageBuilder: (ctx, _, __) => _ReactionPickerOverlay(
+        pos: pos,
+        screenSize: size,
+        current: _reactions[msg.id],
+        onSelect: (emoji) { Navigator.of(ctx).pop(); _react(msg.id, emoji); },
+        onMore: () {
+          Navigator.of(ctx).pop();
+          showModalBottomSheet(
+            context: context,
+            backgroundColor: const Color(0xff1c1c1e),
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            builder: (_) => _FullEmojiPicker(onSelect: (emoji) {
+              Navigator.of(context).pop();
+              _react(msg.id, emoji);
+            }),
+          );
+        },
+      ),
+    );
+  }
 
   // ── Local message cache ───────────────────────────────────────────────────
 
@@ -1072,9 +1157,10 @@ class _ConversationPageState extends State<ConversationPage> {
       setState(() { _messages = merged; _loading = false; });
       _saveCache(merged);
       _scrollToBottom(jump: initial);
-    } catch (_) {
+    } catch (e) {
       // keep whatever messages are already loaded rather than blanking the screen
-      if (mounted) setState(() => _loading = false);
+      final offline = e is SocketException || e is HandshakeException || e is HttpException;
+      if (mounted) setState(() { _loading = false; _isOffline = offline; });
     }
   }
 
@@ -1299,6 +1385,7 @@ class _ConversationPageState extends State<ConversationPage> {
                       )
                     : ListView.builder(
                         controller: _scroll,
+                        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                         padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
                         itemCount: _messages.length,
                         itemBuilder: (_, i) {
@@ -1322,12 +1409,16 @@ class _ConversationPageState extends State<ConversationPage> {
                                     ? () => widget.onOpenUserProfile!(widget.otherUsername)
                                     : null,
                                 onReply: mine ? null : () => _setReplyTo(msg),
+                                reaction: _reactions[msg.id],
+                                onDoubleTap: () => _react(msg.id, '❤️'),
+                                onLongPressStart: (pos) => _showReactionPicker(context, msg, pos),
                               ),
                             ],
                           );
                         },
                       ),
           ),
+          if (_isOffline) _ConvOfflineBanner(isLight: isLight),
           _blocked
               ? _BlockedBanner(isLight: isLight)
               : _Composer(
@@ -1359,6 +1450,9 @@ class _MessageRow extends StatelessWidget {
     required this.onOpenPost,
     this.onOpenUserProfile,
     this.onReply,
+    this.reaction,
+    this.onDoubleTap,
+    this.onLongPressStart,
   });
 
   final MessageItem message;
@@ -1370,6 +1464,9 @@ class _MessageRow extends StatelessWidget {
   final void Function(String, int)? onOpenPost;
   final VoidCallback? onOpenUserProfile;
   final VoidCallback? onReply;
+  final String? reaction;
+  final VoidCallback? onDoubleTap;
+  final void Function(Offset)? onLongPressStart;
 
   Widget _content() {
     final replyData = _parseReply(message.text);
@@ -1410,18 +1507,52 @@ class _MessageRow extends StatelessWidget {
     return _Bubble(text: message.text, mine: mine, isLast: isLast, isLight: isLight);
   }
 
+  Widget _wrapGesture(Widget child) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onDoubleTap: onDoubleTap,
+        onLongPressStart: onLongPressStart == null
+            ? null
+            : (d) => onLongPressStart!(d.globalPosition),
+        child: child,
+      );
+
+  Widget _reactionBadge() => Container(
+        margin: EdgeInsets.only(
+          top: 2,
+          left: mine ? 0 : 38,
+          right: mine ? 4 : 0,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xff2a2a2a),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xff1a1a1a), width: 1.5),
+        ),
+        child: Text(reaction!, style: const TextStyle(fontSize: 14)),
+      );
+
   @override
   Widget build(BuildContext context) {
     final maxW      = MediaQuery.sizeOf(context).width * 0.70;
-    final bottomPad = isLast ? 6.0 : 2.0;
+    final bottomPad = reaction != null ? 2.0 : (isLast ? 6.0 : 2.0);
 
     if (mine) {
       return Padding(
         padding: EdgeInsets.only(bottom: bottomPad),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                _wrapGesture(
+                  ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()),
+                ),
+              ],
+            ),
+            if (reaction != null) _reactionBadge(),
+            if (reaction != null) SizedBox(height: isLast ? 4 : 2),
           ],
         ),
       );
@@ -1434,19 +1565,27 @@ class _MessageRow extends StatelessWidget {
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomPad),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (isLast)
-            GestureDetector(
-              onTap: onOpenUserProfile,
-              child: _avatar(username: otherUsername, url: otherAvatarUrl, radius: 16, isLight: isLight),
-            )
-          else
-            const SizedBox(width: 32),
-          const SizedBox(width: 6),
-          bubble,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (isLast)
+                GestureDetector(
+                  onTap: onOpenUserProfile,
+                  child: _avatar(username: otherUsername, url: otherAvatarUrl, radius: 16, isLight: isLight),
+                )
+              else
+                const SizedBox(width: 32),
+              const SizedBox(width: 6),
+              _wrapGesture(bubble),
+            ],
+          ),
+          if (reaction != null) _reactionBadge(),
+          if (reaction != null) SizedBox(height: isLast ? 4 : 2),
         ],
       ),
     );
@@ -1496,15 +1635,46 @@ class _ImageBubble extends StatelessWidget {
   void _openFullscreen(BuildContext context) {
     Navigator.of(context).push(PageRouteBuilder(
       opaque: false,
-      pageBuilder: (ctx, a1, a2) => Scaffold(
-        backgroundColor: Colors.black,
-        body: GestureDetector(
-          onTap: () => Navigator.of(context).pop(),
-          child: Center(
-            child: InteractiveViewer(child: Image.memory(bytes)),
+      pageBuilder: (ctx, a1, a2) {
+        final topPad = MediaQuery.of(ctx).padding.top;
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            children: [
+              GestureDetector(
+                onTap: () => Navigator.of(ctx).pop(),
+                child: Center(
+                  child: InteractiveViewer(
+                    minScale: 0.5,
+                    maxScale: 4.0,
+                    child: Image.memory(
+                      bytes,
+                      fit: BoxFit.contain,
+                      width: MediaQuery.of(ctx).size.width,
+                      height: MediaQuery.of(ctx).size.height,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: topPad + 12,
+                right: 16,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(ctx).pop(),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: const Icon(Icons.close, color: Colors.white, size: 22),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
-      ),
+        );
+      },
     ));
   }
 }
@@ -2434,6 +2604,293 @@ class _ReplyPreviewBar extends StatelessWidget {
             icon: Icon(Icons.close_rounded, size: 20, color: subClr),
             padding: const EdgeInsets.all(8),
             onPressed: onClear,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Reaction picker overlay ──────────────────────────────────────────────────
+
+const _kQuickEmojis = ['❤️', '😂', '😮', '😢', '😡', '👍'];
+
+class _ReactionPickerOverlay extends StatelessWidget {
+  const _ReactionPickerOverlay({
+    required this.pos,
+    required this.screenSize,
+    required this.onSelect,
+    required this.onMore,
+    this.current,
+  });
+
+  final Offset pos;
+  final Size screenSize;
+  final String? current;
+  final ValueChanged<String> onSelect;
+  final VoidCallback onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    const pickerW = 292.0;
+    const pickerH = 52.0;
+    const margin = 12.0;
+
+    double left = pos.dx - pickerW / 2;
+    left = left.clamp(margin, screenSize.width - pickerW - margin);
+
+    double top = pos.dy - pickerH - 16;
+    if (top < margin + MediaQuery.of(context).padding.top) {
+      top = pos.dy + 16;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: Stack(
+        children: [
+          Positioned(
+            left: left,
+            top: top,
+            child: _ReactionPill(
+              current: current,
+              onSelect: onSelect,
+              onMore: onMore,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReactionPill extends StatefulWidget {
+  const _ReactionPill({required this.current, required this.onSelect, required this.onMore});
+  final String? current;
+  final ValueChanged<String> onSelect;
+  final VoidCallback onMore;
+
+  @override
+  State<_ReactionPill> createState() => _ReactionPillState();
+}
+
+class _ReactionPillState extends State<_ReactionPill> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 200));
+    _scale = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack);
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _scale,
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xff2c2c2e),
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 16, offset: Offset(0, 4))],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final emoji in _kQuickEmojis)
+              _EmojiBtn(
+                emoji: emoji,
+                selected: widget.current == emoji,
+                onTap: () => widget.onSelect(emoji),
+              ),
+            Container(width: 1, height: 28, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 4)),
+            _MoreBtn(onTap: widget.onMore),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmojiBtn extends StatefulWidget {
+  const _EmojiBtn({required this.emoji, required this.selected, required this.onTap});
+  final String emoji;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  State<_EmojiBtn> createState() => _EmojiBtnState();
+}
+
+class _EmojiBtnState extends State<_EmojiBtn> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 120), lowerBound: 0.8, upperBound: 1.0, value: 1.0);
+    _scale = _ctrl;
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  Future<void> _press() async {
+    await _ctrl.reverse();
+    widget.onTap();
+    _ctrl.forward();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _press,
+      child: ScaleTransition(
+        scale: _scale,
+        child: Container(
+          width: 36,
+          height: 36,
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          decoration: widget.selected
+              ? BoxDecoration(color: Colors.white12, shape: BoxShape.circle)
+              : null,
+          child: Center(child: Text(widget.emoji, style: const TextStyle(fontSize: 22))),
+        ),
+      ),
+    );
+  }
+}
+
+class _MoreBtn extends StatelessWidget {
+  const _MoreBtn({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        margin: const EdgeInsets.only(left: 2),
+        decoration: const BoxDecoration(color: Colors.white12, shape: BoxShape.circle),
+        child: const Icon(Icons.add_rounded, color: Colors.white, size: 20),
+      ),
+    );
+  }
+}
+
+// ─── Full emoji picker ────────────────────────────────────────────────────────
+
+const _kAllEmojis = [
+  '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','☺️','😚','😙',
+  '😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥',
+  '😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤧','🥵','🥶','😵','🤯','🤠','🥳','😎','🤓','🧐',
+  '😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞',
+  '😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖',
+  '😺','😸','😹','😻','😼','😽','🙀','😿','😾',
+  '👍','👎','👊','✊','🤛','🤜','🤞','✌️','🤟','🤘','👌','🤌','🤏','👈','👉','👆','👇','☝️','👋','🤚',
+  '🖐️','✋','🖖','💪','🦾','🙏','🤝','👏','🙌','🤲','🫶','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎',
+  '💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','✡️','🔯','🕎','☯️','☦️','🛐',
+  '🎉','🎊','🎈','🎁','🎀','🎗️','🏆','🥇','🥈','🥉','🎖️','🏅','🎯','🎮','🎲','🎭','🎬','🎤','🎧','🎸',
+  '🔥','💫','⭐','🌟','✨','💥','🌈','☀️','🌙','⚡','❄️','🌊','💧','🌸','🌺','🌹','🍀','🌿','🍃',
+  '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊',
+  '🍕','🍔','🌮','🍣','🍜','🍦','🎂','🍰','🧁','🍩','🍪','🍫','🍬','🍭','🥂','🍺','☕','🧃',
+  '🚀','✈️','🚗','🚕','🏠','🏖️','🏝️','⛰️','🌏','🗺️','🧳','📸','📱','💻','⌚','🎒','👓','👑',
+];
+
+// ─── Offline banners ──────────────────────────────────────────────────────────
+
+class _InboxOfflineBanner extends StatelessWidget {
+  const _InboxOfflineBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      color: const Color(0xff2a2a2a),
+      child: Row(
+        children: [
+          const Icon(Icons.wifi_off_rounded, size: 13, color: Color(0xff8e8e8e)),
+          const SizedBox(width: 6),
+          const Text(
+            'No internet connection',
+            style: TextStyle(color: Color(0xff8e8e8e), fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConvOfflineBanner extends StatelessWidget {
+  const _ConvOfflineBanner({required this.isLight});
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    final subClr = isLight ? _kSubLgt : _kSubDark;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      color: isLight ? const Color(0xfff0f0f0) : const Color(0xff1a1a1a),
+      child: Row(
+        children: [
+          Icon(Icons.wifi_off_rounded, size: 13, color: subClr),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'No internet connection',
+              style: TextStyle(color: subClr, fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FullEmojiPicker extends StatelessWidget {
+  const _FullEmojiPicker({required this.onSelect});
+  final ValueChanged<String> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('Emojis', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+          ),
+          Flexible(
+            child: GridView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 8,
+                mainAxisSpacing: 4,
+                crossAxisSpacing: 4,
+                childAspectRatio: 1,
+              ),
+              itemCount: _kAllEmojis.length,
+              itemBuilder: (_, i) => GestureDetector(
+                onTap: () => onSelect(_kAllEmojis[i]),
+                child: Center(child: Text(_kAllEmojis[i], style: const TextStyle(fontSize: 24))),
+              ),
+            ),
           ),
         ],
       ),

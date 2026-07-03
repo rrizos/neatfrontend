@@ -16,6 +16,9 @@ import 'models.dart';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
+// Persists mute preference across feed and fullscreen players.
+final _globalMuted = ValueNotifier<bool>(true);
+
 final _avatarCache = <String, Uint8List?>{};
 
 Uint8List? decodeAvatarUrl(String value) {
@@ -175,10 +178,11 @@ class _FeedMedia extends StatelessWidget {
 // play/pause, seek bar, time counter, and mute button.
 
 class _FeedVideoPlayer extends StatefulWidget {
-  const _FeedVideoPlayer({required this.url, this.onTap, this.fullscreen = false});
+  const _FeedVideoPlayer({required this.url, this.onTap, this.fullscreen = false, this.onDoubleTap});
   final String url;
   final VoidCallback? onTap; // feed: opens fullscreen; null in fullscreen mode
   final bool fullscreen;
+  final VoidCallback? onDoubleTap;
 
   @override
   State<_FeedVideoPlayer> createState() => _FeedVideoPlayerState();
@@ -188,7 +192,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
   VideoPlayerController? _ctrl;
   bool _ready = false;
   bool _failed = false;
-  bool _muted = true;
+  bool _muted = _globalMuted.value;
   bool _showControls = false;
   Timer? _hideTimer;
 
@@ -198,6 +202,19 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
   final _visibilityKey = UniqueKey();
   bool _initStarted = false;
   bool _autoPaused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _globalMuted.addListener(_onGlobalMuteChanged);
+  }
+
+  void _onGlobalMuteChanged() {
+    final newMuted = _globalMuted.value;
+    if (_muted == newMuted) return;
+    setState(() => _muted = newMuted);
+    _ctrl?.setVolume(newMuted ? 0 : 1);
+  }
 
   void _onVisibilityChanged(VisibilityInfo info) {
     if (!_initStarted && info.visibleFraction > 0) {
@@ -245,7 +262,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
       }
       await ctrl.initialize();
       ctrl.setLooping(true);
-      ctrl.setVolume(0);
+      ctrl.setVolume(_muted ? 0 : 1);
       ctrl.play();
       ctrl.addListener(_onVideoUpdate);
       if (!mounted) { ctrl.dispose(); return; }
@@ -262,6 +279,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
 
   @override
   void dispose() {
+    _globalMuted.removeListener(_onGlobalMuteChanged);
     _hideTimer?.cancel();
     _ctrl?.removeListener(_onVideoUpdate);
     _ctrl?.dispose();
@@ -270,6 +288,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
 
   void _toggleMute() {
     setState(() => _muted = !_muted);
+    _globalMuted.value = _muted;
     _ctrl?.setVolume(_muted ? 0 : 1);
   }
 
@@ -328,6 +347,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
     if (_failed) {
       return GestureDetector(
         onTap: widget.onTap,
+        onDoubleTap: widget.onDoubleTap,
         child: Container(
           color: Colors.black,
           child: const Center(
@@ -339,6 +359,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
     if (!_ready || _ctrl == null) {
       return GestureDetector(
         onTap: widget.onTap,
+        onDoubleTap: widget.onDoubleTap,
         child: Container(
           color: Colors.black,
           child: const Center(
@@ -358,6 +379,7 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
 
     return GestureDetector(
       onTap: _onTap,
+      onDoubleTap: widget.onDoubleTap,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -371,10 +393,12 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
             ),
           ),
 
-          // Mute button — always visible
+          // Mute button — in fullscreen sits left of the X button, in feed top-right
           Positioned(
-            top: 10,
-            right: 10,
+            top: widget.fullscreen
+                ? MediaQuery.of(context).padding.top + 12
+                : 10,
+            right: widget.fullscreen ? 62 : 10,
             child: GestureDetector(
               onTap: _toggleMute,
               behavior: HitTestBehavior.opaque,
@@ -383,11 +407,11 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
                   color: Colors.black54,
                   shape: BoxShape.circle,
                 ),
-                padding: const EdgeInsets.all(7),
+                padding: EdgeInsets.all(widget.fullscreen ? 8 : 7),
                 child: Icon(
                   _muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
                   color: Colors.white,
-                  size: 16,
+                  size: widget.fullscreen ? 22 : 16,
                 ),
               ),
             ),
@@ -530,9 +554,10 @@ class _NavArrow extends StatelessWidget {
 // ── In-feed media carousel (images + videos, max 4) ──────────────────────────
 
 class _PostMediaCarousel extends StatefulWidget {
-  const _PostMediaCarousel({required this.media, required this.onTap});
+  const _PostMediaCarousel({required this.media, required this.onTap, this.onDoubleTap});
   final List<MediaItem> media;
   final ValueChanged<int> onTap;
+  final VoidCallback? onDoubleTap;
 
   @override
   State<_PostMediaCarousel> createState() => _PostMediaCarouselState();
@@ -550,10 +575,15 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
 
   Widget _buildPage(MediaItem item, int index) {
     if (item.isVideo) {
-      return _FeedVideoPlayer(url: item.url, onTap: () => widget.onTap(index));
+      return _FeedVideoPlayer(
+        url: item.url,
+        onTap: () => widget.onTap(index),
+        onDoubleTap: widget.onDoubleTap,
+      );
     }
     return GestureDetector(
       onTap: () => widget.onTap(index),
+      onDoubleTap: widget.onDoubleTap,
       child: _FeedMedia(url: item.url),
     );
   }
@@ -1050,10 +1080,17 @@ class FeedPostCard extends StatefulWidget {
   State<FeedPostCard> createState() => _FeedPostCardState();
 }
 
-class _FeedPostCardState extends State<FeedPostCard> {
+class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMixin {
   late bool _liked;
   late bool _saved;
   late int _likes;
+
+  late final AnimationController _heartBounceCtrl;
+  late final Animation<double> _heartBounceAnim;
+  late final AnimationController _floatHeartCtrl;
+  late final Animation<double> _floatHeartFade;
+  late final Animation<double> _floatHeartScale;
+  bool _floatHeartVisible = false;
 
   @override
   void initState() {
@@ -1061,6 +1098,25 @@ class _FeedPostCardState extends State<FeedPostCard> {
     _liked = widget.post.liked;
     _saved = widget.post.saved;
     _likes = widget.post.likes;
+
+    _heartBounceCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
+    _heartBounceAnim = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.4),  weight: 40),
+      TweenSequenceItem(tween: Tween(begin: 1.4, end: 0.85), weight: 30),
+      TweenSequenceItem(tween: Tween(begin: 0.85, end: 1.0), weight: 30),
+    ]).animate(_heartBounceCtrl);
+
+    _floatHeartCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    _floatHeartFade = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 1.0), weight: 15),
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.0), weight: 45),
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 40),
+    ]).animate(_floatHeartCtrl);
+    _floatHeartScale = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.3,  end: 1.25), weight: 35),
+      TweenSequenceItem(tween: Tween(begin: 1.25, end: 1.0),  weight: 25),
+      TweenSequenceItem(tween: Tween(begin: 1.0,  end: 1.0),  weight: 40),
+    ]).animate(_floatHeartCtrl);
   }
 
   @override
@@ -1073,16 +1129,25 @@ class _FeedPostCardState extends State<FeedPostCard> {
     }
   }
 
+  @override
+  void dispose() {
+    _heartBounceCtrl.dispose();
+    _floatHeartCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _handleLike() async {
     if (!widget.likingEnabled) return;
     final wasLiked = _liked;
     final wasLikes = _likes;
+    final willLike = !_liked;
     setState(() {
       _liked = !_liked;
       _likes += _liked ? 1 : -1;
       widget.post.liked = _liked;
       widget.post.likes = _likes;
     });
+    if (willLike) _heartBounceCtrl.forward(from: 0);
     final ok = await widget.onLike();
     if (!ok && mounted) {
       setState(() {
@@ -1091,6 +1156,19 @@ class _FeedPostCardState extends State<FeedPostCard> {
         widget.post.liked = wasLiked;
         widget.post.likes = wasLikes;
       });
+    }
+  }
+
+  void _handleDoubleTapLike() {
+    if (!widget.likingEnabled) return;
+    setState(() => _floatHeartVisible = true);
+    _floatHeartCtrl.forward(from: 0).whenComplete(() {
+      if (mounted) setState(() => _floatHeartVisible = false);
+    });
+    if (!_liked) {
+      _handleLike();
+    } else {
+      _heartBounceCtrl.forward(from: 0);
     }
   }
 
@@ -1244,9 +1322,35 @@ class _FeedPostCardState extends State<FeedPostCard> {
             if (widget.post.media.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: _PostMediaCarousel(
-                  media: widget.post.media,
-                  onTap: (index) => _openFullscreen(context, initialIndex: index),
+                child: Stack(
+                  children: [
+                    _PostMediaCarousel(
+                      media: widget.post.media,
+                      onTap: (index) => _openFullscreen(context, initialIndex: index),
+                      onDoubleTap: _handleDoubleTapLike,
+                    ),
+                    if (_floatHeartVisible)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: AnimatedBuilder(
+                            animation: _floatHeartCtrl,
+                            builder: (_, _) => Center(
+                              child: Opacity(
+                                opacity: _floatHeartFade.value,
+                                child: Transform.scale(
+                                  scale: _floatHeartScale.value,
+                                  child: const Icon(
+                                    Icons.favorite_rounded,
+                                    color: Colors.white,
+                                    size: 80,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             Padding(
@@ -1254,12 +1358,19 @@ class _FeedPostCardState extends State<FeedPostCard> {
               child: Row(
                 children: [
                   if (widget.likingEnabled)
-                    IconButton(
-                      onPressed: _handleLike,
-                      icon: Icon(
-                        _liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                        color: _liked ? Colors.red : (isLight ? Colors.black : Colors.white),
-                        size: 28,
+                    AnimatedBuilder(
+                      animation: _heartBounceCtrl,
+                      builder: (_, child) => Transform.scale(
+                        scale: _heartBounceAnim.value,
+                        child: child,
+                      ),
+                      child: IconButton(
+                        onPressed: _handleLike,
+                        icon: Icon(
+                          _liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                          color: _liked ? Colors.red : (isLight ? Colors.black : Colors.white),
+                          size: 28,
+                        ),
                       ),
                     )
                   else

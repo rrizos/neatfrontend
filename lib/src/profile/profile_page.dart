@@ -668,6 +668,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   builder: (_) => SettingsPage(
                     themeMode: widget.themeMode,
                     onLogout: widget.onLogout,
+                    token: widget.token,
+                    username: widget.currentUser.username,
                   ),
                 ),
               ),
@@ -869,6 +871,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       return const Center(child: Text('No liked posts yet.', style: TextStyle(color: Color(0xffb3b3b3))));
     }
     return ListView.builder(
+      key: const PageStorageKey('liked'),
       itemCount: liked.length,
       itemBuilder: (_, i) => _buildPostCard(liked[i], key: ValueKey(liked[i].id)),
     );
@@ -885,6 +888,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       return const Center(child: Text('No saved posts yet.', style: TextStyle(color: Color(0xffb3b3b3))));
     }
     return ListView.builder(
+      key: const PageStorageKey('saved'),
       itemCount: saved.length,
       itemBuilder: (_, i) => _buildPostCard(saved[i], key: ValueKey(saved[i].id)),
     );

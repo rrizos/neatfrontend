@@ -134,13 +134,22 @@ class _CityMapViewState extends State<CityMapView> {
   // Shared event handlers
   // ─────────────────────────────────────────────────────────────────────────
 
-  void _onCityPinTapped(String name) {
+  Future<void> _onCityPinTapped(String name) async {
     final city = greeceCities.firstWhere(
       (c) => c.name == name,
       orElse: () => greeceCities.first,
     );
     if (_activeCity?.name == city.name) return;
-    setState(() => _activeCity = city);
+    final imageUrl = city.imageUrl;
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      try {
+        await precacheImage(
+          CachedNetworkImageProvider(imageUrl, cacheManager: imageCacheManager),
+          context,
+        );
+      } catch (_) {}
+    }
+    if (mounted) setState(() => _activeCity = city);
   }
 
   void _closeCard() {

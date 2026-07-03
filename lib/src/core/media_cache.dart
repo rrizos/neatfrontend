@@ -26,14 +26,18 @@ final videoCacheManager = CacheManager(
   ),
 );
 
-/// Resolves [url] to a local cached file, downloading it at most once per
-/// [videoCacheManager.stalePeriod]. Returns null (caller should fall back to
-/// network streaming) on web, where on-disk caching isn't available.
+/// Resolves [url] to a local cached file. Checks the on-disk cache first so
+/// offline playback works without any network attempt when the video was
+/// previously downloaded. Falls back to downloading (and caching) when the
+/// file isn't cached yet. Returns null on web or on any error.
 Future<File?> getCachedVideoFile(String url) async {
   if (kIsWeb) return null;
   try {
-    final info = await videoCacheManager.getSingleFile(url);
-    return info;
+    // Local-only lookup — no network request, works offline.
+    final cached = await videoCacheManager.getFileFromCache(url);
+    if (cached != null) return cached.file;
+    // Not cached yet: download and store for future offline use.
+    return await videoCacheManager.getSingleFile(url);
   } catch (e) {
     debugPrint('[media_cache] video cache miss for $url: $e');
     return null;

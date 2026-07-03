@@ -1,5 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
@@ -49,6 +50,7 @@ class EventsPage extends StatefulWidget {
 class _EventsPageState extends State<EventsPage> {
   int _tab = 0; // 0 = Official, 1 = Community
   bool _loading = true;
+  bool _isOffline = false;
   List<EventItem> _events = [];
   final ImagePicker _picker = ImagePicker();
   String _selectedCategory = 'All';
@@ -56,11 +58,50 @@ class _EventsPageState extends State<EventsPage> {
   final Map<int, String> _localDates = {};
   final Set<int> _localAttending = {};
 
+  String get _cacheKey => 'neat_events_cache_${widget.city}';
+
   @override
   void initState() {
     super.initState();
     if (widget.preferredTab != null) _tab = widget.preferredTab!;
-    Future.wait([_loadLocalCategories(), _loadLocalDates(), _loadLocalAttending()]).then((_) => _load());
+    Future.wait([_loadLocalCategories(), _loadLocalDates(), _loadLocalAttending()])
+        .then((_) async {
+      await _loadEventsCache();
+      await _load();
+    });
+  }
+
+  Future<void> _saveEventsCache(List<dynamic> raw) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_cacheKey, jsonEncode(raw));
+    } catch (_) {}
+  }
+
+  Future<void> _loadEventsCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cacheKey);
+      if (raw == null || !mounted) return;
+      final list = (jsonDecode(raw) as List).whereType<Map<String, dynamic>>().toList();
+      final events = list.map(EventItem.fromJson).map((e) {
+        final localCat  = _localCategories[e.id];
+        final localDate = _localDates[e.id];
+        return EventItem(
+          id: e.id, city: e.city, eventType: e.eventType,
+          category: (localCat != null && localCat.isNotEmpty) ? localCat : e.category,
+          title: e.title, description: e.description,
+          location: e.location, imageUrl: e.imageUrl, creator: e.creator,
+          organizer: e.organizer, hasTickets: e.hasTickets,
+          ticketsUrl: e.ticketsUrl, attendees: e.attendees,
+          isAttending: _localAttending.contains(e.id),
+          date: (localDate != null && localDate.isNotEmpty) ? localDate : e.date,
+        );
+      }).toList();
+      events.sort((a, b) => b.attendees.compareTo(a.attendees));
+      if (!mounted || events.isEmpty) return;
+      setState(() { _events = events; _loading = false; });
+    } catch (_) {}
   }
 
   @override
@@ -145,8 +186,11 @@ class _EventsPageState extends State<EventsPage> {
         return;
       }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final events = (decoded['events'] as List<dynamic>? ?? const [])
+      final rawList = (decoded['events'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
+          .toList();
+      unawaited(_saveEventsCache(rawList));
+      final events = rawList
           .map(EventItem.fromJson)
           .map((e) {
             final localCat = _localCategories[e.id];
@@ -165,12 +209,10 @@ class _EventsPageState extends State<EventsPage> {
           .toList();
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
       if (!mounted) return;
-      setState(() {
-        _events = events;
-        _loading = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      setState(() { _events = events; _loading = false; _isOffline = false; });
+    } catch (e) {
+      final offline = e is SocketException || e is HandshakeException || e is HttpException;
+      if (mounted) setState(() { _loading = false; _isOffline = offline; });
     }
   }
 
@@ -433,6 +475,7 @@ class _EventsPageState extends State<EventsPage> {
             ),
           ),
           Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0x1fffffff)),
+          if (_isOffline) _EventsOfflineBanner(isLight: isLight),
           if (!_loading && _tab == 0) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 0, 0),
@@ -504,6 +547,35 @@ class _EventsPageState extends State<EventsPage> {
                       ],
                     );
                   }(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EventsOfflineBanner extends StatelessWidget {
+  const _EventsOfflineBanner({required this.isLight});
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      color: isLight ? const Color(0xfff5f5f5) : const Color(0xff1a1a1a),
+      child: Row(
+        children: [
+          Icon(Icons.wifi_off_rounded, size: 13,
+              color: isLight ? const Color(0xff888888) : const Color(0xff666666)),
+          const SizedBox(width: 6),
+          Text(
+            'No internet connection',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: isLight ? const Color(0xff888888) : const Color(0xff666666),
+            ),
           ),
         ],
       ),

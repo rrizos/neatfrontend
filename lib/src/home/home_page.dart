@@ -65,7 +65,9 @@ class _HomePageState extends State<HomePage> {
   final Set<int> _visitedTabs = <int>{0};
   final _searchViewKey = GlobalKey<_SearchViewState>();
   bool _loading = true;
+  bool _isOffline = false;
   String? _activeCity;
+  int _profileRefreshKey = 0;
   final _composeMedia = <_ComposeMedia>[];
   bool _composeMediaLoading = false;
   bool _posting = false;
@@ -118,6 +120,27 @@ class _HomePageState extends State<HomePage> {
   }
 
 
+  String get _postsCacheKey =>
+      _activeCity == null ? 'cached_posts_home' : 'cached_posts_city_$_activeCity';
+
+  Future<void> _saveCachedPosts(List<dynamic> raw) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_postsCacheKey, jsonEncode(raw));
+    } catch (_) {}
+  }
+
+  Future<void> _loadCachedPosts() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_postsCacheKey);
+      if (raw == null || !mounted) return;
+      final decoded = jsonDecode(raw) as List<dynamic>;
+      final posts = decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList();
+      if (mounted) setState(() => _posts..clear()..addAll(posts));
+    } catch (_) {}
+  }
+
   Future<void> _load() async {
     try {
       final res = await http.get(
@@ -130,16 +153,20 @@ class _HomePageState extends State<HomePage> {
           .whereType<Map<String, dynamic>>()
           .map(FeedPost.fromJson)
           .toList();
+      unawaited(_saveCachedPosts(decoded));
       if (!mounted) return;
       setState(() {
         _posts
           ..clear()
           ..addAll(posts);
         _loading = false;
+        _isOffline = false;
       });
       await Future.wait([_loadFollowingAuthors(), _loadFollowerAuthors(), _loadUnreadMessages(), _loadOfficialEventsBadge()]);
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      final offline = e is SocketException || e is HandshakeException || e is HttpException;
+      if (offline) await _loadCachedPosts();
+      if (mounted) setState(() { _loading = false; _isOffline = offline; });
     }
   }
 
@@ -256,6 +283,29 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
+  static const _kNotifCacheKey = 'neat_notifications_cache';
+
+  Future<void> _saveNotificationsCache(List<dynamic> raw) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kNotifCacheKey, jsonEncode(raw));
+    } catch (_) {}
+  }
+
+  Future<List<NotificationItem>> _loadNotificationsCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kNotifCacheKey);
+      if (raw == null) return const [];
+      return (jsonDecode(raw) as List)
+          .whereType<Map<String, dynamic>>()
+          .map(NotificationItem.fromJson)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   Future<void> _loadNotifications({bool silent = false}) async {
     try {
       final res = await http.get(
@@ -264,11 +314,11 @@ class _HomePageState extends State<HomePage> {
       );
       if (res.statusCode == 401) return widget.onLogout();
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final notifications =
-          (decoded['notifications'] as List<dynamic>? ?? const [])
-              .whereType<Map<String, dynamic>>()
-              .map(NotificationItem.fromJson)
-              .toList();
+      final rawList = (decoded['notifications'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      unawaited(_saveNotificationsCache(rawList));
+      final notifications = rawList.map(NotificationItem.fromJson).toList();
       if (!mounted) return;
       setState(() {
         _notificationsList
@@ -276,24 +326,37 @@ class _HomePageState extends State<HomePage> {
           ..addAll(notifications);
       });
     } catch (_) {
-      if (mounted) setState(() {});
+      // On offline: populate from cache so badge count stays accurate
+      final cached = await _loadNotificationsCache();
+      if (mounted && cached.isNotEmpty) {
+        setState(() {
+          _notificationsList
+            ..clear()
+            ..addAll(cached);
+        });
+      }
     }
   }
 
   Future<List<NotificationItem>> _fetchNotifications() async {
-    final res = await http.get(
-      notificationsEndpoint,
-      headers: authGetHeaders(widget.session.token),
-    );
-    if (res.statusCode == 401) {
-      await widget.onLogout();
-      return const [];
+    try {
+      final res = await http.get(
+        notificationsEndpoint,
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (res.statusCode == 401) {
+        await widget.onLogout();
+        return const [];
+      }
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final rawList = (decoded['notifications'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      unawaited(_saveNotificationsCache(rawList));
+      return rawList.map(NotificationItem.fromJson).toList();
+    } catch (_) {
+      return _loadNotificationsCache();
     }
-    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-    return (decoded['notifications'] as List<dynamic>? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .map(NotificationItem.fromJson)
-        .toList();
   }
 
   Future<void> _markNotificationsRead(Iterable<NotificationItem> items) async {
@@ -1329,6 +1392,13 @@ class _HomePageState extends State<HomePage> {
               height: 1,
               color: isLight ? const Color(0xffd6d9df) : const Color(0xff232323),
             ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+              child: _isOffline
+                  ? _OfflineBanner(isLight: isLight)
+                  : const SizedBox.shrink(),
+            ),
             Expanded(
               child: Stack(
                 fit: StackFit.expand,
@@ -1492,7 +1562,7 @@ class _HomePageState extends State<HomePage> {
                     Offstage(
                       offstage: !_showInlineProfile,
                       child: ProfilePage(
-                        key: ValueKey('$_inlineProfileUsername:${_inlinePostId ?? ""}'),
+                        key: ValueKey('$_inlineProfileUsername:${_inlinePostId ?? ""}:$_profileRefreshKey'),
                         username: _inlineProfileUsername,
                         currentUser: widget.session.user,
                         token: widget.session.token,
@@ -1626,6 +1696,10 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     if (i == 4) {
+      if (_nav == 4 && _showInlineProfile) {
+        setState(() => _profileRefreshKey++);
+        return;
+      }
       setState(() {
         _nav = 4;
         _visitedTabs.add(4);
@@ -1637,6 +1711,13 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     if (i == 0) {
+      if (_nav == 0 && !_showInlineProfile) {
+        if (_feedScroll.hasClients) {
+          _feedScroll.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+        }
+        _load();
+        return;
+      }
       setState(() {
         _nav = 0;
         _showInlineProfile = false;
@@ -1644,6 +1725,9 @@ class _HomePageState extends State<HomePage> {
       });
       if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 0);
       return;
+    }
+    if (i == _nav && !_showInlineProfile) {
+      if (i == 1) { _searchViewKey.currentState?.refresh(); return; }
     }
     setState(() {
       _nav = i;
@@ -2155,6 +2239,13 @@ class _SearchViewState extends State<_SearchView> {
   }
 
   void _refreshFollowState() => _loadFollowingAuthors();
+
+  void refresh() {
+    _controller.clear();
+    _load('');
+    _loadSuggestions();
+    _loadTopUsers();
+  }
 
   Future<void> _loadFollowingAuthors() async {
     try {
@@ -3909,4 +4000,37 @@ class _SlashPainterSmall extends CustomPainter {
   }
   @override
   bool shouldRepaint(_SlashPainterSmall old) => old.color != color;
+}
+
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner({required this.isLight});
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: isLight ? const Color(0xfff0f0f0) : const Color(0xff1e1e1e),
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.wifi_off_rounded,
+            size: 13,
+            color: isLight ? const Color(0xff888888) : const Color(0xff888888),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'No internet connection',
+            style: TextStyle(
+              color: isLight ? const Color(0xff666666) : const Color(0xff999999),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
