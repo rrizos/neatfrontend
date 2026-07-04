@@ -2856,16 +2856,13 @@ class _FriendsAttendingSheetState extends State<_FriendsAttendingSheet> {
       final following = parseUsers(followingRes, ['following', 'users', 'results']);
       final followers = parseUsers(followersRes, ['followers', 'users', 'results']);
 
-      // Union: anyone who follows you or you follow counts as a friend
-      final seen = <String>{};
-      final allFriends = <UserProfile>[];
-      for (final u in [...following, ...followers]) {
-        if (u.username != widget.currentUsername && seen.add(u.username)) {
-          allFriends.add(u);
-        }
-      }
+      // Mutual only: a "friend" is someone you follow who also follows you back
+      final followerNames = followers.map((u) => u.username).toSet();
+      final mutualFriends = following
+          .where((u) => u.username != widget.currentUsername && followerNames.contains(u.username))
+          .toList();
 
-      final friends = allFriends
+      final friends = mutualFriends
           .where((u) => attendeeNames.contains(u.username))
           .toList();
 
