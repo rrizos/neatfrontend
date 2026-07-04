@@ -99,6 +99,10 @@ Uri eventDetailEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/');
 Uri eventAttendEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/attend/');
+Uri eventAttendeesEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/$id/attendees/');
+Uri eventUpdateEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/$id/update/');
 Uri eventDeleteEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/delete/');
 Uri eventReportEndpoint(int id) =>

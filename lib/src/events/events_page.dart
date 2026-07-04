@@ -26,6 +26,17 @@ const _kMapKitCdn = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
 
 String? _eventMapkitJs;
 
+// Strips the "lat,lon|" coordinate prefix that gets stored when a Nominatim
+// suggestion is selected. Returns the human-readable part for display.
+String _locationDisplay(String loc) {
+  final pipe = loc.indexOf('|');
+  return pipe >= 0 ? loc.substring(pipe + 1) : loc;
+}
+
+// Persists attending state for the app session, exactly like FeedPost.liked.
+// Survives EventsPage being popped and re-pushed without needing SharedPreferences.
+final _kSessionAttending = <int, bool>{};
+
 class EventsPage extends StatefulWidget {
   const EventsPage({
     super.key,
@@ -55,7 +66,6 @@ class _EventsPageState extends State<EventsPage> {
   List<EventItem> _events = [];
   final ImagePicker _picker = ImagePicker();
   String _selectedCategory = 'All';
-  final Set<int> _localAttending = {};
 
   String get _cacheKey => 'neat_events_cache_${widget.city}';
 
@@ -63,10 +73,7 @@ class _EventsPageState extends State<EventsPage> {
   void initState() {
     super.initState();
     if (widget.preferredTab != null) _tab = widget.preferredTab!;
-    _loadLocalAttending().then((_) async {
-      await _loadEventsCache();
-      await _load();
-    });
+    _loadEventsCache().then((_) => _load());
   }
 
   Future<void> _saveEventsCache(List<dynamic> raw) async {
@@ -81,19 +88,10 @@ class _EventsPageState extends State<EventsPage> {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_cacheKey);
       if (raw == null || !mounted) return;
-      final list = (jsonDecode(raw) as List).whereType<Map<String, dynamic>>().toList();
-      final events = list.map(EventItem.fromJson).map((e) {
-        return EventItem(
-          id: e.id, city: e.city, eventType: e.eventType,
-          category: e.category,
-          title: e.title, description: e.description,
-          location: e.location, imageUrl: e.imageUrl, creator: e.creator,
-          organizer: e.organizer, hasTickets: e.hasTickets,
-          ticketsUrl: e.ticketsUrl, attendees: e.attendees,
-          isAttending: _localAttending.contains(e.id),
-          date: e.date,
-        );
-      }).toList();
+      final events = (jsonDecode(raw) as List)
+          .whereType<Map<String, dynamic>>()
+          .map(EventItem.fromJson)
+          .toList();
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
       if (!mounted || events.isEmpty) return;
       setState(() { _events = events; _loading = false; });
@@ -107,24 +105,6 @@ class _EventsPageState extends State<EventsPage> {
         widget.preferredTab != oldWidget.preferredTab) {
       setState(() => _tab = widget.preferredTab!);
     }
-  }
-
-  Future<void> _loadLocalAttending() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('event_attending') ?? '[]';
-    try {
-      final list = jsonDecode(raw) as List<dynamic>;
-      _localAttending.clear();
-      for (final v in list) {
-        final id = int.tryParse(v.toString());
-        if (id != null) _localAttending.add(id);
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _saveLocalAttending() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('event_attending', jsonEncode(_localAttending.toList()));
   }
 
   Future<void> _load() async {
@@ -142,19 +122,7 @@ class _EventsPageState extends State<EventsPage> {
           .whereType<Map<String, dynamic>>()
           .toList();
       unawaited(_saveEventsCache(rawList));
-      final events = rawList
-          .map(EventItem.fromJson)
-          .map((e) => EventItem(
-                id: e.id, city: e.city, eventType: e.eventType,
-                category: e.category,
-                title: e.title, description: e.description,
-                location: e.location, imageUrl: e.imageUrl, creator: e.creator,
-                organizer: e.organizer, hasTickets: e.hasTickets,
-                ticketsUrl: e.ticketsUrl, attendees: e.attendees,
-                isAttending: _localAttending.contains(e.id),
-                date: e.date,
-              ))
-          .toList();
+      final events = rawList.map(EventItem.fromJson).toList();
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
       if (!mounted) return;
       setState(() { _events = events; _loading = false; _isOffline = false; });
@@ -189,15 +157,28 @@ class _EventsPageState extends State<EventsPage> {
     }
   }
 
+  // Returns a copy of [e] with the session-attending override applied.
+  // The session map survives EventsPage being popped/re-pushed (like FeedPost.liked).
+  EventItem _effective(EventItem e) {
+    final ia = _kSessionAttending[e.id];
+    if (ia == null) return e;
+    return EventItem(
+      id: e.id, city: e.city, eventType: e.eventType,
+      category: e.category, title: e.title, description: e.description,
+      location: e.location, imageUrl: e.imageUrl, creator: e.creator,
+      organizer: e.organizer, hasTickets: e.hasTickets,
+      ticketsUrl: e.ticketsUrl,
+      attendees: e.attendees,
+      isAttending: ia,
+      date: e.date,
+    );
+  }
+
   Future<void> _attend(EventItem event) async {
-    final nowAttending = !event.isAttending;
-    if (nowAttending) {
-      _localAttending.add(event.id);
-    } else {
-      _localAttending.remove(event.id);
-    }
-    await _saveLocalAttending();
+    final cur = _kSessionAttending[event.id] ?? event.isAttending;
+    final next = !cur;
     setState(() {
+      _kSessionAttending[event.id] = next;
       _events = _events.map((e) {
         if (e.id != event.id) return e;
         return EventItem(
@@ -206,24 +187,30 @@ class _EventsPageState extends State<EventsPage> {
           location: e.location, imageUrl: e.imageUrl, creator: e.creator,
           organizer: e.organizer, hasTickets: e.hasTickets,
           ticketsUrl: e.ticketsUrl,
-          attendees: nowAttending ? e.attendees + 1 : e.attendees - 1,
-          isAttending: nowAttending,
+          attendees: next ? e.attendees + 1 : e.attendees - 1,
+          isAttending: next,
           date: e.date,
         );
       }).toList();
     });
-    final res = await http.post(
-      eventAttendEndpoint(event.id),
-      headers: authJsonHeaders(widget.token),
-    );
-    if (res.statusCode != 200) {
-      if (nowAttending) {
-        _localAttending.remove(event.id);
-      } else {
-        _localAttending.add(event.id);
-      }
-      await _saveLocalAttending();
-      await _load();
+    final res = await http.post(eventAttendEndpoint(event.id), headers: authGetHeaders(widget.token));
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      setState(() {
+        _kSessionAttending[event.id] = cur;
+        _events = _events.map((e) {
+          if (e.id != event.id) return e;
+          return EventItem(
+            id: e.id, city: e.city, eventType: e.eventType,
+            category: e.category, title: e.title, description: e.description,
+            location: e.location, imageUrl: e.imageUrl, creator: e.creator,
+            organizer: e.organizer, hasTickets: e.hasTickets,
+            ticketsUrl: e.ticketsUrl,
+            attendees: cur ? e.attendees + 1 : e.attendees - 1,
+            isAttending: cur,
+            date: e.date,
+          );
+        }).toList();
+      });
     }
   }
 
@@ -241,6 +228,72 @@ class _EventsPageState extends State<EventsPage> {
     showReportEventSheet(context, eventId: event.id, token: widget.token);
   }
 
+  Future<void> _editEvent(EventItem event) async {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isLight ? Colors.white : const Color(0xff111111),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+      ),
+      builder: (_) => _EditEventSheet(event: event, picker: _picker),
+    );
+    if (result == null) return;
+    final payload = jsonEncode({...result, 'city': widget.city});
+
+    // Try the most common REST patterns in order until one succeeds
+    http.Response res;
+    res = await http.patch(eventDetailEndpoint(event.id),
+        headers: authJsonHeaders(widget.token), body: payload);
+    if (res.statusCode == 404 || res.statusCode == 405) {
+      res = await http.put(eventDetailEndpoint(event.id),
+          headers: authJsonHeaders(widget.token), body: payload);
+    }
+    if (res.statusCode == 404 || res.statusCode == 405) {
+      res = await http.post(eventUpdateEndpoint(event.id),
+          headers: authJsonHeaders(widget.token), body: payload);
+    }
+    if (res.statusCode == 404 || res.statusCode == 405) {
+      res = await http.patch(eventUpdateEndpoint(event.id),
+          headers: authJsonHeaders(widget.token), body: payload);
+    }
+
+    if (!mounted) return;
+
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      // Optimistically reflect the edited fields in local state immediately
+      final updated = EventItem(
+        id: event.id,
+        city: widget.city,
+        eventType: (result['eventType'] as String?) ?? event.eventType,
+        category: (result['category'] as String?) ?? event.category,
+        title: (result['title'] as String?) ?? event.title,
+        description: (result['description'] as String?) ?? event.description,
+        location: (result['location'] as String?) ?? event.location,
+        imageUrl: (result['imageUrl'] as String?) ?? event.imageUrl,
+        creator: event.creator,
+        organizer: event.organizer,
+        hasTickets: (result['hasTickets'] as bool?) ?? event.hasTickets,
+        ticketsUrl: (result['ticketsUrl'] as String?) ?? event.ticketsUrl,
+        attendees: event.attendees,
+        isAttending: event.isAttending,
+        date: (result['date'] as String?) ?? event.date,
+      );
+      setState(() {
+        _events = _events.map((e) => e.id == event.id ? updated : e).toList();
+      });
+      unawaited(_load());
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save event (${res.statusCode})')),
+      );
+    }
+  }
+
   void _showEventDetail(EventItem event) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
@@ -253,6 +306,7 @@ class _EventsPageState extends State<EventsPage> {
       ),
       builder: (_) => _EventDetailSheet(
         event: event,
+        token: widget.token,
         currentUsername: widget.currentUser.username,
         onAttend: () => _attend(event),
         onDelete: () {
@@ -262,6 +316,10 @@ class _EventsPageState extends State<EventsPage> {
         onReport: () {
           Navigator.of(context).pop();
           _reportEvent(event);
+        },
+        onEdit: () {
+          Navigator.of(context).pop();
+          _editEvent(event);
         },
         attendEnabled: widget.attendEnabled,
         isAdmin: widget.currentUser.isAdmin,
@@ -277,13 +335,11 @@ class _EventsPageState extends State<EventsPage> {
       ? _official
       : _official.where((e) => e.category == _selectedCategory).toList();
 
-  bool _isExpired(EventItem e) {
-    if (e.date.isEmpty) return false;
+  DateTime? _dateOnly(EventItem e) {
+    if (e.date.isEmpty) return null;
     final d = DateTime.tryParse(e.date);
-    if (d == null) return false;
-    final today = DateTime.now();
-    return DateTime(d.year, d.month, d.day)
-        .isBefore(DateTime(today.year, today.month, today.day));
+    if (d == null) return null;
+    return DateTime(d.year, d.month, d.day);
   }
 
   Widget _buildSection(bool isLight, String title, List<EventItem> events) {
@@ -309,6 +365,7 @@ class _EventsPageState extends State<EventsPage> {
             itemCount: events.length,
             itemBuilder: (context, index) {
               final event = events[index];
+              final eff = _effective(event);
               return Padding(
                 padding: const EdgeInsets.only(right: 14),
                 child: SizedBox(
@@ -316,12 +373,13 @@ class _EventsPageState extends State<EventsPage> {
                   child: Align(
                     alignment: Alignment.topCenter,
                     child: _EventCard(
-                      event: event,
+                      event: eff,
                       currentUsername: widget.currentUser.username,
                       onAttend: () => _attend(event),
                       onDelete: () => _deleteEvent(event),
                       onReport: () => _reportEvent(event),
-                      onTap: () => _showEventDetail(event),
+                      onEdit: () => _editEvent(event),
+                      onTap: () => _showEventDetail(eff),
                       attendEnabled: widget.attendEnabled,
                       isAdmin: widget.currentUser.isAdmin,
                     ),
@@ -453,10 +511,33 @@ class _EventsPageState extends State<EventsPage> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : () {
-                    final upcoming = visible.where((e) => !_isExpired(e)).toList();
-                    final completed = visible.where((e) => _isExpired(e) && !e.isAttending).toList();
-                    final attended = visible.where((e) => _isExpired(e) && e.isAttending).toList();
-                    if (upcoming.isEmpty && completed.isEmpty && attended.isEmpty) {
+                    final now = DateTime.now();
+                    final today    = DateTime(now.year, now.month, now.day);
+                    final tomorrow = today.add(const Duration(days: 1));
+                    final in7Days  = today.add(const Duration(days: 7));
+                    final cutoff   = today.subtract(const Duration(days: 7));
+
+                    final liveToday = visible.where((e) {
+                      final d = _dateOnly(e); return d != null && d == today;
+                    }).toList();
+                    final upcoming = visible.where((e) {
+                      final d = _dateOnly(e);
+                      return d != null && !d.isBefore(tomorrow) && !d.isAfter(in7Days);
+                    }).toList();
+                    final other = visible.where((e) {
+                      final d = _dateOnly(e); return d != null && d.isAfter(in7Days);
+                    }).toList();
+                    final attended = visible.where((e) {
+                      final d = _dateOnly(e);
+                      return d != null && d.isBefore(today) && !d.isBefore(cutoff) && _effective(e).isAttending;
+                    }).toList();
+                    final completed = visible.where((e) {
+                      final d = _dateOnly(e);
+                      return d != null && d.isBefore(today) && !d.isBefore(cutoff) && !_effective(e).isAttending;
+                    }).toList();
+
+                    if (liveToday.isEmpty && upcoming.isEmpty && other.isEmpty &&
+                        attended.isEmpty && completed.isEmpty) {
                       return Center(
                         child: Text(
                           'No events yet.',
@@ -467,9 +548,11 @@ class _EventsPageState extends State<EventsPage> {
                     return ListView(
                       padding: const EdgeInsets.only(bottom: 24),
                       children: [
-                        if (upcoming.isNotEmpty) _buildSection(isLight, 'Upcoming Events', upcoming),
-                        if (completed.isNotEmpty) _buildSection(isLight, 'Completed Events', completed),
-                        if (attended.isNotEmpty) _buildSection(isLight, 'Already Attended', attended),
+                        if (liveToday.isNotEmpty)  _buildSection(isLight, 'Live Today',        liveToday),
+                        if (upcoming.isNotEmpty)   _buildSection(isLight, 'Upcoming Events',   upcoming),
+                        if (other.isNotEmpty)      _buildSection(isLight, 'Other Events',      other),
+                        if (attended.isNotEmpty)   _buildSection(isLight, 'Already Attended',  attended),
+                        if (completed.isNotEmpty)  _buildSection(isLight, 'Completed Events',  completed),
                       ],
                     );
                   }(),
@@ -506,6 +589,18 @@ class _EventsOfflineBanner extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+Future<void> _openUrl(String raw) async {
+  var url = raw.trim();
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = 'https://$url';
+  }
+  final uri = Uri.tryParse(url);
+  if (uri == null) return;
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 }
 
@@ -593,6 +688,7 @@ class _EventCard extends StatelessWidget {
     required this.onAttend,
     required this.onDelete,
     required this.onReport,
+    required this.onEdit,
     required this.onTap,
     this.attendEnabled = true,
     this.isAdmin = false,
@@ -603,6 +699,7 @@ class _EventCard extends StatelessWidget {
   final VoidCallback onAttend;
   final VoidCallback onDelete;
   final VoidCallback onReport;
+  final VoidCallback onEdit;
   final VoidCallback onTap;
   final bool attendEnabled;
   final bool isAdmin;
@@ -692,7 +789,7 @@ class _EventCard extends StatelessWidget {
                     const SizedBox(height: 6),
                   ],
                   Text(
-                    event.location.isEmpty ? event.city : event.location,
+                    event.location.isEmpty ? event.city : _locationDisplay(event.location),
                     style: const TextStyle(
                       color: Color(0xffb3b3b3),
                       fontSize: 13,
@@ -819,25 +916,38 @@ class _EventCard extends StatelessWidget {
                       ),
                       constraints: const BoxConstraints(),
                       onSelected: (value) async {
+                        if (value == 'edit') onEdit();
                         if (value == 'delete') onDelete();
                         if (value == 'report') onReport();
                       },
-                      itemBuilder: (context) => [
-                        if (event.creator == currentUsername || isAdmin)
-                          const PopupMenuItem(
-                            value: 'delete',
-                            padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
-                            child: Text(
-                              'Delete event',
-                              style: TextStyle(color: Color(0xfff66c6c)),
+                      itemBuilder: (ctx) {
+                        final isLt = Theme.of(ctx).brightness == Brightness.light;
+                        return [
+                          if (event.creator == currentUsername || isAdmin) ...[
+                            PopupMenuItem(
+                              value: 'edit',
+                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                              child: Text(
+                                'Edit event',
+                                style: TextStyle(color: isLt ? Colors.black : Colors.white),
+                              ),
                             ),
+                            const PopupMenuItem(
+                              value: 'delete',
+                              padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+                              child: Text(
+                                'Delete event',
+                                style: TextStyle(color: Color(0xfff66c6c)),
+                              ),
+                            ),
+                          ],
+                          const PopupMenuItem(
+                            value: 'report',
+                            padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+                            child: Text('Report event'),
                           ),
-                        const PopupMenuItem(
-                          value: 'report',
-                          padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
-                          child: Text('Report event'),
-                        ),
-                      ],
+                        ];
+                      },
                     ),
                   ],
                 ),
@@ -848,14 +958,7 @@ class _EventCard extends StatelessWidget {
                         child: TextButton(
                           onPressed: event.ticketsUrl.isEmpty
                               ? null
-                              : () async {
-                                  final uri = Uri.tryParse(event.ticketsUrl);
-                                  if (uri == null) return;
-                                  await launchUrl(
-                                    uri,
-                                    mode: LaunchMode.externalApplication,
-                                  );
-                                },
+                              : () => _openUrl(event.ticketsUrl),
                           style: TextButton.styleFrom(
                           backgroundColor: isLight ? const Color(0xffeef1f5) : const Color(0xff1d1d1d),
                           foregroundColor: isLight ? Colors.black : Colors.white,
@@ -951,6 +1054,21 @@ class _TabPill extends StatelessWidget {
   }
 }
 
+class _PlaceSuggestion {
+  const _PlaceSuggestion({
+    required this.label,
+    required this.sublabel,
+    required this.stored,
+    required this.lat,
+    required this.lon,
+  });
+  final String label;
+  final String sublabel;
+  final String stored;
+  final double lat;
+  final double lon;
+}
+
 class _CreateEventSheet extends StatefulWidget {
   const _CreateEventSheet({required this.picker});
 
@@ -964,20 +1082,101 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   final _title = TextEditingController();
   final _desc = TextEditingController();
   final _location = TextEditingController();
+  final _ticketsUrl = TextEditingController();
+  final _locationFocus = FocusNode();
   bool _official = false;
   bool _tickets = false;
   String _category = _kEventCategories[1];
   String _imageUrl = '';
   bool _showPhotoError = false;
+  bool _showTicketsUrlError = false;
+  bool _showLocationError = false;
   DateTime? _date;
   bool _showDateError = false;
 
+  List<_PlaceSuggestion> _suggestions = [];
+  bool _loadingSuggestions = false;
+  Timer? _debounce;
+  double? _selectedLat;
+  double? _selectedLon;
+
+  @override
+  void initState() {
+    super.initState();
+    _locationFocus.addListener(() {
+      if (!_locationFocus.hasFocus && mounted) {
+        setState(() { _suggestions = []; _loadingSuggestions = false; });
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _debounce?.cancel();
     _title.dispose();
     _desc.dispose();
     _location.dispose();
+    _ticketsUrl.dispose();
+    _locationFocus.dispose();
     super.dispose();
+  }
+
+  void _onLocationChanged(String value) {
+    _selectedLat = null;
+    _selectedLon = null;
+    _debounce?.cancel();
+    final q = value.trim();
+    if (q.length < 3) {
+      setState(() { _suggestions = []; _loadingSuggestions = false; });
+      return;
+    }
+    setState(() => _loadingSuggestions = true);
+    _debounce = Timer(const Duration(milliseconds: 450), () => _fetchSuggestions(q));
+  }
+
+  Future<void> _fetchSuggestions(String query) async {
+    try {
+      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+        'q': query,
+        'format': 'json',
+        'limit': '5',
+        'addressdetails': '1',
+        'countrycodes': 'gr',
+      });
+      final res = await http.get(uri, headers: {'User-Agent': 'NeatApp/1.0'});
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final raw = jsonDecode(res.body) as List<dynamic>;
+        final items = raw.whereType<Map<String, dynamic>>().map((j) {
+          final name = j['name']?.toString() ?? '';
+          final display = j['display_name']?.toString() ?? '';
+          final label = name.isNotEmpty ? name : display.split(',').first.trim();
+          final parts = display.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+          final stored = parts.take(3).join(', ');
+          final lat = double.tryParse(j['lat']?.toString() ?? '') ?? 0;
+          final lon = double.tryParse(j['lon']?.toString() ?? '') ?? 0;
+          return _PlaceSuggestion(
+            label: label, sublabel: display,
+            stored: stored.isNotEmpty ? stored : label,
+            lat: lat, lon: lon,
+          );
+        }).toList();
+        if (mounted) setState(() { _suggestions = items; _loadingSuggestions = false; });
+      } else {
+        if (mounted) setState(() { _suggestions = []; _loadingSuggestions = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _suggestions = []; _loadingSuggestions = false; });
+    }
+  }
+
+  void _selectSuggestion(_PlaceSuggestion s) {
+    _location.text = s.stored;
+    _location.selection = TextSelection.collapsed(offset: s.stored.length);
+    _selectedLat = s.lat;
+    _selectedLon = s.lon;
+    _locationFocus.unfocus();
+    setState(() { _suggestions = []; _loadingSuggestions = false; });
   }
 
   Future<void> _pickImage() async {
@@ -1037,6 +1236,14 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       setState(() => _showPhotoError = true);
                       return;
                     }
+                    if (_official && _location.text.trim().isEmpty) {
+                      setState(() => _showLocationError = true);
+                      return;
+                    }
+                    if (_official && _tickets && _ticketsUrl.text.trim().isEmpty) {
+                      setState(() => _showTicketsUrlError = true);
+                      return;
+                    }
                     Navigator.of(context).pop({
                       'title': _title.text.trim(),
                       'description': _desc.text.trim(),
@@ -1044,7 +1251,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       'hasTickets': _tickets,
                       'date': _date!.toIso8601String().substring(0, 10),
                       if (_official) 'category': _category,
-                      if (_official && _location.text.trim().isNotEmpty) 'location': _location.text.trim(),
+                      if (_official && _location.text.trim().isNotEmpty)
+                        'location': (_selectedLat != null && _selectedLon != null)
+                            ? '$_selectedLat,$_selectedLon|${_location.text.trim()}'
+                            : _location.text.trim(),
+                      if (_official && _tickets) 'ticketsUrl': _ticketsUrl.text.trim(),
                       if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
                     });
                   },
@@ -1073,7 +1284,10 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                   child: _CompactToggle(
                     label: 'Official event',
                     value: _official,
-                    onChanged: (v) => setState(() => _official = v),
+                    onChanged: (v) => setState(() {
+                      _official = v;
+                      if (!v) _tickets = false;
+                    }),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1081,6 +1295,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                   child: _CompactToggle(
                     label: 'Has tickets',
                     value: _tickets,
+                    enabled: _official,
                     onChanged: (v) => setState(() => _tickets = v),
                   ),
                 ),
@@ -1143,9 +1358,100 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               const SizedBox(height: 10),
               TextField(
                 controller: _location,
+                focusNode: _locationFocus,
+                onChanged: (v) {
+                  if (_showLocationError && v.trim().isNotEmpty) setState(() => _showLocationError = false);
+                  _onLocationChanged(v);
+                },
                 style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                decoration: _dec('Venue / Address', isLight),
+                decoration: _dec('Venue / Address (required)', isLight, error: _showLocationError),
               ),
+              if (_loadingSuggestions) ...[
+                const SizedBox(height: 6),
+                const Center(
+                  child: SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ] else if (_suggestions.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Container(
+                  decoration: BoxDecoration(
+                    color: isLight ? Colors.white : const Color(0xff1e1e1e),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (int i = 0; i < _suggestions.length; i++) ...[
+                        if (i > 0)
+                          Divider(
+                            height: 1,
+                            color: isLight ? const Color(0xffe8e8e8) : const Color(0xff2a2a2a),
+                          ),
+                        InkWell(
+                          onTap: () => _selectSuggestion(_suggestions[i]),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.location_on_outlined, size: 15, color: Color(0xff8f8f8f)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _suggestions[i].label,
+                                        style: TextStyle(
+                                          color: isLight ? Colors.black : Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      if (_suggestions[i].sublabel != _suggestions[i].label)
+                                        Text(
+                                          _suggestions[i].sublabel,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Color(0xff8f8f8f),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+              if (_tickets) ...[
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _ticketsUrl,
+                  style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                  keyboardType: TextInputType.url,
+                  onChanged: (_) { if (_showTicketsUrlError) setState(() => _showTicketsUrlError = false); },
+                  decoration: _dec('Tickets website URL (required)', isLight, error: _showTicketsUrlError),
+                ),
+              ],
             ],
             const SizedBox(height: 12),
             GestureDetector(
@@ -1236,7 +1542,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     );
   }
 
-  InputDecoration _dec(String hint, bool isLight) => InputDecoration(
+  InputDecoration _dec(String hint, bool isLight, {bool error = false}) => InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
         filled: true,
@@ -1244,7 +1550,500 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(
-            color: isLight ? const Color(0xffd9dee6) : Colors.transparent,
+            color: error ? const Color(0xfff66c6c) : (isLight ? const Color(0xffd9dee6) : Colors.transparent),
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(
+            color: error ? const Color(0xfff66c6c) : (isLight ? const Color(0xffd9dee6) : Colors.transparent),
+          ),
+        ),
+      );
+}
+
+class _EditEventSheet extends StatefulWidget {
+  const _EditEventSheet({required this.event, required this.picker});
+
+  final EventItem event;
+  final ImagePicker picker;
+
+  @override
+  State<_EditEventSheet> createState() => _EditEventSheetState();
+}
+
+class _EditEventSheetState extends State<_EditEventSheet> {
+  late final TextEditingController _title;
+  late final TextEditingController _desc;
+  late final TextEditingController _location;
+  late final TextEditingController _ticketsUrl;
+  final _locationFocus = FocusNode();
+  late bool _official;
+  late bool _tickets;
+  late String _category;
+  late String _imageUrl;
+  bool _imageChanged = false;
+  bool _showTicketsUrlError = false;
+  bool _showLocationError = false;
+  DateTime? _date;
+
+  List<_PlaceSuggestion> _suggestions = [];
+  bool _loadingSuggestions = false;
+  Timer? _debounce;
+  double? _selectedLat;
+  double? _selectedLon;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.event;
+    _title = TextEditingController(text: e.title);
+    _desc = TextEditingController(text: e.description);
+    // If the stored location has embedded coordinates, extract them for the map.
+    final pipe = e.location.indexOf('|');
+    if (pipe > 0) {
+      final coords = e.location.substring(0, pipe).split(',');
+      if (coords.length == 2) {
+        _selectedLat = double.tryParse(coords[0]);
+        _selectedLon = double.tryParse(coords[1]);
+      }
+    }
+    _location = TextEditingController(text: _locationDisplay(e.location));
+    _ticketsUrl = TextEditingController(text: e.ticketsUrl);
+    _official = e.eventType == 'official';
+    _tickets = e.hasTickets;
+    _category = (_kEventCategories.contains(e.category) && e.category.isNotEmpty)
+        ? e.category
+        : _kEventCategories[1];
+    _imageUrl = e.imageUrl;
+    if (e.date.isNotEmpty) {
+      final d = DateTime.tryParse(e.date);
+      if (d != null) _date = DateTime(d.year, d.month, d.day);
+    }
+    _locationFocus.addListener(() {
+      if (!_locationFocus.hasFocus && mounted) {
+        setState(() { _suggestions = []; _loadingSuggestions = false; });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _title.dispose();
+    _desc.dispose();
+    _location.dispose();
+    _ticketsUrl.dispose();
+    _locationFocus.dispose();
+    super.dispose();
+  }
+
+  void _onLocationChanged(String value) {
+    _selectedLat = null;
+    _selectedLon = null;
+    _debounce?.cancel();
+    final q = value.trim();
+    if (q.length < 3) {
+      setState(() { _suggestions = []; _loadingSuggestions = false; });
+      return;
+    }
+    setState(() => _loadingSuggestions = true);
+    _debounce = Timer(const Duration(milliseconds: 450), () => _fetchSuggestions(q));
+  }
+
+  Future<void> _fetchSuggestions(String query) async {
+    try {
+      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+        'q': query,
+        'format': 'json',
+        'limit': '5',
+        'addressdetails': '1',
+        'countrycodes': 'gr',
+      });
+      final res = await http.get(uri, headers: {'User-Agent': 'NeatApp/1.0'});
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final raw = jsonDecode(res.body) as List<dynamic>;
+        final items = raw.whereType<Map<String, dynamic>>().map((j) {
+          final name = j['name']?.toString() ?? '';
+          final display = j['display_name']?.toString() ?? '';
+          final label = name.isNotEmpty ? name : display.split(',').first.trim();
+          final parts = display.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+          final stored = parts.take(3).join(', ');
+          final lat = double.tryParse(j['lat']?.toString() ?? '') ?? 0;
+          final lon = double.tryParse(j['lon']?.toString() ?? '') ?? 0;
+          return _PlaceSuggestion(
+            label: label, sublabel: display,
+            stored: stored.isNotEmpty ? stored : label,
+            lat: lat, lon: lon,
+          );
+        }).toList();
+        if (mounted) setState(() { _suggestions = items; _loadingSuggestions = false; });
+      } else {
+        if (mounted) setState(() { _suggestions = []; _loadingSuggestions = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _suggestions = []; _loadingSuggestions = false; });
+    }
+  }
+
+  void _selectSuggestion(_PlaceSuggestion s) {
+    _location.text = s.stored;
+    _location.selection = TextSelection.collapsed(offset: s.stored.length);
+    _selectedLat = s.lat;
+    _selectedLon = s.lon;
+    _locationFocus.unfocus();
+    setState(() { _suggestions = []; _loadingSuggestions = false; });
+  }
+
+  Future<void> _pickImage() async {
+    final picked = await widget.picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 88,
+      maxWidth: 1600,
+    );
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    final mime = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+    setState(() {
+      _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}';
+      _imageChanged = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          16, 0, 16,
+          MediaQuery.viewInsetsOf(context).bottom + 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const Spacer(),
+                Text(
+                  'Edit event',
+                  style: TextStyle(
+                    color: isLight ? Colors.black : Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () {
+                    if (_title.text.trim().isEmpty || _desc.text.trim().isEmpty) return;
+                    if (_date == null) return;
+                    if (_official && _location.text.trim().isEmpty) {
+                      setState(() => _showLocationError = true);
+                      return;
+                    }
+                    if (_official && _tickets && _ticketsUrl.text.trim().isEmpty) {
+                      setState(() => _showTicketsUrlError = true);
+                      return;
+                    }
+                    Navigator.of(context).pop({
+                      'title': _title.text.trim(),
+                      'description': _desc.text.trim(),
+                      'eventType': _official ? 'official' : 'community',
+                      'hasTickets': _tickets,
+                      'date': _date!.toIso8601String().substring(0, 10),
+                      if (_official) 'category': _category,
+                      if (_official && _location.text.trim().isNotEmpty)
+                        'location': (_selectedLat != null && _selectedLon != null)
+                            ? '$_selectedLat,$_selectedLon|${_location.text.trim()}'
+                            : _location.text.trim(),
+                      if (_official && _tickets) 'ticketsUrl': _ticketsUrl.text.trim(),
+                      if (_imageChanged && _imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
+                    });
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _title,
+              style: TextStyle(color: isLight ? Colors.black : Colors.white),
+              decoration: _dec('Title', isLight),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _desc,
+              style: TextStyle(color: isLight ? Colors.black : Colors.white),
+              maxLines: 4,
+              maxLength: 500,
+              decoration: _dec('Description', isLight),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _CompactToggle(
+                    label: 'Official event',
+                    value: _official,
+                    onChanged: (v) => setState(() {
+                      _official = v;
+                      if (!v) _tickets = false;
+                    }),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _CompactToggle(
+                    label: 'Has tickets',
+                    value: _tickets,
+                    enabled: _official,
+                    onChanged: (v) => setState(() => _tickets = v),
+                  ),
+                ),
+              ],
+            ),
+            if (_official) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Category',
+                style: TextStyle(
+                  color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 38,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: EdgeInsets.zero,
+                  itemCount: _kEventCategories.length - 1,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final cat = _kEventCategories[index + 1];
+                    final sel = cat == _category;
+                    return GestureDetector(
+                      onTap: () => setState(() => _category = cat),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: sel
+                              ? (isLight ? Colors.black : Colors.white)
+                              : (isLight ? Colors.white : const Color(0xff1e1e1e)),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: sel
+                                ? Colors.transparent
+                                : (isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                          ),
+                        ),
+                        child: Text(
+                          cat,
+                          style: TextStyle(
+                            color: sel
+                                ? (isLight ? Colors.white : Colors.black)
+                                : (isLight ? Colors.black : Colors.white),
+                            fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+            if (_official) ...[
+              const SizedBox(height: 10),
+              TextField(
+                controller: _location,
+                focusNode: _locationFocus,
+                onChanged: (v) {
+                  if (_showLocationError && v.trim().isNotEmpty) setState(() => _showLocationError = false);
+                  _onLocationChanged(v);
+                },
+                style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                decoration: _dec('Venue / Address (required)', isLight, error: _showLocationError),
+              ),
+              if (_loadingSuggestions) ...[
+                const SizedBox(height: 6),
+                const Center(
+                  child: SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ] else if (_suggestions.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Container(
+                  decoration: BoxDecoration(
+                    color: isLight ? Colors.white : const Color(0xff1e1e1e),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (int i = 0; i < _suggestions.length; i++) ...[
+                        if (i > 0)
+                          Divider(
+                            height: 1,
+                            color: isLight ? const Color(0xffe8e8e8) : const Color(0xff2a2a2a),
+                          ),
+                        InkWell(
+                          onTap: () => _selectSuggestion(_suggestions[i]),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.location_on_outlined, size: 15, color: Color(0xff8f8f8f)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _suggestions[i].label,
+                                        style: TextStyle(
+                                          color: isLight ? Colors.black : Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      if (_suggestions[i].sublabel != _suggestions[i].label)
+                                        Text(
+                                          _suggestions[i].sublabel,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Color(0xff8f8f8f),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+              if (_tickets) ...[
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _ticketsUrl,
+                  style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                  keyboardType: TextInputType.url,
+                  onChanged: (_) { if (_showTicketsUrlError) setState(() => _showTicketsUrlError = false); },
+                  decoration: _dec('Tickets website URL (required)', isLight, error: _showTicketsUrlError),
+                ),
+              ],
+            ],
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _date ?? DateTime.now(),
+                  firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                  lastDate: DateTime.now().add(const Duration(days: 365 * 3)),
+                );
+                if (picked != null) setState(() => _date = picked);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: isLight ? Colors.white : const Color(0xff1a1a1b),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.calendar_today_outlined, size: 16,
+                        color: isLight ? Colors.black : Colors.white),
+                    const SizedBox(width: 10),
+                    Text(
+                      _date == null
+                          ? 'Choose date'
+                          : _formatEventDate(_date!.toIso8601String().substring(0, 10)),
+                      style: TextStyle(
+                        color: _date == null
+                            ? (isLight ? const Color(0xff616161) : const Color(0xff8f8f8f))
+                            : (isLight ? Colors.black : Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (_imageUrl.isNotEmpty)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: AspectRatio(
+                  aspectRatio: 1.25,
+                  child: _EventMedia(url: _imageUrl),
+                ),
+              ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _ComposerAction(
+                  icon: Icons.image_outlined,
+                  onTap: _pickImage,
+                ),
+                const Spacer(),
+                Text(
+                  _imageUrl.isNotEmpty ? 'Tap photo icon to replace' : 'Photos make events feel real',
+                  style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f), fontSize: 12),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _dec(String hint, bool isLight, {bool error = false}) => InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
+        filled: true,
+        fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(
+            color: error ? const Color(0xfff66c6c) : (isLight ? const Color(0xffd9dee6) : Colors.transparent),
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(
+            color: error ? const Color(0xfff66c6c) : (isLight ? const Color(0xffd9dee6) : Colors.transparent),
           ),
         ),
       );
@@ -1255,47 +2054,52 @@ class _CompactToggle extends StatelessWidget {
     required this.label,
     required this.value,
     required this.onChanged,
+    this.enabled = true,
   });
 
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () => onChanged(!value),
+      onTap: enabled ? () => onChanged(!value) : null,
       borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: value ? Colors.white : const Color(0xff1a1a1b),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: value ? Colors.white : const Color(0xff2a2a2a),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              value ? Icons.check_circle : Icons.circle_outlined,
-              size: 16,
-              color: value ? Colors.black : Colors.white,
+      child: Opacity(
+        opacity: enabled ? 1.0 : 0.38,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: value ? Colors.white : const Color(0xff1a1a1b),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: value ? Colors.white : const Color(0xff2a2a2a),
             ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: value ? Colors.black : Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.5,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                value ? Icons.check_circle : Icons.circle_outlined,
+                size: 16,
+                color: value ? Colors.black : Colors.white,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: value ? Colors.black : Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1355,19 +2159,23 @@ class _EventMedia extends StatelessWidget {
 class _EventDetailSheet extends StatefulWidget {
   const _EventDetailSheet({
     required this.event,
+    required this.token,
     required this.currentUsername,
     required this.onAttend,
     required this.onDelete,
     required this.onReport,
+    required this.onEdit,
     this.attendEnabled = true,
     this.isAdmin = false,
   });
 
   final EventItem event;
+  final String token;
   final String currentUsername;
   final VoidCallback onAttend;
   final VoidCallback onDelete;
   final VoidCallback onReport;
+  final VoidCallback onEdit;
   final bool attendEnabled;
   final bool isAdmin;
 
@@ -1378,6 +2186,29 @@ class _EventDetailSheet extends StatefulWidget {
 class _EventDetailSheetState extends State<_EventDetailSheet> {
   late bool _isAttending = widget.event.isAttending;
   late int _attendees = widget.event.attendees;
+  int? _totalAttendees; // real total loaded from the attendees endpoint
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTotal();
+  }
+
+  Future<void> _fetchTotal() async {
+    try {
+      final res = await http.get(
+        eventAttendeesEndpoint(widget.event.id),
+        headers: authGetHeaders(widget.token),
+      );
+      if (!mounted || res.statusCode != 200) return;
+      final body = jsonDecode(res.body);
+      final list = body is List
+          ? body
+          : ((body['attendees'] ?? body['users'] ?? body['results'] ?? const []) as List);
+      final count = list.whereType<Map<String, dynamic>>().length;
+      if (mounted) setState(() => _totalAttendees = count);
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1463,7 +2294,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                         else
                           _DetailRow(
                             icon: Icons.location_on_outlined,
-                            text: event.location.isNotEmpty ? event.location : event.city,
+                            text: event.location.isNotEmpty ? _locationDisplay(event.location) : event.city,
                           ),
                         const SizedBox(height: 8),
                       ],
@@ -1475,13 +2306,77 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                         const SizedBox(height: 8),
                         _DetailRow(icon: Icons.category_outlined, text: event.category),
                       ],
-                      const SizedBox(height: 16),
-                      Text(
-                        '$_attendees people attending',
-                        style: TextStyle(
-                          color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
-                          fontSize: 13,
+                      if (event.ticketsUrl.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () => _openUrl(event.ticketsUrl),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.link_rounded, size: 14, color: Color(0xff0095f6)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  event.ticketsUrl,
+                                  style: const TextStyle(
+                                    color: Color(0xff0095f6),
+                                    fontSize: 12,
+                                    decoration: TextDecoration.underline,
+                                    decorationColor: Color(0xff0095f6),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                      ],
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Text(
+                            '${_totalAttendees ?? _attendees} people attending',
+                            style: TextStyle(
+                              color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
+                              fontSize: 13,
+                            ),
+                          ),
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: () {
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                useSafeArea: true,
+                                backgroundColor: isLight ? Colors.white : const Color(0xff111111),
+                                shape: const RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                                ),
+                                builder: (_) => _FriendsAttendingSheet(
+                                  eventId: event.id,
+                                  token: widget.token,
+                                  currentUsername: widget.currentUsername,
+                                  isLight: isLight,
+                                ),
+                              );
+                            },
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.people_outline_rounded, size: 14,
+                                    color: isLight ? Colors.black : Colors.white),
+                                const SizedBox(width: 5),
+                                Text(
+                                  'See if friends are going',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: isLight ? Colors.black : Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                       if (event.description.isNotEmpty) ...[
                         const SizedBox(height: 16),
@@ -1502,11 +2397,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                               child: TextButton(
                                 onPressed: event.ticketsUrl.isEmpty
                                     ? null
-                                    : () async {
-                                        final uri = Uri.tryParse(event.ticketsUrl);
-                                        if (uri == null) return;
-                                        await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                      },
+                                    : () => _openUrl(event.ticketsUrl),
                                 style: TextButton.styleFrom(
                                   backgroundColor: isLight ? const Color(0xffeef1f5) : const Color(0xff1d1d1d),
                                   foregroundColor: isLight ? Colors.black : Colors.white,
@@ -1525,7 +2416,11 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                             child: _isAttending
                                 ? OutlinedButton(
                                     onPressed: widget.attendEnabled ? () {
-                                      setState(() { _isAttending = false; _attendees--; });
+                                      setState(() {
+                                        _isAttending = false;
+                                        _attendees--;
+                                        if (_totalAttendees != null) _totalAttendees = _totalAttendees! - 1;
+                                      });
                                       widget.onAttend();
                                     } : null,
                                     style: OutlinedButton.styleFrom(
@@ -1538,7 +2433,11 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                   )
                                 : FilledButton(
                                     onPressed: widget.attendEnabled ? () {
-                                      setState(() { _isAttending = true; _attendees++; });
+                                      setState(() {
+                                        _isAttending = true;
+                                        _attendees++;
+                                        if (_totalAttendees != null) _totalAttendees = _totalAttendees! + 1;
+                                      });
                                       widget.onAttend();
                                     } : null,
                                     style: FilledButton.styleFrom(
@@ -1554,6 +2453,20 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                       ),
                       if (event.creator == widget.currentUsername || widget.isAdmin) ...[
                         const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton(
+                            onPressed: widget.onEdit,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: isLight ? Colors.black : Colors.white,
+                              side: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            ),
+                            child: const Text('Edit event'),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
                         SizedBox(
                           width: double.infinity,
                           child: TextButton(
@@ -1623,9 +2536,24 @@ class _MapCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final encoded = Uri.encodeComponent(location);
-    final appleMapsUri = Uri.parse('https://maps.apple.com/?q=$encoded');
-    final googleMapsUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encoded');
+    final display = _locationDisplay(location);
+    // If we have exact coordinates, use them for more accurate deep links.
+    double? lat, lon;
+    final pipe = location.indexOf('|');
+    if (pipe > 0) {
+      final coords = location.substring(0, pipe).split(',');
+      if (coords.length == 2) {
+        lat = double.tryParse(coords[0]);
+        lon = double.tryParse(coords[1]);
+      }
+    }
+    final encoded = Uri.encodeComponent(display);
+    final appleMapsUri = (lat != null && lon != null)
+        ? Uri.parse('https://maps.apple.com/?ll=$lat,$lon&q=$encoded')
+        : Uri.parse('https://maps.apple.com/?q=$encoded');
+    final googleMapsUri = (lat != null && lon != null)
+        ? Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lon')
+        : Uri.parse('https://www.google.com/maps/search/?api=1&query=$encoded');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1646,7 +2574,7 @@ class _MapCard extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                location,
+                display,
                 style: const TextStyle(color: Color(0xff8f8f8f), fontSize: 12),
               ),
             ),
@@ -1730,7 +2658,39 @@ class _EventMapViewState extends State<_EventMapView> {
 }
 
 String _buildMapHtml(String address, {String? inlineJs}) {
-  final escaped = address.replaceAll("'", "\\'");
+  // Parse "lat,lon|Display Name" format written by _selectSuggestion.
+  double? lat, lon;
+  String displayAddr = address;
+  final pipe = address.indexOf('|');
+  if (pipe > 0) {
+    displayAddr = address.substring(pipe + 1);
+    final coords = address.substring(0, pipe).split(',');
+    if (coords.length == 2) {
+      lat = double.tryParse(coords[0]);
+      lon = double.tryParse(coords[1]);
+    }
+  }
+
+  final String pinJs;
+  if (lat != null && lon != null) {
+    pinJs = '''
+      var coord = new mapkit.Coordinate($lat, $lon);
+      var pin = new mapkit.MarkerAnnotation(coord, { color: '#ff3040', calloutEnabled: false });
+      map.addAnnotation(pin);
+      map.setRegionAnimated(new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.008, 0.008)));''';
+  } else {
+    final escaped = displayAddr.replaceAll("'", "\\'");
+    pinJs = '''
+      var geocoder = new mapkit.Geocoder({ language: 'en-GB' });
+      geocoder.lookup('$escaped', function(err, data) {
+        if (err || !data.results || !data.results.length) return;
+        var coord = data.results[0].coordinate;
+        var pin = new mapkit.MarkerAnnotation(coord, { color: '#ff3040', calloutEnabled: false });
+        map.addAnnotation(pin);
+        map.setRegionAnimated(new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.008, 0.008)));
+      });''';
+  }
+
   final buf = StringBuffer();
   buf.write('''<!DOCTYPE html>
 <html>
@@ -1759,15 +2719,7 @@ String _buildMapHtml(String address, {String? inlineJs}) {
       map.isRotationEnabled = false;
       map.isPitchEnabled = false;
       try { map.pointOfInterestFilter = mapkit.PointOfInterestFilter.excludingAllCategories; } catch(_) {}
-
-      var geocoder = new mapkit.Geocoder({ language: 'en-GB' });
-      geocoder.lookup('$escaped', function(err, data) {
-        if (err || !data.results || !data.results.length) return;
-        var coord = data.results[0].coordinate;
-        var pin = new mapkit.MarkerAnnotation(coord, { color: '#ff3040', calloutEnabled: false });
-        map.addAnnotation(pin);
-        map.setRegionAnimated(new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.008, 0.008)));
-      });
+      $pinJs
     }
   </script>
 ''');
@@ -1827,6 +2779,176 @@ class _MapButton extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Friends Attending Sheet ───────────────────────────────────────────────────
+
+class _FriendsAttendingSheet extends StatefulWidget {
+  const _FriendsAttendingSheet({
+    required this.eventId,
+    required this.token,
+    required this.currentUsername,
+    required this.isLight,
+  });
+  final int eventId;
+  final String token;
+  final String currentUsername;
+  final bool isLight;
+
+  @override
+  State<_FriendsAttendingSheet> createState() => _FriendsAttendingSheetState();
+}
+
+class _FriendsAttendingSheetState extends State<_FriendsAttendingSheet> {
+  List<UserProfile>? _friends;
+  bool _error = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final results = await Future.wait([
+        http.get(eventAttendeesEndpoint(widget.eventId),
+            headers: authGetHeaders(widget.token)),
+        http.get(followingEndpoint(widget.currentUsername),
+            headers: authGetHeaders(widget.token)),
+        http.get(followersEndpoint(widget.currentUsername),
+            headers: authGetHeaders(widget.token)),
+      ]);
+
+      if (!mounted) return;
+
+      final attendeesRes = results[0];
+      final followingRes = results[1];
+      final followersRes = results[2];
+
+      Set<String> attendeeNames = {};
+      if (attendeesRes.statusCode == 200) {
+        final body = jsonDecode(attendeesRes.body);
+        final list = body is List
+            ? body
+            : ((body['attendees'] ?? body['users'] ?? body['results'] ?? const []) as List);
+        attendeeNames = list
+            .whereType<Map<String, dynamic>>()
+            .map((j) => j['username']?.toString() ?? '')
+            .where((u) => u.isNotEmpty)
+            .toSet();
+      }
+
+      List<UserProfile> parseUsers(http.Response res, List<String> keys) {
+        if (res.statusCode != 200) return [];
+        final body = jsonDecode(res.body);
+        final list = body is List ? body : (() {
+          for (final k in keys) {
+            if (body[k] != null) return body[k] as List;
+          }
+          return const [];
+        })();
+        return list.whereType<Map<String, dynamic>>().map(UserProfile.fromJson).toList();
+      }
+
+      final following = parseUsers(followingRes, ['following', 'users', 'results']);
+      final followers = parseUsers(followersRes, ['followers', 'users', 'results']);
+
+      // Union: anyone who follows you or you follow counts as a friend
+      final seen = <String>{};
+      final allFriends = <UserProfile>[];
+      for (final u in [...following, ...followers]) {
+        if (u.username != widget.currentUsername && seen.add(u.username)) {
+          allFriends.add(u);
+        }
+      }
+
+      final friends = allFriends
+          .where((u) => attendeeNames.contains(u.username))
+          .toList();
+
+      if (mounted) setState(() => _friends = friends);
+    } catch (_) {
+      if (mounted) setState(() => _error = true);
+    }
+  }
+
+  Uint8List? _decodeAvatar(String url) {
+    if (!url.startsWith('data:')) return null;
+    final comma = url.indexOf(',');
+    if (comma < 0) return null;
+    try { return base64Decode(url.substring(comma + 1)); } catch (_) { return null; }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = widget.isLight;
+    final textColor = isLight ? Colors.black : Colors.white;
+
+    Widget body;
+    if (_error) {
+      body = const Center(child: Text('Could not load.', style: TextStyle(color: Color(0xffb3b3b3))));
+    } else if (_friends == null) {
+      body = const Center(child: CircularProgressIndicator());
+    } else if (_friends!.isEmpty) {
+      body = const Center(
+        child: Text('None of your friends are going yet.',
+            style: TextStyle(color: Color(0xffb3b3b3))),
+      );
+    } else {
+      body = ListView.builder(
+        padding: const EdgeInsets.only(top: 8, bottom: 32),
+        itemCount: _friends!.length,
+        itemBuilder: (_, i) {
+          final u = _friends![i];
+          final bytes = _decodeAvatar(u.avatarUrl);
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+            leading: CircleAvatar(
+              radius: 22,
+              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+              child: bytes == null
+                  ? Text(
+                      u.username.isNotEmpty ? u.username[0].toUpperCase() : '?',
+                      style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+                    )
+                  : null,
+            ),
+            title: Text(
+              u.fullName.isNotEmpty ? u.fullName : u.username,
+              style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+            ),
+            subtitle: u.fullName.isNotEmpty
+                ? Text('@${u.username}', style: const TextStyle(color: Color(0xffb3b3b3), fontSize: 13))
+                : null,
+          );
+        },
+      );
+    }
+
+    return Column(
+      children: [
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: 12),
+          width: 40, height: 4,
+          decoration: BoxDecoration(
+            color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: Text(
+            'Friends going',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: textColor),
+          ),
+        ),
+        Divider(height: 1, color: isLight ? const Color(0xffe0e0e0) : const Color(0xff242424)),
+        Expanded(child: body),
+      ],
     );
   }
 }
