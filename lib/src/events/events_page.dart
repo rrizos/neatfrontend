@@ -33,9 +33,9 @@ String _locationDisplay(String loc) {
   return pipe >= 0 ? loc.substring(pipe + 1) : loc;
 }
 
-// Persists attending state for the app session, exactly like FeedPost.liked.
-// Survives EventsPage being popped and re-pushed without needing SharedPreferences.
-final _kSessionAttending = <int, bool>{};
+// Persists attending state for the app session, scoped per username.
+// Survives EventsPage being popped and re-pushed; isolated per account.
+final _kSessionAttending = <String, Map<int, bool>>{};
 
 class EventsPage extends StatefulWidget {
   const EventsPage({
@@ -68,6 +68,8 @@ class _EventsPageState extends State<EventsPage> {
   String _selectedCategory = 'All';
 
   String get _cacheKey => 'neat_events_cache_${widget.city}';
+  Map<int, bool> get _myAttending =>
+      _kSessionAttending.putIfAbsent(widget.currentUser.username, () => {});
 
   @override
   void initState() {
@@ -152,15 +154,31 @@ class _EventsPageState extends State<EventsPage> {
       headers: authJsonHeaders(widget.token),
       body: jsonEncode({...result, 'city': widget.city}),
     );
-    if (res.statusCode == 201) {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
       await _load();
+      if (mounted) {
+        final isOfficial = (result['eventType'] as String?) == 'official';
+        setState(() => _tab = isOfficial ? 0 : 1);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Event published!'), duration: Duration(seconds: 3)),
+        );
+      }
+    } else if (mounted) {
+      final body = res.body.trim();
+      final msg = body.length > 120 ? body.substring(0, 120) : body;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not create event (${res.statusCode}): $msg'),
+          duration: const Duration(seconds: 8),
+        ),
+      );
     }
   }
 
   // Returns a copy of [e] with the session-attending override applied.
   // The session map survives EventsPage being popped/re-pushed (like FeedPost.liked).
   EventItem _effective(EventItem e) {
-    final ia = _kSessionAttending[e.id];
+    final ia = _myAttending[e.id];
     if (ia == null) return e;
     return EventItem(
       id: e.id, city: e.city, eventType: e.eventType,
@@ -175,10 +193,10 @@ class _EventsPageState extends State<EventsPage> {
   }
 
   Future<void> _attend(EventItem event) async {
-    final cur = _kSessionAttending[event.id] ?? event.isAttending;
+    final cur = _myAttending[event.id] ?? event.isAttending;
     final next = !cur;
     setState(() {
-      _kSessionAttending[event.id] = next;
+      _myAttending[event.id] = next;
       _events = _events.map((e) {
         if (e.id != event.id) return e;
         return EventItem(
@@ -196,7 +214,7 @@ class _EventsPageState extends State<EventsPage> {
     final res = await http.post(eventAttendEndpoint(event.id), headers: authGetHeaders(widget.token));
     if (res.statusCode < 200 || res.statusCode >= 300) {
       setState(() {
-        _kSessionAttending[event.id] = cur;
+        _myAttending[event.id] = cur;
         _events = _events.map((e) {
           if (e.id != event.id) return e;
           return EventItem(
@@ -609,7 +627,21 @@ String _formatEventDate(String date) {
   if (d == null) return date;
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  return '${weekdays[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}, ${d.year}';
+  final datePart = '${weekdays[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}, ${d.year}';
+  if (d.hour != 0 || d.minute != 0) {
+    final h = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
+    final m = d.minute.toString().padLeft(2, '0');
+    final amPm = d.hour >= 12 ? 'PM' : 'AM';
+    return '$datePart at $h:$m $amPm';
+  }
+  return datePart;
+}
+
+String _formatTime(TimeOfDay t) {
+  final h = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
+  final m = t.minute.toString().padLeft(2, '0');
+  final amPm = t.period == DayPeriod.am ? 'AM' : 'PM';
+  return '$h:$m $amPm';
 }
 
 const _kEventCategories = [
@@ -1091,8 +1123,12 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   bool _showPhotoError = false;
   bool _showTicketsUrlError = false;
   bool _showLocationError = false;
+  bool _showTitleError = false;
+  bool _showDescError = false;
   DateTime? _date;
+  TimeOfDay? _time;
   bool _showDateError = false;
+  bool _showTimeError = false;
 
   List<_PlaceSuggestion> _suggestions = [];
   bool _loadingSuggestions = false;
@@ -1227,9 +1263,20 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 const Spacer(),
                 TextButton(
                   onPressed: () {
-                    if (_title.text.trim().isEmpty || _desc.text.trim().isEmpty) return;
+                    if (_title.text.trim().isEmpty) {
+                      setState(() => _showTitleError = true);
+                      return;
+                    }
+                    if (_desc.text.trim().isEmpty) {
+                      setState(() => _showDescError = true);
+                      return;
+                    }
                     if (_date == null) {
                       setState(() => _showDateError = true);
+                      return;
+                    }
+                    if (_time == null) {
+                      setState(() => _showTimeError = true);
                       return;
                     }
                     if (_official && _imageUrl.isEmpty) {
@@ -1267,7 +1314,8 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
             TextField(
               controller: _title,
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
-              decoration: _dec('Title', isLight),
+              decoration: _dec('Title', isLight, error: _showTitleError),
+              onChanged: (_) { if (_showTitleError) setState(() => _showTitleError = false); },
             ),
             const SizedBox(height: 10),
             TextField(
@@ -1275,7 +1323,8 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
               maxLines: 4,
               maxLength: 500,
-              decoration: _dec('Description', isLight),
+              decoration: _dec('Description', isLight, error: _showDescError),
+              onChanged: (_) { if (_showDescError) setState(() => _showDescError = false); },
             ),
             const SizedBox(height: 10),
             Row(
@@ -1500,6 +1549,48 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               ),
             ),
             const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () async {
+                final picked = await showTimePicker(
+                  context: context,
+                  initialTime: _time ?? TimeOfDay.now(),
+                );
+                if (picked != null) setState(() { _time = picked; _showTimeError = false; });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: isLight ? Colors.white : const Color(0xff1a1a1b),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _showTimeError
+                        ? const Color(0xfff66c6c)
+                        : (isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.access_time_rounded, size: 16,
+                        color: isLight ? Colors.black : Colors.white),
+                    const SizedBox(width: 10),
+                    Text(
+                      _time == null ? 'Choose time' : _formatTime(_time!),
+                      style: TextStyle(
+                        color: _time == null
+                            ? (isLight ? const Color(0xff616161) : const Color(0xff8f8f8f))
+                            : (isLight ? Colors.black : Colors.white),
+                      ),
+                    ),
+                    if (_showTimeError) ...[
+                      const Spacer(),
+                      const Text('Required',
+                          style: TextStyle(color: Color(0xfff66c6c), fontSize: 12, fontWeight: FontWeight.w600)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
             if (_imageUrl.isNotEmpty)
               ClipRRect(
                 borderRadius: BorderRadius.circular(18),
@@ -1586,6 +1677,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
   bool _showTicketsUrlError = false;
   bool _showLocationError = false;
   DateTime? _date;
+  TimeOfDay? _time;
 
   List<_PlaceSuggestion> _suggestions = [];
   bool _loadingSuggestions = false;
@@ -1618,7 +1710,12 @@ class _EditEventSheetState extends State<_EditEventSheet> {
     _imageUrl = e.imageUrl;
     if (e.date.isNotEmpty) {
       final d = DateTime.tryParse(e.date);
-      if (d != null) _date = DateTime(d.year, d.month, d.day);
+      if (d != null) {
+        _date = DateTime(d.year, d.month, d.day);
+        if (d.hour != 0 || d.minute != 0) {
+          _time = TimeOfDay(hour: d.hour, minute: d.minute);
+        }
+      }
     }
     _locationFocus.addListener(() {
       if (!_locationFocus.hasFocus && mounted) {
@@ -2001,6 +2098,41 @@ class _EditEventSheetState extends State<_EditEventSheet> {
               ),
             ),
             const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () async {
+                final picked = await showTimePicker(
+                  context: context,
+                  initialTime: _time ?? TimeOfDay.now(),
+                );
+                if (picked != null) setState(() => _time = picked);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: isLight ? Colors.white : const Color(0xff1a1a1b),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.access_time_rounded, size: 16,
+                        color: isLight ? Colors.black : Colors.white),
+                    const SizedBox(width: 10),
+                    Text(
+                      _time == null ? 'Choose time (optional)' : _formatTime(_time!),
+                      style: TextStyle(
+                        color: _time == null
+                            ? (isLight ? const Color(0xff616161) : const Color(0xff8f8f8f))
+                            : (isLight ? Colors.black : Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
             if (_imageUrl.isNotEmpty)
               ClipRRect(
                 borderRadius: BorderRadius.circular(18),
@@ -2186,29 +2318,6 @@ class _EventDetailSheet extends StatefulWidget {
 class _EventDetailSheetState extends State<_EventDetailSheet> {
   late bool _isAttending = widget.event.isAttending;
   late int _attendees = widget.event.attendees;
-  int? _totalAttendees; // real total loaded from the attendees endpoint
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchTotal();
-  }
-
-  Future<void> _fetchTotal() async {
-    try {
-      final res = await http.get(
-        eventAttendeesEndpoint(widget.event.id),
-        headers: authGetHeaders(widget.token),
-      );
-      if (!mounted || res.statusCode != 200) return;
-      final body = jsonDecode(res.body);
-      final list = body is List
-          ? body
-          : ((body['attendees'] ?? body['users'] ?? body['results'] ?? const []) as List);
-      final count = list.whereType<Map<String, dynamic>>().length;
-      if (mounted) setState(() => _totalAttendees = count);
-    } catch (_) {}
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -2334,7 +2443,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                       Row(
                         children: [
                           Text(
-                            '${_totalAttendees ?? _attendees} people attending',
+                            '$_attendees people attending',
                             style: TextStyle(
                               color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
                               fontSize: 13,
@@ -2419,7 +2528,6 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                       setState(() {
                                         _isAttending = false;
                                         _attendees--;
-                                        if (_totalAttendees != null) _totalAttendees = _totalAttendees! - 1;
                                       });
                                       widget.onAttend();
                                     } : null,
@@ -2436,7 +2544,6 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                       setState(() {
                                         _isAttending = true;
                                         _attendees++;
-                                        if (_totalAttendees != null) _totalAttendees = _totalAttendees! + 1;
                                       });
                                       widget.onAttend();
                                     } : null,
