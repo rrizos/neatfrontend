@@ -107,6 +107,8 @@ Uri eventDeleteEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/delete/');
 Uri eventReportEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/report/');
+Uri eventCommentsEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/$id/comments/');
 Uri get inboxEndpoint => Uri.parse('$apiBaseUrl/api/messages/inbox/');
 Uri get presenceEndpoint => Uri.parse('$apiBaseUrl/api/messages/presence/');
 Uri get startConversationEndpoint =>

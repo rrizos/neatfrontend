@@ -15,6 +15,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
+import '../core/post_card.dart' show decodeAvatarUrl;
 import '../core/report_post_sheet.dart';
 
 const _kMapToken =
@@ -36,6 +37,14 @@ String _locationDisplay(String loc) {
 // Persists attending state for the app session, scoped per username.
 // Survives EventsPage being popped and re-pushed; isolated per account.
 final _kSessionAttending = <String, Map<int, bool>>{};
+
+String _timeAgo(DateTime dt) {
+  final d = DateTime.now().difference(dt);
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+  if (d.inHours < 24) return '${d.inHours}h ago';
+  return '${d.inDays}d ago';
+}
 
 class EventsPage extends StatefulWidget {
   const EventsPage({
@@ -326,6 +335,7 @@ class _EventsPageState extends State<EventsPage> {
         event: event,
         token: widget.token,
         currentUsername: widget.currentUser.username,
+        currentUserAvatar: widget.currentUser.avatarUrl,
         onAttend: () => _attend(event),
         onDelete: () {
           Navigator.of(context).pop();
@@ -2293,6 +2303,7 @@ class _EventDetailSheet extends StatefulWidget {
     required this.event,
     required this.token,
     required this.currentUsername,
+    required this.currentUserAvatar,
     required this.onAttend,
     required this.onDelete,
     required this.onReport,
@@ -2304,6 +2315,7 @@ class _EventDetailSheet extends StatefulWidget {
   final EventItem event;
   final String token;
   final String currentUsername;
+  final String currentUserAvatar;
   final VoidCallback onAttend;
   final VoidCallback onDelete;
   final VoidCallback onReport;
@@ -2319,14 +2331,319 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
   late bool _isAttending = widget.event.isAttending;
   late int _attendees = widget.event.attendees;
 
+  List<FeedComment> _comments = [];
+  bool _loadingComments = true;
+  final _liked = <int, bool>{};
+  final _likes = <int, int>{};
+  FeedComment? _replyingTo;
+  String _imageUrl = '';
+  bool _sending = false;
+  bool _picking = false;
+  bool _showInputBar = false;
+  final _commentCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+  final _picker = ImagePicker();
+  final _commentSectionKey = GlobalKey();
+  final _scrollViewKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadComments();
+    _scrollCtrl.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.removeListener(_onScroll);
+    _commentCtrl.dispose();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final commentBox = _commentSectionKey.currentContext?.findRenderObject() as RenderBox?;
+    final scrollBox = _scrollViewKey.currentContext?.findRenderObject() as RenderBox?;
+    if (commentBox == null || scrollBox == null) return;
+    final commentY = commentBox.localToGlobal(Offset.zero).dy;
+    final scrollBottom = scrollBox.localToGlobal(Offset.zero).dy + scrollBox.size.height;
+    final show = commentY < scrollBottom;
+    if (show != _showInputBar) setState(() => _showInputBar = show);
+  }
+
+  ImageProvider? _avatarImage(String url) {
+    if (url.isEmpty) return null;
+    if (url.startsWith('data:')) {
+      final bytes = decodeAvatarUrl(url);
+      return bytes != null ? MemoryImage(bytes) : null;
+    }
+    String resolved = url;
+    if (url.startsWith('/')) {
+      resolved = kIsWeb ? '$webBaseUrl$url' : '$apiBaseUrl$url';
+    } else if (kIsWeb && url.startsWith('http://')) {
+      final uri = Uri.tryParse(url);
+      if (uri != null) resolved = '$webBaseUrl${uri.path}';
+    }
+    return CachedNetworkImageProvider(resolved);
+  }
+
+  void _seedMaps(List<FeedComment> list) {
+    for (final c in list) {
+      _liked[c.id] = c.liked;
+      _likes[c.id] = c.likes;
+      _seedMaps(c.replies);
+    }
+  }
+
+  List<FeedComment> _buildTree(List<FeedComment> flat) {
+    if (flat.any((c) => c.replies.isNotEmpty)) {
+      return flat.where((c) => c.parentId == null).toList();
+    }
+    final map = {for (final c in flat) c.id: c};
+    final roots = <FeedComment>[];
+    for (final c in flat) {
+      if (c.parentId != null && map.containsKey(c.parentId)) {
+        map[c.parentId!]!.replies.add(c);
+      } else {
+        roots.add(c);
+      }
+    }
+    return roots;
+  }
+
+  Future<void> _loadComments() async {
+    try {
+      final res = await http.get(
+        eventCommentsEndpoint(widget.event.id),
+        headers: authGetHeaders(widget.token),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        final rawList = body is List
+            ? body.whereType<Map<String, dynamic>>().toList()
+            : ((body['comments'] ?? body['results']) as List? ?? [])
+                .whereType<Map<String, dynamic>>()
+                .toList();
+        final flat = rawList.map(FeedComment.fromJson).toList();
+        final comments = _buildTree(flat);
+        setState(() { _comments = comments; _loadingComments = false; });
+        _seedMaps(comments);
+      } else {
+        setState(() => _loadingComments = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingComments = false);
+    }
+  }
+
+  Future<void> _pickImage() async {
+    setState(() => _picking = true);
+    try {
+      final picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1200,
+      );
+      if (picked == null || !mounted) return;
+      final bytes = await picked.readAsBytes();
+      if (!mounted) return;
+      final mime = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+      setState(() => _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}');
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _send() async {
+    final text = _commentCtrl.text.trim();
+    if ((text.isEmpty && _imageUrl.isEmpty) || _sending) return;
+    setState(() => _sending = true);
+    try {
+      final res = await http.post(
+        eventCommentsEndpoint(widget.event.id),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({
+          'text': text,
+          if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
+          if (_replyingTo != null) 'parentId': _replyingTo!.id,
+        }),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        _commentCtrl.clear();
+        setState(() { _replyingTo = null; _imageUrl = ''; });
+        await _loadComments();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollCtrl.hasClients) {
+            _scrollCtrl.animateTo(
+              _scrollCtrl.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _toggleLike(FeedComment comment) async {
+    final was = _liked[comment.id] ?? comment.liked;
+    final next = (_likes[comment.id] ?? comment.likes) + (was ? -1 : 1);
+    setState(() {
+      _liked[comment.id] = !was;
+      _likes[comment.id] = next;
+    });
+    try {
+      await http.post(
+        commentLikeEndpoint(comment.id),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'liked': !was}),
+      );
+      comment.liked = !was;
+      comment.likes = next;
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _liked[comment.id] = was;
+          _likes[comment.id] = (_likes[comment.id] ?? comment.likes) + (was ? 1 : -1);
+        });
+      }
+    }
+  }
+
+  Widget _tile(FeedComment c, bool isReply, bool isLight) {
+    final avatar = _avatarImage(c.avatarUrl);
+    final imgBytes = c.imageUrl.isNotEmpty ? decodeAvatarUrl(c.imageUrl) : null;
+    final isLiked = _liked[c.id] ?? c.liked;
+    final likeCount = _likes[c.id] ?? c.likes;
+    DateTime? created;
+    try { created = DateTime.parse(c.createdAt); } catch (_) {}
+    return Padding(
+      padding: EdgeInsets.fromLTRB(isReply ? 52 : 16, 10, 16, 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: isReply ? 14 : 18,
+            backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+            foregroundImage: avatar,
+            child: avatar == null
+                ? Text(
+                    initialFor(c.author),
+                    style: TextStyle(
+                      color: isLight ? const Color(0xff444444) : Colors.white,
+                      fontSize: isReply ? 9 : 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                RichText(
+                  text: TextSpan(children: [
+                    TextSpan(
+                      text: '${c.author} ',
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: isReply ? 13.5 : 15,
+                        height: 1.5,
+                      ),
+                    ),
+                    if (c.text.isNotEmpty)
+                      TextSpan(
+                        text: c.text,
+                        style: TextStyle(
+                          color: isLight ? Colors.black : Colors.white,
+                          fontWeight: FontWeight.w400,
+                          fontSize: isReply ? 13.5 : 15,
+                          height: 1.5,
+                        ),
+                      ),
+                  ]),
+                ),
+                if (imgBytes != null) ...[
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.memory(imgBytes, width: double.infinity, fit: BoxFit.cover),
+                  ),
+                ],
+                const SizedBox(height: 6),
+                Row(children: [
+                  if (created != null)
+                    Text(
+                      _timeAgo(created),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                      ),
+                    ),
+                  const SizedBox(width: 14),
+                  GestureDetector(
+                    onTap: () => setState(() => _replyingTo = c),
+                    child: Text(
+                      'Reply',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                      ),
+                    ),
+                  ),
+                ]),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => _toggleLike(c),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                  size: 18,
+                  color: isLiked
+                      ? const Color(0xfff66c6c)
+                      : (isLight ? const Color(0xffa0a0a0) : const Color(0xff6a6a6a)),
+                ),
+                if (likeCount > 0)
+                  Text(
+                    '$likeCount',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final event = widget.event;
     final official = event.eventType == 'official';
+    final dividerColor = isLight ? const Color(0xfff0f0f0) : const Color(0xff1e1e1e);
+    final mutedColor = isLight ? const Color(0xff8f8f8f) : const Color(0xff6f6f6f);
+    final userAvatar = _avatarImage(widget.currentUserAvatar);
+    final previewBytes = _imageUrl.isNotEmpty ? decodeAvatarUrl(_imageUrl) : null;
 
     return Column(
       children: [
+        // ── drag handle ──────────────────────────────────────────────
         Container(
           margin: const EdgeInsets.symmetric(vertical: 12),
           width: 40,
@@ -2336,11 +2653,16 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
             borderRadius: BorderRadius.circular(2),
           ),
         ),
+
+        // ── scrollable content ───────────────────────────────────────
         Expanded(
           child: SingleChildScrollView(
+            key: _scrollViewKey,
+            controller: _scrollCtrl,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // hero image
                 if (event.imageUrl.isNotEmpty)
                   Stack(
                     children: [
@@ -2377,8 +2699,10 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                       ),
                     ],
                   ),
+
+                // event details
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -2444,10 +2768,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                         children: [
                           Text(
                             '$_attendees people attending',
-                            style: TextStyle(
-                              color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
-                              fontSize: 13,
-                            ),
+                            style: TextStyle(color: mutedColor, fontSize: 13),
                           ),
                           const Spacer(),
                           GestureDetector(
@@ -2499,14 +2820,13 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                         ),
                       ],
                       const SizedBox(height: 24),
+                      // attend / tickets buttons
                       Row(
                         children: [
                           if (official && event.hasTickets) ...[
                             Expanded(
                               child: TextButton(
-                                onPressed: event.ticketsUrl.isEmpty
-                                    ? null
-                                    : () => _openUrl(event.ticketsUrl),
+                                onPressed: event.ticketsUrl.isEmpty ? null : () => _openUrl(event.ticketsUrl),
                                 style: TextButton.styleFrom(
                                   backgroundColor: isLight ? const Color(0xffeef1f5) : const Color(0xff1d1d1d),
                                   foregroundColor: isLight ? Colors.black : Colors.white,
@@ -2525,10 +2845,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                             child: _isAttending
                                 ? OutlinedButton(
                                     onPressed: widget.attendEnabled ? () {
-                                      setState(() {
-                                        _isAttending = false;
-                                        _attendees--;
-                                      });
+                                      setState(() { _isAttending = false; _attendees--; });
                                       widget.onAttend();
                                     } : null,
                                     style: OutlinedButton.styleFrom(
@@ -2541,10 +2858,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                   )
                                 : FilledButton(
                                     onPressed: widget.attendEnabled ? () {
-                                      setState(() {
-                                        _isAttending = true;
-                                        _attendees++;
-                                      });
+                                      setState(() { _isAttending = true; _attendees++; });
                                       widget.onAttend();
                                     } : null,
                                     style: FilledButton.styleFrom(
@@ -2558,6 +2872,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                           ),
                         ],
                       ),
+                      // edit / delete / report
                       if (event.creator == widget.currentUsername || widget.isAdmin) ...[
                         const SizedBox(height: 10),
                         SizedBox(
@@ -2602,8 +2917,213 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                     ],
                   ),
                 ),
+
+                // ── comments section ─────────────────────────────────
+                Divider(key: _commentSectionKey, color: dividerColor, thickness: 1, height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Text(
+                    _loadingComments
+                        ? 'Comments'
+                        : 'Comments${_comments.isEmpty ? '' : ' (${_comments.length})'}',
+                    style: TextStyle(
+                      color: isLight ? Colors.black : Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (_loadingComments)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                else if (_comments.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                    child: Text(
+                      'No comments yet.\nBe the first!',
+                      style: TextStyle(
+                        color: isLight ? const Color(0xff8b95a3) : const Color(0xffb3b3b3),
+                        height: 1.6,
+                      ),
+                    ),
+                  )
+                else
+                  Column(
+                    children: [
+                      for (final c in _comments) ...[
+                        _tile(c, false, isLight),
+                        for (final r in c.replies)
+                          _tile(r, true, isLight),
+                        const SizedBox(height: 4),
+                      ],
+                      const SizedBox(height: 12),
+                    ],
+                  ),
               ],
             ),
+          ),
+        ),
+
+        // ── comment input bar ────────────────────────────────────────
+        if (_showInputBar)
+        Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+              if (previewBytes != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: SizedBox(
+                    height: 72,
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.memory(previewBytes, height: 72, fit: BoxFit.cover),
+                        ),
+                        Positioned(
+                          top: 4, right: 4,
+                          child: GestureDetector(
+                            onTap: () => setState(() => _imageUrl = ''),
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: const BoxDecoration(
+                                color: Colors.black54,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close, size: 14, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              if (_replyingTo != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.reply_rounded, size: 16,
+                          color: isLight ? const Color(0xff536471) : const Color(0xff71767b)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Replying to @${_replyingTo!.author}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => setState(() => _replyingTo = null),
+                        child: Icon(Icons.close, size: 16,
+                            color: isLight ? const Color(0xff536471) : const Color(0xff71767b)),
+                      ),
+                    ],
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+                      foregroundImage: userAvatar,
+                      child: userAvatar == null
+                          ? Text(
+                              initialFor(widget.currentUsername),
+                              style: TextStyle(
+                                color: isLight ? const Color(0xff444444) : Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: _picking ? null : _pickImage,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(
+                          Icons.photo_outlined,
+                          size: 24,
+                          color: _picking
+                              ? (isLight ? const Color(0xffd0d0d0) : const Color(0xff444444))
+                              : (isLight ? const Color(0xff536471) : const Color(0xff71767b)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: _commentCtrl,
+                        builder: (context, value, _) {
+                          final canSend = value.text.trim().isNotEmpty || _imageUrl.isNotEmpty;
+                          return TextField(
+                            controller: _commentCtrl,
+                            style: TextStyle(
+                              color: isLight ? Colors.black : Colors.white,
+                              fontSize: 14,
+                            ),
+                            cursorColor: isLight ? Colors.black : Colors.white,
+                            decoration: InputDecoration(
+                              hintText: _replyingTo != null
+                                  ? 'Reply to @${_replyingTo!.author}...'
+                                  : 'Add a comment...',
+                              hintStyle: TextStyle(
+                                color: isLight ? const Color(0xff8b95a3) : const Color(0xff9a9a9a),
+                                fontSize: 14,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              filled: true,
+                              fillColor: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
+                              ),
+                              suffixIcon: canSend
+                                  ? _sending
+                                      ? const Padding(
+                                          padding: EdgeInsets.all(10),
+                                          child: SizedBox(
+                                            width: 18, height: 18,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          ),
+                                        )
+                                      : IconButton(
+                                          onPressed: _send,
+                                          icon: const Icon(
+                                            Icons.send_rounded,
+                                            color: Color(0xff4f8cff),
+                                            size: 20,
+                                          ),
+                                        )
+                                  : null,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ],
