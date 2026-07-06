@@ -1086,7 +1086,7 @@ class _HomePageState extends State<HomePage> {
                                           ),
                                           cursorColor: dimColor,
                                           decoration: InputDecoration(
-                                            hintText: "What's happening?",
+                                            hintText: 'Δημοσιεύστε ενα neet.',
                                             hintStyle: TextStyle(
                                               color: isLight
                                                   ? const Color(0xff616161)
