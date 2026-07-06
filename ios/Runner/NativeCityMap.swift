@@ -38,7 +38,8 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
 
   init(frame: CGRect, args: Any?, messenger: FlutterBinaryMessenger) {
     super.init()
-    configureMap(frame: frame)
+    let isDark = (args as? [String: Any])?["isDark"] as? Bool ?? true
+    configureMap(frame: frame, isDark: isDark)
     wireChannel(messenger: messenger)
     loadCities(from: args)
   }
@@ -90,7 +91,7 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     map.setRegion(overview, animated: true)
   }
 
-  private func configureMap(frame: CGRect) {
+  private func configureMap(frame: CGRect, isDark: Bool) {
     map.frame = frame
     map.delegate = self
     map.isRotateEnabled = false
@@ -99,7 +100,7 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     map.showsScale = false
     map.showsTraffic = false
     map.pointOfInterestFilter = .excludingAll
-    map.overrideUserInterfaceStyle = .dark
+    map.overrideUserInterfaceStyle = isDark ? .dark : .light
     map.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier: "pin")
     map.setRegion(overview, animated: false)
 
@@ -128,6 +129,9 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     )
     channel?.setMethodCallHandler { [weak self] call, result in
       if call.method == "zoomOut" { self?.zoomOut() }
+      if call.method == "updateColorScheme", let isDark = call.arguments as? Bool {
+        self?.map.overrideUserInterfaceStyle = isDark ? .dark : .light
+      }
       result(nil)
     }
   }

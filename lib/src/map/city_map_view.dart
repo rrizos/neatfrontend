@@ -56,6 +56,8 @@ class _CityMapViewState extends State<CityMapView> {
 
   // ── UI state ──────────────────────────────────────────────────────────────
   GreeceCity? _activeCity;
+  Brightness _brightness = Brightness.dark;
+  bool _androidInitDone = false;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -65,7 +67,26 @@ class _CityMapViewState extends State<CityMapView> {
   void initState() {
     super.initState();
     _iosChannel.setMethodCallHandler(_onNativeCall);
-    if (!kIsWeb && Platform.isAndroid) _initAndroid();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final newBrightness = Theme.of(context).brightness;
+    final changed = newBrightness != _brightness;
+    _brightness = newBrightness;
+    if (kIsWeb) return;
+    if (Platform.isAndroid) {
+      if (!_androidInitDone) {
+        _androidInitDone = true;
+        _initAndroid();
+      } else if (changed && _webCtrl != null) {
+        _buildWebView();
+        setState(() {});
+      }
+    } else if (Platform.isIOS && changed) {
+      _iosChannel.invokeMethod('updateColorScheme', _brightness == Brightness.dark);
+    }
   }
 
   @override
@@ -115,9 +136,10 @@ class _CityMapViewState extends State<CityMapView> {
           .toList(),
     );
 
+    final isDark = _brightness == Brightness.dark;
     _webCtrl = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xff0a0a0a))
+      ..setBackgroundColor(isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7))
       ..setNavigationDelegate(NavigationDelegate(
         onWebResourceError: (e) => debugPrint('[map] ${e.description}'),
       ))
@@ -125,7 +147,7 @@ class _CityMapViewState extends State<CityMapView> {
         if (mounted) _onCityPinTapped(msg.message);
       })
       ..loadHtmlString(
-        _mapHtml(citiesJson, inlineJs: _cachedMapkitJs),
+        _mapHtml(citiesJson, inlineJs: _cachedMapkitJs, isDark: isDark),
         baseUrl: 'https://netnest.net',
       );
   }
@@ -188,7 +210,7 @@ class _CityMapViewState extends State<CityMapView> {
     final city = _activeCity;
     return Stack(
       children: [
-        Positioned.fill(child: _MapLayer(webCtrl: _webCtrl, homeCity: widget.homeCity)),
+        Positioned.fill(child: _MapLayer(webCtrl: _webCtrl, homeCity: widget.homeCity, isDark: _brightness == Brightness.dark)),
 
         if (city != null)
           Positioned.fill(
@@ -226,7 +248,7 @@ class _CityMapViewState extends State<CityMapView> {
 // The CDN URL (cdn.apple-mapkit.com) is only hit if the asset load fails.
 // ─────────────────────────────────────────────────────────────────────────────
 
-String _mapHtml(String citiesJson, {String? inlineJs}) {
+String _mapHtml(String citiesJson, {String? inlineJs, required bool isDark}) {
   // Use StringBuffer so the (potentially large) mapkit.js content is appended
   // without being inside a Dart string literal — avoids any ''' termination
   // risk in minified JS and keeps the Dart source clean.
@@ -238,7 +260,7 @@ String _mapHtml(String citiesJson, {String? inlineJs}) {
   <meta charset="utf-8">
   <meta name="viewport" content="initial-scale=1.0,width=device-width">
   <style>
-    html, body, #map { margin:0; padding:0; width:100%; height:100%; background:#0a0a0a; overflow:hidden; }
+    html, body, #map { margin:0; padding:0; width:100%; height:100%; background:${isDark ? '#0a0a0a' : '#f2f2f7'}; overflow:hidden; }
   </style>
 </head>
 <body>
@@ -256,7 +278,7 @@ String _mapHtml(String citiesJson, {String? inlineJs}) {
       homeSpan = new mapkit.CoordinateSpan(7.5, 7.5);
 
       map = new mapkit.Map('map', {
-        colorScheme:              mapkit.Map.ColorSchemes.Dark,
+        colorScheme:              mapkit.Map.ColorSchemes.${isDark ? 'Dark' : 'Light'},
         showsCompass:             mapkit.FeatureVisibility.Hidden,
         showsScale:               mapkit.FeatureVisibility.Hidden,
         showsMapTypeControl:      false,
@@ -362,9 +384,10 @@ String _mapHtml(String citiesJson, {String? inlineJs}) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MapLayer extends StatelessWidget {
-  const _MapLayer({this.webCtrl, required this.homeCity});
+  const _MapLayer({this.webCtrl, required this.homeCity, required this.isDark});
   final WebViewController? webCtrl;
   final String homeCity;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
@@ -393,6 +416,7 @@ class _MapLayer extends StatelessWidget {
                     'longitude': c.longitude,
                   })
               .toList(),
+          'isDark': isDark,
         },
         creationParamsCodec: const StandardMessageCodec(),
       );
@@ -400,7 +424,7 @@ class _MapLayer extends StatelessWidget {
 
     // Android — null while mapkit.js is being pre-fetched
     final ctrl = webCtrl;
-    if (ctrl == null) return const ColoredBox(color: Color(0xff0a0a0a));
+    if (ctrl == null) return ColoredBox(color: isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7));
     return WebViewWidget(controller: ctrl);
   }
 }

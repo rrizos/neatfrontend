@@ -371,6 +371,7 @@ class _EventsPageState extends State<EventsPage> {
   }
 
   Widget _buildSection(bool isLight, String title, List<EventItem> events) {
+    final hasImages = events.any((e) => e.imageUrl.isNotEmpty);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -386,7 +387,7 @@ class _EventsPageState extends State<EventsPage> {
           ),
         ),
         SizedBox(
-          height: 430,
+          height: hasImages ? 430.0 : 280.0,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(14, 0, 0, 0),
