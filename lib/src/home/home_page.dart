@@ -59,8 +59,8 @@ class _HomePageState extends State<HomePage> {
   final Set<String> _followingAuthors = {};
   final List<UserProfile> _followingProfiles = [];
   final Set<String> _followerAuthors = {};
-  final ScrollController _feedScroll = ScrollController();
-  final Map<int, double> _tabScrollOffsets = {0: 0.0, 1: 0.0};
+  final _cityScroll = ScrollController();
+  final _followingScroll = ScrollController();
   int _nav = 0;
   int _selectedTab = 0;
   final Set<int> _visitedTabs = <int>{0};
@@ -116,7 +116,8 @@ class _HomePageState extends State<HomePage> {
     if (_isIOS26) _kTabChannel.invokeMethod('hideTabBar');
     _kTabChannel.setMethodCallHandler(null);
     _compose.dispose();
-    _feedScroll.dispose();
+    _cityScroll.dispose();
+    _followingScroll.dispose();
     super.dispose();
   }
 
@@ -1338,17 +1339,131 @@ class _HomePageState extends State<HomePage> {
     ).whenComplete(_showNativeBar);
   }
 
+  Widget _buildFeedScrollView(
+    List<FeedPost> posts,
+    ScrollController scroll,
+    bool isLight,
+  ) {
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: CustomScrollView(
+        controller: scroll,
+        slivers: [
+          const SliverToBoxAdapter(child: SizedBox.shrink()),
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _TabsHeader(
+              selectedTab: _selectedTab,
+              city: _activeCity ?? widget.session.user.city,
+              showFollowing: _activeCity == null,
+              scrollController: scroll,
+              onTabChanged: (value) => setState(() => _selectedTab = value),
+            ),
+          ),
+          if (posts.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: Text(
+                  'No posts yet.',
+                  style: TextStyle(
+                    color: isLight
+                        ? const Color(0xff888888)
+                        : const Color(0xffe8e8e8),
+                  ),
+                ),
+              ),
+            )
+          else
+            SliverList.builder(
+              itemCount: posts.length,
+              itemBuilder: (context, index) {
+                final post = posts[index];
+                return FeedPostCard(
+                  key: ValueKey(post.id),
+                  post: post,
+                  token: widget.session.token,
+                  currentUser: widget.session.user,
+                  followingAuthors: _followingAuthors,
+                  onFollowUser: _activeCity == null ? _follow : null,
+                  onUnfollowUser: _activeCity == null ? _unfollow : null,
+                  likingEnabled: _activeCity == null,
+                  onLike: () => _likePost(post),
+                  onSave: () => _savePost(post),
+                  onShare: () {
+                    _hideNativeBar();
+                    showShareSheet(
+                      context: context,
+                      post: post,
+                      token: widget.session.token,
+                      currentUser: widget.session.user,
+                      onLogout: widget.onLogout,
+                    ).whenComplete(_showNativeBar);
+                  },
+                  onMore: () => _openSheet(
+                    title: post.author,
+                    child: Column(
+                      children: [
+                        if (post.author == widget.session.user.username || widget.session.user.isAdmin)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(
+                              Icons.delete_outline,
+                              color: Color(0xfff66c6c),
+                            ),
+                            title: const Text('Delete post'),
+                            onTap: () async {
+                              Navigator.of(context).pop();
+                              await _deletePost(post);
+                            },
+                          ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.flag_outlined),
+                          title: const Text('Report post'),
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            showReportPostSheet(
+                              context,
+                              postId: post.id,
+                              token: widget.session.token,
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  onComment: () => _openComments(post),
+                  onProfileTap: () => _pushProfileRoute(post.author),
+                  onOpenUserProfile: _pushProfileRoute,
+                  onFollow: (post.author != widget.session.user.username && _activeCity == null)
+                      ? () => _follow(post.author)
+                      : null,
+                  onUnfollow: (post.author != widget.session.user.username && _activeCity == null)
+                      ? () => _unfollow(post.author)
+                      : null,
+                  isFollowing: _followingAuthors.contains(post.author),
+                  followerAuthors: _followerAuthors,
+                  onHideNavBar: _hideNativeBar,
+                  onShowNavBar: _showNativeBar,
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final filtered = _selectedTab == 1
-        ? (_followingAuthors.isEmpty
-            ? const <FeedPost>[]
-            : _posts.where((post) => _followingAuthors.contains(post.author)).toList())
-        : _posts;
+    final cityPosts = _posts;
+    final followingPosts = _followingAuthors.isEmpty
+        ? const <FeedPost>[]
+        : _posts.where((p) => _followingAuthors.contains(p.author)).toList();
 
     final isLight = Theme.of(context).brightness == Brightness.light;
 
@@ -1411,124 +1526,13 @@ class _HomePageState extends State<HomePage> {
                     child: IndexedStack(
                       index: _nav,
                       children: [
-                        // 0: Feed — always mounted so scroll state survives tab switches
-                        RefreshIndicator(
-                          onRefresh: _load,
-                          child: CustomScrollView(
-                            controller: _feedScroll,
-                            slivers: [
-                              const SliverToBoxAdapter(child: SizedBox.shrink()),
-                              SliverPersistentHeader(
-                                pinned: true,
-                                delegate: _TabsHeader(
-                                  selectedTab: _selectedTab,
-                                  city: _activeCity ?? widget.session.user.city,
-                                  showFollowing: _activeCity == null,
-                                  scrollController: _feedScroll,
-                                  onTabChanged: (value) {
-                                    if (_feedScroll.hasClients) {
-                                      _tabScrollOffsets[_selectedTab] = _feedScroll.offset;
-                                    }
-                                    setState(() => _selectedTab = value);
-                                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                                      if (_feedScroll.hasClients) {
-                                        _feedScroll.jumpTo(_tabScrollOffsets[value] ?? 0.0);
-                                      }
-                                    });
-                                  },
-                                ),
-                              ),
-                              if (filtered.isEmpty)
-                                SliverFillRemaining(
-                                  hasScrollBody: false,
-                                  child: Center(
-                                    child: Text(
-                                      'No posts yet.',
-                                      style: TextStyle(
-                                        color: isLight
-                                            ? const Color(0xff888888)
-                                            : const Color(0xffe8e8e8),
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              else
-                                SliverList.builder(
-                                  itemCount: filtered.length,
-                                  itemBuilder: (context, index) {
-                                    final post = filtered[index];
-                                    return FeedPostCard(
-                                      key: ValueKey(post.id),
-                                      post: post,
-                                      token: widget.session.token,
-                                      currentUser: widget.session.user,
-                                      followingAuthors: _followingAuthors,
-                                      onFollowUser: _activeCity == null ? _follow : null,
-                                      onUnfollowUser: _activeCity == null ? _unfollow : null,
-                                      likingEnabled: _activeCity == null,
-                                      onLike: () => _likePost(post),
-                                      onSave: () => _savePost(post),
-                                      onShare: () {
-                                        _hideNativeBar();
-                                        showShareSheet(
-                                          context: context,
-                                          post: post,
-                                          token: widget.session.token,
-                                          currentUser: widget.session.user,
-                                          onLogout: widget.onLogout,
-                                        ).whenComplete(_showNativeBar);
-                                      },
-                                      onMore: () => _openSheet(
-                                        title: post.author,
-                                        child: Column(
-                                          children: [
-                                            if (post.author == widget.session.user.username || widget.session.user.isAdmin)
-                                              ListTile(
-                                                contentPadding: EdgeInsets.zero,
-                                                leading: const Icon(
-                                                  Icons.delete_outline,
-                                                  color: Color(0xfff66c6c),
-                                                ),
-                                                title: const Text('Delete post'),
-                                                onTap: () async {
-                                                  Navigator.of(context).pop();
-                                                  await _deletePost(post);
-                                                },
-                                              ),
-                                            ListTile(
-                                              contentPadding: EdgeInsets.zero,
-                                              leading: const Icon(Icons.flag_outlined),
-                                              title: const Text('Report post'),
-                                              onTap: () {
-                                                Navigator.of(context).pop();
-                                                showReportPostSheet(
-                                                  context,
-                                                  postId: post.id,
-                                                  token: widget.session.token,
-                                                );
-                                              },
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      onComment: () => _openComments(post),
-                                      onProfileTap: () => _pushProfileRoute(post.author),
-                                      onOpenUserProfile: _pushProfileRoute,
-                                      onFollow: (post.author != widget.session.user.username && _activeCity == null)
-                                          ? () => _follow(post.author)
-                                          : null,
-                                      onUnfollow: (post.author != widget.session.user.username && _activeCity == null)
-                                          ? () => _unfollow(post.author)
-                                          : null,
-                                      isFollowing: _followingAuthors.contains(post.author),
-                                      followerAuthors: _followerAuthors,
-                                      onHideNavBar: _hideNativeBar,
-                                      onShowNavBar: _showNativeBar,
-                                    );
-                                  },
-                                ),
-                            ],
-                          ),
+                        // 0: Feed — two independent scroll views keep their own positions
+                        IndexedStack(
+                          index: _selectedTab,
+                          children: [
+                            _buildFeedScrollView(cityPosts, _cityScroll, isLight),
+                            _buildFeedScrollView(followingPosts, _followingScroll, isLight),
+                          ],
                         ),
                         // 1: Search — mounted lazily on first visit
                         _visitedTabs.contains(1)
@@ -1714,8 +1718,9 @@ class _HomePageState extends State<HomePage> {
     }
     if (i == 0) {
       if (_nav == 0 && !_showInlineProfile) {
-        if (_feedScroll.hasClients) {
-          _feedScroll.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+        final activeScroll = _selectedTab == 0 ? _cityScroll : _followingScroll;
+        if (activeScroll.hasClients) {
+          activeScroll.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
         }
         _load();
         return;
