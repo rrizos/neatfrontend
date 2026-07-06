@@ -50,9 +50,13 @@ Uri adminUsersEndpoint([String query = '']) {
 }
 Uri adminVerifyUserEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/admin/users/$username/verify/');
+Uri adminSetOfficialEligibilityEndpoint(String username) =>
+    Uri.parse('$apiBaseUrl/api/auth/admin/users/$username/official-eligibility/');
 Uri adminDeleteUserEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/admin/users/$username/delete/');
 Uri commentLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/like/');
+Uri commentReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/report/');
+Uri commentPinEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/pin/');
 Uri get savedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/saved/');
 Uri get likedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/liked/');
 Uri get forgotPasswordEndpoint => Uri.parse('$apiBaseUrl/api/auth/forgot-password/');
@@ -109,6 +113,12 @@ Uri eventReportEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/report/');
 Uri eventCommentsEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/$id/comments/');
+Uri eventCommentReportEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/comments/$id/report/');
+Uri eventCommentPinEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/comments/$id/pin/');
+Uri eventCommentLikeEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/events/comments/$id/like/');
 Uri get inboxEndpoint => Uri.parse('$apiBaseUrl/api/messages/inbox/');
 Uri get presenceEndpoint => Uri.parse('$apiBaseUrl/api/messages/presence/');
 Uri get startConversationEndpoint =>

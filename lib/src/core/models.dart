@@ -76,6 +76,7 @@ class UserProfile {
     this.avatarZoomable = true,
     this.isVerified = false,
     this.isAdmin = false,
+    this.canCreateOfficialEvents = false,
     this.isBlocked = false,
     this.hasBlockedYou = false,
   });
@@ -95,6 +96,7 @@ class UserProfile {
   final bool avatarZoomable;
   final bool isVerified;
   final bool isAdmin;
+  final bool canCreateOfficialEvents;
   final bool isBlocked;
   final bool hasBlockedYou;
 
@@ -113,6 +115,7 @@ class UserProfile {
     followsYou: followsYou ?? this.followsYou,
     mutuals: mutuals, mutualsCount: mutualsCount, avatarZoomable: avatarZoomable,
     isVerified: isVerified, isAdmin: isAdmin,
+    canCreateOfficialEvents: canCreateOfficialEvents,
     isBlocked: isBlocked ?? this.isBlocked,
     hasBlockedYou: hasBlockedYou ?? this.hasBlockedYou,
   );
@@ -142,6 +145,7 @@ class UserProfile {
       avatarZoomable: json['avatarZoomable'] != false,
       isVerified: json['isVerified'] == true,
       isAdmin: json['isAdmin'] == true,
+      canCreateOfficialEvents: json['canCreateOfficialEvents'] == true,
       isBlocked: json['isBlocked'] == true,
       hasBlockedYou: json['hasBlockedYou'] == true,
     );
@@ -244,6 +248,8 @@ class FeedComment {
     required this.likes,
     required this.liked,
     required this.replies,
+    this.pinned = false,
+    this.likedByOwner = false,
   });
 
   final int id;
@@ -256,6 +262,8 @@ class FeedComment {
   final List<FeedComment> replies;
   int likes;
   bool liked;
+  bool pinned;
+  bool likedByOwner;
 
   factory FeedComment.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -274,6 +282,8 @@ class FeedComment {
       likes: parseInt(json['likes']),
       liked: json['liked'] == true,
       replies: replies,
+      pinned: json['pinned'] == true,
+      likedByOwner: json['likedByOwner'] == true,
     );
     return c;
   }

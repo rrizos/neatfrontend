@@ -147,6 +147,21 @@ Future<void> showReportMessageSheet(
   );
 }
 
+Future<void> showReportCommentSheet(
+  BuildContext context, {
+  required Uri endpoint,
+  required String token,
+}) {
+  return _showReportSheet(
+    context,
+    submit: (reason, subReason) => http.post(
+      endpoint,
+      headers: authJsonHeaders(token),
+      body: jsonEncode({'reason': reason}),
+    ),
+  );
+}
+
 Future<void> showReportEventSheet(
   BuildContext context, {
   required int eventId,

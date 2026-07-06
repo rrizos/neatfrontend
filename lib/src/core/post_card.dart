@@ -12,6 +12,7 @@ import 'package:visibility_detector/visibility_detector.dart';
 import 'api.dart';
 import 'icons.dart';
 import 'media_cache.dart';
+import 'mentions.dart';
 import 'models.dart';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -1310,12 +1311,23 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
             if (widget.post.text.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  widget.post.text,
-                  style: TextStyle(
-                    fontSize: 15.5,
-                    height: 1.45,
-                    color: isLight ? Colors.black : Colors.white,
+                child: RichText(
+                  text: TextSpan(
+                    children: buildMentionSpans(
+                      widget.post.text,
+                      style: TextStyle(
+                        fontSize: 15.5,
+                        height: 1.45,
+                        color: isLight ? Colors.black : Colors.white,
+                      ),
+                      mentionStyle: const TextStyle(
+                        fontSize: 15.5,
+                        height: 1.45,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xff3897f0),
+                      ),
+                      onTapMention: widget.onOpenUserProfile,
+                    ),
                   ),
                 ),
               ),

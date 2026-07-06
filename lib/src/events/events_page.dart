@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -14,6 +15,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core/api.dart';
 import '../core/media_cache.dart';
+import '../core/mentions.dart';
 import '../core/models.dart';
 import '../core/post_card.dart' show decodeAvatarUrl;
 import '../core/report_post_sheet.dart';
@@ -155,7 +157,10 @@ class _EventsPageState extends State<EventsPage> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.sizeOf(context).height * 0.9,
       ),
-      builder: (_) => _CreateEventSheet(picker: _picker),
+      builder: (_) => _CreateEventSheet(
+        picker: _picker,
+        canCreateOfficial: widget.currentUser.canCreateOfficialEvents || widget.currentUser.isAdmin,
+      ),
     );
     if (result == null) return;
     final res = await http.post(
@@ -270,24 +275,13 @@ class _EventsPageState extends State<EventsPage> {
       builder: (_) => _EditEventSheet(event: event, picker: _picker),
     );
     if (result == null) return;
-    final payload = jsonEncode({...result, 'city': widget.city});
+    final payload = jsonEncode(result);
 
-    // Try the most common REST patterns in order until one succeeds
-    http.Response res;
-    res = await http.patch(eventDetailEndpoint(event.id),
-        headers: authJsonHeaders(widget.token), body: payload);
-    if (res.statusCode == 404 || res.statusCode == 405) {
-      res = await http.put(eventDetailEndpoint(event.id),
-          headers: authJsonHeaders(widget.token), body: payload);
-    }
-    if (res.statusCode == 404 || res.statusCode == 405) {
-      res = await http.post(eventUpdateEndpoint(event.id),
-          headers: authJsonHeaders(widget.token), body: payload);
-    }
-    if (res.statusCode == 404 || res.statusCode == 405) {
-      res = await http.patch(eventUpdateEndpoint(event.id),
-          headers: authJsonHeaders(widget.token), body: payload);
-    }
+    final res = await http.post(
+      eventUpdateEndpoint(event.id),
+      headers: authJsonHeaders(widget.token),
+      body: payload,
+    );
 
     if (!mounted) return;
 
@@ -345,6 +339,7 @@ class _EventsPageState extends State<EventsPage> {
           Navigator.of(context).pop();
           _reportEvent(event);
         },
+        onOpenUserProfile: widget.onOpenUserProfile,
         onEdit: () {
           Navigator.of(context).pop();
           _editEvent(event);
@@ -646,6 +641,11 @@ String _formatEventDate(String date) {
     return '$datePart at $h:$m $amPm';
   }
   return datePart;
+}
+
+String _dateTimeIso(DateTime date, TimeOfDay? time) {
+  final t = time ?? const TimeOfDay(hour: 0, minute: 0);
+  return DateTime(date.year, date.month, date.day, t.hour, t.minute).toIso8601String();
 }
 
 String _formatTime(TimeOfDay t) {
@@ -1113,9 +1113,10 @@ class _PlaceSuggestion {
 }
 
 class _CreateEventSheet extends StatefulWidget {
-  const _CreateEventSheet({required this.picker});
+  const _CreateEventSheet({required this.picker, required this.canCreateOfficial});
 
   final ImagePicker picker;
+  final bool canCreateOfficial;
 
   @override
   State<_CreateEventSheet> createState() => _CreateEventSheetState();
@@ -1307,7 +1308,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       'description': _desc.text.trim(),
                       'eventType': _official ? 'official' : 'community',
                       'hasTickets': _tickets,
-                      'date': _date!.toIso8601String().substring(0, 10),
+                      'date': _dateTimeIso(_date!, _time),
                       if (_official) 'category': _category,
                       if (_official && _location.text.trim().isNotEmpty)
                         'location': (_selectedLat != null && _selectedLon != null)
@@ -1344,6 +1345,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                   child: _CompactToggle(
                     label: 'Official event',
                     value: _official,
+                    enabled: widget.canCreateOfficial,
                     onChanged: (v) => setState(() {
                       _official = v;
                       if (!v) _tickets = false;
@@ -1790,7 +1792,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                     if (_date == null) return;
                     Navigator.of(context).pop({
                       'description': _desc.text.trim(),
-                      'date': _date!.toIso8601String().substring(0, 10),
+                      'date': _dateTimeIso(_date!, _time),
                       if (_imageChanged) 'imageUrl': _imageUrl,
                     });
                   },
@@ -2183,6 +2185,7 @@ class _EventDetailSheet extends StatefulWidget {
     required this.onDelete,
     required this.onReport,
     required this.onEdit,
+    required this.onOpenUserProfile,
     this.attendEnabled = true,
     this.isAdmin = false,
   });
@@ -2195,6 +2198,7 @@ class _EventDetailSheet extends StatefulWidget {
   final VoidCallback onDelete;
   final VoidCallback onReport;
   final VoidCallback onEdit;
+  final ValueChanged<String> onOpenUserProfile;
   final bool attendEnabled;
   final bool isAdmin;
 
@@ -2373,7 +2377,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
     });
     try {
       await http.post(
-        commentLikeEndpoint(comment.id),
+        eventCommentLikeEndpoint(comment.id),
         headers: authJsonHeaders(widget.token),
         body: jsonEncode({'liked': !was}),
       );
@@ -2387,6 +2391,79 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
         });
       }
     }
+  }
+
+  Future<void> _deleteComment(FeedComment c) async {
+    try {
+      final res = await http.delete(
+        eventCommentsEndpoint(widget.event.id),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'commentId': c.id}),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) await _loadComments();
+    } catch (_) {}
+  }
+
+  Future<void> _pinComment(FeedComment c) async {
+    try {
+      final res = await http.post(
+        eventCommentPinEndpoint(c.id),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'pinned': !c.pinned}),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) await _loadComments();
+    } catch (_) {}
+  }
+
+  void _showCommentMenu(FeedComment c, bool isReply, bool isLight) {
+    final isOwnComment = c.author == widget.currentUsername;
+    final isOwner = widget.event.creator == widget.currentUsername;
+    final isAdmin = widget.isAdmin;
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if ((isOwner || isAdmin) && !isReply)
+              ListTile(
+                leading: Icon(c.pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined),
+                title: Text(c.pinned ? 'Unpin comment' : 'Pin comment'),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  _pinComment(c);
+                },
+              ),
+            if (isOwnComment || isAdmin)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
+                title: const Text('Delete comment'),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  _deleteComment(c);
+                },
+              ),
+            if (!isOwnComment)
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('Report comment'),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  showReportCommentSheet(
+                    context,
+                    endpoint: eventCommentReportEndpoint(c.id),
+                    token: widget.token,
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _tile(FeedComment c, bool isReply, bool isLight) {
@@ -2421,6 +2498,27 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (c.pinned) ...[
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.push_pin_rounded,
+                        size: 12,
+                        color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Pinned by organizer',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                ],
                 RichText(
                   text: TextSpan(children: [
                     TextSpan(
@@ -2431,16 +2529,35 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                         fontSize: isReply ? 13.5 : 15,
                         height: 1.5,
                       ),
+                      recognizer: TapGestureRecognizer()
+                        ..onTap = () => widget.onOpenUserProfile(c.author),
                     ),
-                    if (c.text.isNotEmpty)
+                    if (c.author == widget.event.creator)
                       TextSpan(
-                        text: c.text,
+                        text: 'Creator ',
+                        style: TextStyle(
+                          color: const Color(0xff3897f0),
+                          fontWeight: FontWeight.w700,
+                          fontSize: isReply ? 12 : 13,
+                          height: 1.5,
+                        ),
+                      ),
+                    if (c.text.isNotEmpty)
+                      ...buildMentionSpans(
+                        c.text,
                         style: TextStyle(
                           color: isLight ? Colors.black : Colors.white,
                           fontWeight: FontWeight.w400,
                           fontSize: isReply ? 13.5 : 15,
                           height: 1.5,
                         ),
+                        mentionStyle: TextStyle(
+                          color: const Color(0xff3897f0),
+                          fontWeight: FontWeight.w600,
+                          fontSize: isReply ? 13.5 : 15,
+                          height: 1.5,
+                        ),
+                        onTapMention: widget.onOpenUserProfile,
                       ),
                   ]),
                 ),
@@ -2474,6 +2591,17 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                     ),
                   ),
                 ]),
+                if (c.likedByOwner && c.author != widget.event.creator) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    'Liked by creator',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -2499,6 +2627,18 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                     ),
                   ),
               ],
+            ),
+          ),
+          GestureDetector(
+            onTap: () => _showCommentMenu(c, isReply, isLight),
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(6, 2, 0, 0),
+              child: Icon(
+                Icons.more_horiz_rounded,
+                size: 16,
+                color: isLight ? const Color(0xffa0a0a0) : const Color(0xff6a6a6a),
+              ),
             ),
           ),
         ],
@@ -2904,6 +3044,10 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                     ],
                   ),
                 ),
+              MentionSuggestions(
+                controller: _commentCtrl,
+                token: widget.token,
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 child: Row(

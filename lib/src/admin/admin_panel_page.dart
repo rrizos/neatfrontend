@@ -396,6 +396,22 @@ class _UsersTabState extends State<_UsersTab> with AutomaticKeepAliveClientMixin
     }
   }
 
+  Future<void> _toggleOfficialEligibility(_AdminUser user) async {
+    final res = await http.post(
+      adminSetOfficialEligibilityEndpoint(user.username),
+      headers: authJsonHeaders(widget.token),
+      body: jsonEncode({'eligible': !user.canCreateOfficialEvents}),
+    );
+    if (res.statusCode == 200) {
+      setState(() {
+        final idx = _users.indexWhere((u) => u.username == user.username);
+        if (idx != -1) {
+          _users[idx] = _users[idx].copyWith(canCreateOfficialEvents: !user.canCreateOfficialEvents);
+        }
+      });
+    }
+  }
+
   Future<void> _deleteUser(_AdminUser user) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -464,6 +480,7 @@ class _UsersTabState extends State<_UsersTab> with AutomaticKeepAliveClientMixin
                           itemBuilder: (_, i) => _UserCard(
                             user: _users[i],
                             onVerify: () => _toggleVerify(_users[i]),
+                            onToggleOfficialEligibility: () => _toggleOfficialEligibility(_users[i]),
                             onDelete: () => _deleteUser(_users[i]),
                           ),
                         ),
@@ -476,11 +493,13 @@ class _UsersTabState extends State<_UsersTab> with AutomaticKeepAliveClientMixin
 class _UserCard extends StatelessWidget {
   final _AdminUser user;
   final VoidCallback onVerify;
+  final VoidCallback onToggleOfficialEligibility;
   final VoidCallback onDelete;
 
   const _UserCard({
     required this.user,
     required this.onVerify,
+    required this.onToggleOfficialEligibility,
     required this.onDelete,
   });
 
@@ -532,6 +551,10 @@ class _UserCard extends StatelessWidget {
                         const SizedBox(width: 4),
                         const Icon(Icons.verified_rounded, size: 14, color: Color(0xff0095f6)),
                       ],
+                      if (user.canCreateOfficialEvents) ...[
+                        const SizedBox(width: 4),
+                        const Icon(Icons.event_available_rounded, size: 14, color: Color(0xff34c759)),
+                      ],
                       if (user.isAdmin) ...[
                         const SizedBox(width: 4),
                         const Icon(Icons.shield_rounded, size: 14, color: Color(0xffffd700)),
@@ -556,6 +579,19 @@ class _UserCard extends StatelessWidget {
                 size: 22,
               ),
               onPressed: onVerify,
+            ),
+            IconButton(
+              tooltip: user.canCreateOfficialEvents
+                  ? 'Revoke official event badge'
+                  : 'Grant official event badge',
+              icon: Icon(
+                user.canCreateOfficialEvents
+                    ? Icons.event_available_rounded
+                    : Icons.event_available_outlined,
+                color: user.canCreateOfficialEvents ? const Color(0xff34c759) : subColor,
+                size: 22,
+              ),
+              onPressed: onToggleOfficialEligibility,
             ),
             IconButton(
               tooltip: 'Delete user',
@@ -612,6 +648,7 @@ class _AdminUser {
   final int following;
   final bool isVerified;
   final bool isAdmin;
+  final bool canCreateOfficialEvents;
 
   const _AdminUser({
     required this.id,
@@ -621,6 +658,7 @@ class _AdminUser {
     required this.following,
     required this.isVerified,
     required this.isAdmin,
+    required this.canCreateOfficialEvents,
   });
 
   factory _AdminUser.fromJson(Map<String, dynamic> j) {
@@ -633,13 +671,15 @@ class _AdminUser {
       following: parseInt(j['following']),
       isVerified: j['isVerified'] == true,
       isAdmin: j['isAdmin'] == true,
+      canCreateOfficialEvents: j['canCreateOfficialEvents'] == true,
     );
   }
 
-  _AdminUser copyWith({bool? isVerified}) => _AdminUser(
+  _AdminUser copyWith({bool? isVerified, bool? canCreateOfficialEvents}) => _AdminUser(
     id: id, username: username, fullName: fullName,
     followers: followers, following: following,
     isVerified: isVerified ?? this.isVerified,
     isAdmin: isAdmin,
+    canCreateOfficialEvents: canCreateOfficialEvents ?? this.canCreateOfficialEvents,
   );
 }

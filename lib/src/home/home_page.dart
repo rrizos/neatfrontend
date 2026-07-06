@@ -20,6 +20,7 @@ import 'package:video_player/video_player.dart';
 
 import '../core/api.dart';
 import '../core/media_cache.dart';
+import '../core/mentions.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
 import '../core/report_post_sheet.dart';
@@ -1124,6 +1125,10 @@ class _HomePageState extends State<HomePage> {
                                             border: InputBorder.none,
                                             contentPadding: EdgeInsets.zero,
                                           ),
+                                        ),
+                                        MentionSuggestions(
+                                          controller: _compose,
+                                          token: widget.session.token,
                                         ),
                                         // ── media grid / loading ─────────
                                         if (_composeMediaLoading) ...[
@@ -3655,18 +3660,12 @@ class _CommentSheetState extends State<_CommentSheet> {
       if (!mounted) return;
       if (res.statusCode == 200 || res.statusCode == 201) {
         final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-        final updated = FeedPost.fromJson(decoded);
+        _applyUpdatedPost(decoded);
         setState(() {
-          _comments = updated.comments;
-          _seedMaps(updated.comments);
           _replyingTo = null;
           _imageUrl = '';
         });
         _controller.clear();
-        widget.post.comments
-          ..clear()
-          ..addAll(updated.comments);
-        widget.onRefresh();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scroll.hasClients) {
             _scroll.animateTo(
@@ -3680,6 +3679,97 @@ class _CommentSheetState extends State<_CommentSheet> {
     } finally {
       if (mounted) setState(() => _sending = false);
     }
+  }
+
+  void _applyUpdatedPost(Map<String, dynamic> decoded) {
+    final updated = FeedPost.fromJson(decoded);
+    setState(() {
+      _comments = updated.comments;
+      _seedMaps(updated.comments);
+    });
+    widget.post.comments
+      ..clear()
+      ..addAll(updated.comments);
+    widget.onRefresh();
+  }
+
+  Future<void> _deleteComment(FeedComment c) async {
+    try {
+      final res = await http.delete(
+        postCommentsEndpoint(widget.post.id),
+        headers: authJsonHeaders(widget.session.token),
+        body: jsonEncode({'commentId': c.id}),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        _applyUpdatedPost(jsonDecode(res.body) as Map<String, dynamic>);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _pinComment(FeedComment c) async {
+    try {
+      final res = await http.post(
+        commentPinEndpoint(c.id),
+        headers: authJsonHeaders(widget.session.token),
+        body: jsonEncode({'pinned': !c.pinned}),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        _applyUpdatedPost(jsonDecode(res.body) as Map<String, dynamic>);
+      }
+    } catch (_) {}
+  }
+
+  void _showCommentMenu(FeedComment c, bool isReply) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final currentUsername = widget.session.user.username;
+    final isOwnComment = c.author == currentUsername;
+    final isAdmin = widget.session.user.isAdmin;
+    final isPostOwner = widget.post.author == currentUsername;
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if ((isPostOwner || isAdmin) && !isReply)
+              ListTile(
+                leading: Icon(c.pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined),
+                title: Text(c.pinned ? 'Unpin comment' : 'Pin comment'),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  _pinComment(c);
+                },
+              ),
+            if (isOwnComment || isAdmin)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
+                title: const Text('Delete comment'),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  _deleteComment(c);
+                },
+              ),
+            if (!isOwnComment)
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('Report comment'),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  showReportCommentSheet(
+                    context,
+                    endpoint: commentReportEndpoint(c.id),
+                    token: widget.session.token,
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _toggleLike(FeedComment comment) async {
@@ -3740,6 +3830,27 @@ class _CommentSheetState extends State<_CommentSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (c.pinned) ...[
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.push_pin_rounded,
+                        size: 12,
+                        color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Pinned by author',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                ],
                 RichText(
                   text: TextSpan(
                     children: [
@@ -3754,15 +3865,32 @@ class _CommentSheetState extends State<_CommentSheet> {
                         recognizer: TapGestureRecognizer()
                           ..onTap = () => widget.onOpenUserProfile(c.author),
                       ),
-                      if (c.text.isNotEmpty)
+                      if (c.author == widget.post.author)
                         TextSpan(
-                          text: c.text,
+                          text: 'Creator ',
+                          style: TextStyle(
+                            color: const Color(0xff3897f0),
+                            fontWeight: FontWeight.w700,
+                            fontSize: isReply ? 12 : 13,
+                            height: 1.5,
+                          ),
+                        ),
+                      if (c.text.isNotEmpty)
+                        ...buildMentionSpans(
+                          c.text,
                           style: TextStyle(
                             color: isLight ? Colors.black : Colors.white,
                             fontWeight: FontWeight.w400,
                             fontSize: isReply ? 13.5 : 15,
                             height: 1.5,
                           ),
+                          mentionStyle: TextStyle(
+                            color: const Color(0xff3897f0),
+                            fontWeight: FontWeight.w600,
+                            fontSize: isReply ? 13.5 : 15,
+                            height: 1.5,
+                          ),
+                          onTapMention: widget.onOpenUserProfile,
                         ),
                     ],
                   ),
@@ -3799,6 +3927,17 @@ class _CommentSheetState extends State<_CommentSheet> {
                     ),
                   ],
                 ),
+                if (c.likedByOwner && c.author != widget.post.author) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    'Liked by creator',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -3850,6 +3989,18 @@ class _CommentSheetState extends State<_CommentSheet> {
                     ),
                   ),
               ],
+            ),
+          ),
+          GestureDetector(
+            onTap: () => _showCommentMenu(c, isReply),
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(6, 2, 0, 0),
+              child: Icon(
+                Icons.more_horiz_rounded,
+                size: 16,
+                color: isLight ? const Color(0xffa0a0a0) : const Color(0xff6a6a6a),
+              ),
             ),
           ),
         ],
@@ -3978,6 +4129,10 @@ class _CommentSheetState extends State<_CommentSheet> {
                     ],
                   ),
                 ),
+              MentionSuggestions(
+                controller: _controller,
+                token: widget.session.token,
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 child: Row(
