@@ -908,6 +908,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                             )
                                           : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? 'Follow Back' : 'Follow')),
                                     ),
+                                    if (widget.followEnabled) ...[
                                     const SizedBox(width: 12),
                                     SizedBox(
                                       height: 42,
@@ -921,6 +922,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                         child: const Icon(Icons.send_outlined, size: 18),
                                       ),
                                     ),
+                                    ],
                                   ],
                                 ),
                 ),

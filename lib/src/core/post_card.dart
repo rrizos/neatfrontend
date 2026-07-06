@@ -1390,7 +1390,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                             CustomPaint(
                               size: const Size(28, 28),
                               painter: _SlashPainter(
-                                color: const Color(0xfff66c6c),
+                                color: isLight ? Colors.black : Colors.white,
                               ),
                             ),
                           ],
@@ -1450,7 +1450,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                     onTap: widget.onComment,
                     child: Text(
                       widget.post.comments.isEmpty
-                          ? 'Add a comment...'
+                          ? (widget.likingEnabled ? 'Add a comment...' : 'No comments yet.')
                           : 'View ${widget.post.comments.length} comments',
                       style: const TextStyle(color: Color(0xffb3b3b3), fontSize: 13),
                     ),

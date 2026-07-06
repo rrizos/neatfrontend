@@ -1603,12 +1603,31 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
             ),
             const SizedBox(height: 10),
             if (_imageUrl.isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: AspectRatio(
-                  aspectRatio: 1.25,
-                  child: _EventMedia(url: _imageUrl),
-                ),
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: AspectRatio(
+                      aspectRatio: 1.25,
+                      child: _EventMedia(url: _imageUrl),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: GestureDetector(
+                      onTap: () => setState(() => _imageUrl = ''),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close_rounded, color: Colors.white, size: 18),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             const SizedBox(height: 10),
             if (_showPhotoError)
@@ -1679,22 +1698,13 @@ class _EditEventSheetState extends State<_EditEventSheet> {
   late final TextEditingController _desc;
   late final TextEditingController _location;
   late final TextEditingController _ticketsUrl;
-  final _locationFocus = FocusNode();
   late bool _official;
   late bool _tickets;
   late String _category;
   late String _imageUrl;
   bool _imageChanged = false;
-  bool _showTicketsUrlError = false;
-  bool _showLocationError = false;
   DateTime? _date;
   TimeOfDay? _time;
-
-  List<_PlaceSuggestion> _suggestions = [];
-  bool _loadingSuggestions = false;
-  Timer? _debounce;
-  double? _selectedLat;
-  double? _selectedLon;
 
   @override
   void initState() {
@@ -1702,15 +1712,6 @@ class _EditEventSheetState extends State<_EditEventSheet> {
     final e = widget.event;
     _title = TextEditingController(text: e.title);
     _desc = TextEditingController(text: e.description);
-    // If the stored location has embedded coordinates, extract them for the map.
-    final pipe = e.location.indexOf('|');
-    if (pipe > 0) {
-      final coords = e.location.substring(0, pipe).split(',');
-      if (coords.length == 2) {
-        _selectedLat = double.tryParse(coords[0]);
-        _selectedLon = double.tryParse(coords[1]);
-      }
-    }
     _location = TextEditingController(text: _locationDisplay(e.location));
     _ticketsUrl = TextEditingController(text: e.ticketsUrl);
     _official = e.eventType == 'official';
@@ -1728,80 +1729,15 @@ class _EditEventSheetState extends State<_EditEventSheet> {
         }
       }
     }
-    _locationFocus.addListener(() {
-      if (!_locationFocus.hasFocus && mounted) {
-        setState(() { _suggestions = []; _loadingSuggestions = false; });
-      }
-    });
   }
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _title.dispose();
     _desc.dispose();
     _location.dispose();
     _ticketsUrl.dispose();
-    _locationFocus.dispose();
     super.dispose();
-  }
-
-  void _onLocationChanged(String value) {
-    _selectedLat = null;
-    _selectedLon = null;
-    _debounce?.cancel();
-    final q = value.trim();
-    if (q.length < 3) {
-      setState(() { _suggestions = []; _loadingSuggestions = false; });
-      return;
-    }
-    setState(() => _loadingSuggestions = true);
-    _debounce = Timer(const Duration(milliseconds: 450), () => _fetchSuggestions(q));
-  }
-
-  Future<void> _fetchSuggestions(String query) async {
-    try {
-      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
-        'q': query,
-        'format': 'json',
-        'limit': '5',
-        'addressdetails': '1',
-        'countrycodes': 'gr',
-      });
-      final res = await http.get(uri, headers: {'User-Agent': 'NeatApp/1.0'});
-      if (!mounted) return;
-      if (res.statusCode == 200) {
-        final raw = jsonDecode(res.body) as List<dynamic>;
-        final items = raw.whereType<Map<String, dynamic>>().map((j) {
-          final name = j['name']?.toString() ?? '';
-          final display = j['display_name']?.toString() ?? '';
-          final label = name.isNotEmpty ? name : display.split(',').first.trim();
-          final parts = display.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-          final stored = parts.take(3).join(', ');
-          final lat = double.tryParse(j['lat']?.toString() ?? '') ?? 0;
-          final lon = double.tryParse(j['lon']?.toString() ?? '') ?? 0;
-          return _PlaceSuggestion(
-            label: label, sublabel: display,
-            stored: stored.isNotEmpty ? stored : label,
-            lat: lat, lon: lon,
-          );
-        }).toList();
-        if (mounted) setState(() { _suggestions = items; _loadingSuggestions = false; });
-      } else {
-        if (mounted) setState(() { _suggestions = []; _loadingSuggestions = false; });
-      }
-    } catch (_) {
-      if (mounted) setState(() { _suggestions = []; _loadingSuggestions = false; });
-    }
-  }
-
-  void _selectSuggestion(_PlaceSuggestion s) {
-    _location.text = s.stored;
-    _location.selection = TextSelection.collapsed(offset: s.stored.length);
-    _selectedLat = s.lat;
-    _selectedLon = s.lon;
-    _locationFocus.unfocus();
-    setState(() { _suggestions = []; _loadingSuggestions = false; });
   }
 
   Future<void> _pickImage() async {
@@ -1850,29 +1786,12 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                 const Spacer(),
                 TextButton(
                   onPressed: () {
-                    if (_title.text.trim().isEmpty || _desc.text.trim().isEmpty) return;
+                    if (_desc.text.trim().isEmpty) return;
                     if (_date == null) return;
-                    if (_official && _location.text.trim().isEmpty) {
-                      setState(() => _showLocationError = true);
-                      return;
-                    }
-                    if (_official && _tickets && _ticketsUrl.text.trim().isEmpty) {
-                      setState(() => _showTicketsUrlError = true);
-                      return;
-                    }
                     Navigator.of(context).pop({
-                      'title': _title.text.trim(),
                       'description': _desc.text.trim(),
-                      'eventType': _official ? 'official' : 'community',
-                      'hasTickets': _tickets,
                       'date': _date!.toIso8601String().substring(0, 10),
-                      if (_official) 'category': _category,
-                      if (_official && _location.text.trim().isNotEmpty)
-                        'location': (_selectedLat != null && _selectedLon != null)
-                            ? '$_selectedLat,$_selectedLon|${_location.text.trim()}'
-                            : _location.text.trim(),
-                      if (_official && _tickets) 'ticketsUrl': _ticketsUrl.text.trim(),
-                      if (_imageChanged && _imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
+                      if (_imageChanged) 'imageUrl': _imageUrl,
                     });
                   },
                   child: const Text('Save'),
@@ -1880,12 +1799,15 @@ class _EditEventSheetState extends State<_EditEventSheet> {
               ],
             ),
             const SizedBox(height: 12),
+            // Title — read-only
             TextField(
               controller: _title,
+              enabled: false,
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
               decoration: _dec('Title', isLight),
             ),
             const SizedBox(height: 10),
+            // Description — editable
             TextField(
               controller: _desc,
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
@@ -1894,178 +1816,108 @@ class _EditEventSheetState extends State<_EditEventSheet> {
               decoration: _dec('Description', isLight),
             ),
             const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: _CompactToggle(
-                    label: 'Official event',
-                    value: _official,
-                    onChanged: (v) => setState(() {
-                      _official = v;
-                      if (!v) _tickets = false;
-                    }),
-                  ),
+            // Toggles — read-only
+            Opacity(
+              opacity: 0.45,
+              child: IgnorePointer(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _CompactToggle(
+                        label: 'Official event',
+                        value: _official,
+                        onChanged: (_) {},
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _CompactToggle(
+                        label: 'Has tickets',
+                        value: _tickets,
+                        onChanged: (_) {},
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _CompactToggle(
-                    label: 'Has tickets',
-                    value: _tickets,
-                    enabled: _official,
-                    onChanged: (v) => setState(() => _tickets = v),
-                  ),
-                ),
-              ],
+              ),
             ),
             if (_official) ...[
               const SizedBox(height: 10),
-              Text(
-                'Category',
-                style: TextStyle(
-                  color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 38,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: EdgeInsets.zero,
-                  itemCount: _kEventCategories.length - 1,
-                  separatorBuilder: (_, _) => const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final cat = _kEventCategories[index + 1];
-                    final sel = cat == _category;
-                    return GestureDetector(
-                      onTap: () => setState(() => _category = cat),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 160),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: sel
-                              ? (isLight ? Colors.black : Colors.white)
-                              : (isLight ? Colors.white : const Color(0xff1e1e1e)),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: sel
-                                ? Colors.transparent
-                                : (isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
-                          ),
-                        ),
-                        child: Text(
-                          cat,
-                          style: TextStyle(
-                            color: sel
-                                ? (isLight ? Colors.white : Colors.black)
-                                : (isLight ? Colors.black : Colors.white),
-                            fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                            fontSize: 13,
-                          ),
+              // Category — read-only
+              Opacity(
+                opacity: 0.45,
+                child: IgnorePointer(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Category',
+                        style: TextStyle(
+                          color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    );
-                  },
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 38,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.zero,
+                          itemCount: _kEventCategories.length - 1,
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
+                          itemBuilder: (context, index) {
+                            final cat = _kEventCategories[index + 1];
+                            final sel = cat == _category;
+                            return AnimatedContainer(
+                              duration: const Duration(milliseconds: 160),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: sel
+                                    ? (isLight ? Colors.black : Colors.white)
+                                    : (isLight ? Colors.white : const Color(0xff1e1e1e)),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: sel
+                                      ? Colors.transparent
+                                      : (isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
+                                ),
+                              ),
+                              child: Text(
+                                cat,
+                                style: TextStyle(
+                                  color: sel
+                                      ? (isLight ? Colors.white : Colors.black)
+                                      : (isLight ? Colors.black : Colors.white),
+                                  fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ],
-            if (_official) ...[
               const SizedBox(height: 10),
+              // Location — read-only
               TextField(
                 controller: _location,
-                focusNode: _locationFocus,
-                onChanged: (v) {
-                  if (_showLocationError && v.trim().isNotEmpty) setState(() => _showLocationError = false);
-                  _onLocationChanged(v);
-                },
+                enabled: false,
                 style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                decoration: _dec('Venue / Address (required)', isLight, error: _showLocationError),
+                decoration: _dec('Venue / Address', isLight),
               ),
-              if (_loadingSuggestions) ...[
-                const SizedBox(height: 6),
-                const Center(
-                  child: SizedBox(
-                    width: 18, height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-              ] else if (_suggestions.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Container(
-                  decoration: BoxDecoration(
-                    color: isLight ? Colors.white : const Color(0xff1e1e1e),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.08),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      for (int i = 0; i < _suggestions.length; i++) ...[
-                        if (i > 0)
-                          Divider(
-                            height: 1,
-                            color: isLight ? const Color(0xffe8e8e8) : const Color(0xff2a2a2a),
-                          ),
-                        InkWell(
-                          onTap: () => _selectSuggestion(_suggestions[i]),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.location_on_outlined, size: 15, color: Color(0xff8f8f8f)),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _suggestions[i].label,
-                                        style: TextStyle(
-                                          color: isLight ? Colors.black : Colors.white,
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                      if (_suggestions[i].sublabel != _suggestions[i].label)
-                                        Text(
-                                          _suggestions[i].sublabel,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            color: Color(0xff8f8f8f),
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
               if (_tickets) ...[
                 const SizedBox(height: 10),
+                // Tickets URL — read-only
                 TextField(
                   controller: _ticketsUrl,
+                  enabled: false,
                   style: TextStyle(color: isLight ? Colors.black : Colors.white),
                   keyboardType: TextInputType.url,
-                  onChanged: (_) { if (_showTicketsUrlError) setState(() => _showTicketsUrlError = false); },
-                  decoration: _dec('Tickets website URL (required)', isLight, error: _showTicketsUrlError),
+                  decoration: _dec('Tickets website URL', isLight),
                 ),
               ],
             ],
@@ -2145,12 +1997,34 @@ class _EditEventSheetState extends State<_EditEventSheet> {
             ),
             const SizedBox(height: 10),
             if (_imageUrl.isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: AspectRatio(
-                  aspectRatio: 1.25,
-                  child: _EventMedia(url: _imageUrl),
-                ),
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: AspectRatio(
+                      aspectRatio: 1.25,
+                      child: _EventMedia(url: _imageUrl),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: GestureDetector(
+                      onTap: () => setState(() {
+                        _imageUrl = '';
+                        _imageChanged = true;
+                      }),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close_rounded, color: Colors.white, size: 18),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             const SizedBox(height: 10),
             Row(
@@ -2772,6 +2646,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                             style: TextStyle(color: mutedColor, fontSize: 13),
                           ),
                           const Spacer(),
+                          if (widget.attendEnabled)
                           GestureDetector(
                             onTap: () {
                               showModalBottomSheet(
@@ -2943,7 +2818,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                     child: Text(
-                      'No comments yet.\nBe the first!',
+                      widget.attendEnabled ? 'No comments yet.\nBe the first!' : 'No comments yet.',
                       style: TextStyle(
                         color: isLight ? const Color(0xff8b95a3) : const Color(0xffb3b3b3),
                         height: 1.6,
@@ -2968,7 +2843,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
         ),
 
         // ── comment input bar ────────────────────────────────────────
-        if (_showInputBar)
+        if (_showInputBar && widget.attendEnabled)
         Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
           child: Column(

@@ -508,6 +508,35 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _pickComposeCamera(StateSetter setPageState) async {
+    final picked = await _imagePicker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 88,
+      maxWidth: 1600,
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _composeMediaLoading = true);
+    setPageState(() {});
+    final fileSize = await picked.length();
+    if (!mounted) return;
+    if (fileSize > _kMaxImageBytes) {
+      setState(() => _composeMediaLoading = false);
+      setPageState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photo is too large. Try again.')),
+      );
+      return;
+    }
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _composeMediaLoading = false;
+      _composeMedia.removeWhere((m) => m.isVideo);
+      _composeMedia.add(_ComposeMedia.localImage(imageBytes: bytes));
+    });
+    setPageState(() {});
+  }
+
   Future<void> _pickComposeVideo(StateSetter setPageState) async {
     final picked = await _imagePicker.pickVideo(
       source: ImageSource.gallery,
@@ -1086,7 +1115,7 @@ class _HomePageState extends State<HomePage> {
                                           ),
                                           cursorColor: dimColor,
                                           decoration: InputDecoration(
-                                            hintText: 'Δημοσιεύστε ενα neet.',
+                                            hintText: 'Δημοσιεύστε ενα neet...',
                                             hintStyle: TextStyle(
                                               color: isLight
                                                   ? const Color(0xff616161)
@@ -1119,9 +1148,20 @@ class _HomePageState extends State<HomePage> {
                                                 (m) => m.isVideo) &&
                                                 _composeMedia.length < 4)
                                               _ComposeAction(
-                                                icon: Icons.image_outlined,
+                                                icon: Icons.photo_library_outlined,
                                                 onTap: () =>
                                                     _pickComposeImages(
+                                                        setPageState),
+                                              ),
+                                            // Camera (disabled if video present or 4 photos)
+                                            if (!_composeMediaLoading &&
+                                                !_composeMedia.any(
+                                                (m) => m.isVideo) &&
+                                                _composeMedia.length < 4)
+                                              _ComposeAction(
+                                                icon: Icons.camera_alt_outlined,
+                                                onTap: () =>
+                                                    _pickComposeCamera(
                                                         setPageState),
                                               ),
                                             // Video (disabled if any media present)
@@ -1138,7 +1178,8 @@ class _HomePageState extends State<HomePage> {
                                             if (_composeMedia.isEmpty)
                                               _ComposeAction(
                                                 icon: Icons
-                                                    .gif_box_outlined,
+                                                    .gif,
+                                                iconSize: 28,
                                                 onTap: () async {
                                                   final completer =
                                                       Completer<String?>();
@@ -1690,7 +1731,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onNavTap(int i) {
-    if (_activeCity != null && (i == 1 || i == 2 || i == 4)) return;
+    if (_activeCity != null && (i == 1 || i == 2 || i == 4)) {
+      if (_isIOS26) _kTabChannel.invokeMethod('syncTab', _nav);
+      return;
+    }
     // If a route is pushed on top (e.g. a profile opened from the feed),
     // pop back to root immediately so the tab switch is visible right away
     // rather than only after the user manually presses back.
@@ -3019,9 +3063,10 @@ class _SearchSegment extends StatelessWidget {
 }
 
 class _ComposeAction extends StatelessWidget {
-  const _ComposeAction({required this.icon, required this.onTap});
+  const _ComposeAction({required this.icon, required this.onTap, this.iconSize = 19});
   final IconData icon;
   final VoidCallback onTap;
+  final double iconSize;
 
   @override
   Widget build(BuildContext context) {
@@ -3035,8 +3080,8 @@ class _ComposeAction extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(14),
           child: Padding(
-            padding: const EdgeInsets.all(11),
-            child: Icon(icon, color: isLight ? Colors.black : Colors.white, size: 19),
+            padding: EdgeInsets.all((41.0 - iconSize) / 2),
+            child: Icon(icon, color: isLight ? Colors.black : Colors.white, size: iconSize),
           ),
         ),
       ),
@@ -3788,7 +3833,9 @@ class _CommentSheetState extends State<_CommentSheet> {
                         CustomPaint(
                           size: const Size(18, 18),
                           painter: _SlashPainterSmall(
-                            color: const Color(0xfff66c6c),
+                            color: isLight
+                                ? const Color(0xffa0a0a0)
+                                : const Color(0xff6a6a6a),
                           ),
                         ),
                       ],
@@ -3842,7 +3889,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                 child: _comments.isEmpty
                     ? Center(
                         child: Text(
-                          'No comments yet.\nBe the first!',
+                          widget.likingEnabled ? 'No comments yet.\nBe the first!' : 'No comments yet.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: isLight ? const Color(0xff8b95a3) : const Color(0xffb3b3b3),
@@ -3868,6 +3915,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                         },
                       ),
               ),
+              if (widget.likingEnabled) ...[
               Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
               if (previewBytes != null)
                 Padding(
@@ -4034,6 +4082,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                   ],
                 ),
               ),
+              ], // end if (widget.likingEnabled)
             ],
           ),
         ),
