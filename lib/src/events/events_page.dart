@@ -104,6 +104,7 @@ class _EventsPageState extends State<EventsPage> {
       final events = (jsonDecode(raw) as List)
           .whereType<Map<String, dynamic>>()
           .map(EventItem.fromJson)
+          .where((e) => e.city.toLowerCase() == widget.city.toLowerCase())
           .toList();
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
       if (!mounted || events.isEmpty) return;
@@ -135,7 +136,9 @@ class _EventsPageState extends State<EventsPage> {
           .whereType<Map<String, dynamic>>()
           .toList();
       unawaited(_saveEventsCache(rawList));
-      final events = rawList.map(EventItem.fromJson).toList();
+      final events = rawList.map(EventItem.fromJson)
+          .where((e) => e.city.toLowerCase() == widget.city.toLowerCase())
+          .toList();
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
       if (!mounted) return;
       setState(() { _events = events; _loading = false; _isOffline = false; });
@@ -2230,6 +2233,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
     super.initState();
     _loadComments();
     _scrollCtrl.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
   }
 
   @override
@@ -2522,28 +2526,42 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                 RichText(
                   text: TextSpan(children: [
                     TextSpan(
-                      text: '${c.author} ',
+                      text: c.author,
                       style: TextStyle(
                         color: isLight ? Colors.black : Colors.white,
                         fontWeight: FontWeight.w700,
                         fontSize: isReply ? 13.5 : 15,
-                        height: 1.5,
+                        height: 1.4,
                       ),
                       recognizer: TapGestureRecognizer()
                         ..onTap = () => widget.onOpenUserProfile(c.author),
                     ),
-                    if (c.author == widget.event.creator)
+                    if (c.author == widget.event.creator) ...[
                       TextSpan(
-                        text: 'Creator ',
+                        text: ' · ',
+                        style: TextStyle(
+                          color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                          fontWeight: FontWeight.w400,
+                          fontSize: isReply ? 12 : 13,
+                          height: 1.4,
+                        ),
+                      ),
+                      TextSpan(
+                        text: 'Creator',
                         style: TextStyle(
                           color: const Color(0xff3897f0),
                           fontWeight: FontWeight.w700,
                           fontSize: isReply ? 12 : 13,
-                          height: 1.5,
+                          height: 1.4,
                         ),
                       ),
-                    if (c.text.isNotEmpty)
-                      ...buildMentionSpans(
+                    ],
+                  ]),
+                ),
+                if (c.text.isNotEmpty)
+                  RichText(
+                    text: TextSpan(
+                      children: buildMentionSpans(
                         c.text,
                         style: TextStyle(
                           color: isLight ? Colors.black : Colors.white,
@@ -2559,8 +2577,8 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                         ),
                         onTapMention: widget.onOpenUserProfile,
                       ),
-                  ]),
-                ),
+                    ),
+                  ),
                 if (imgBytes != null) ...[
                   const SizedBox(height: 8),
                   ClipRRect(

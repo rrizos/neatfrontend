@@ -121,6 +121,8 @@ Uri eventCommentLikeEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/events/comments/$id/like/');
 Uri get inboxEndpoint => Uri.parse('$apiBaseUrl/api/messages/inbox/');
 Uri get presenceEndpoint => Uri.parse('$apiBaseUrl/api/messages/presence/');
+Uri typingEndpoint(int conversationId) =>
+    Uri.parse('$apiBaseUrl/api/messages/$conversationId/typing/');
 Uri get startConversationEndpoint =>
     Uri.parse('$apiBaseUrl/api/messages/start/');
 Uri messageConversationEndpoint(int id) =>

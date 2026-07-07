@@ -3597,8 +3597,10 @@ class _CommentSheetState extends State<_CommentSheet> {
   late List<FeedComment> _comments;
   final _liked = <int, bool>{};
   final _likes = <int, int>{};
+  final _likedByOwner = <int, bool>{};
   FeedComment? _replyingTo;
   String _imageUrl = '';
+  String _gifUrl   = '';
   bool _sending = false;
   bool _picking = false;
 
@@ -3613,6 +3615,7 @@ class _CommentSheetState extends State<_CommentSheet> {
     for (final c in list) {
       _liked[c.id] = c.liked;
       _likes[c.id] = c.likes;
+      _likedByOwner[c.id] = c.likedByOwner;
       _seedMaps(c.replies);
     }
   }
@@ -3636,16 +3639,42 @@ class _CommentSheetState extends State<_CommentSheet> {
       final bytes = await picked.readAsBytes();
       if (!mounted) return;
       final mime = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
-      setState(() => _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}');
+      setState(() { _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}'; _gifUrl = ''; });
     } finally {
       if (mounted) setState(() => _picking = false);
     }
   }
 
+  Future<void> _pickGif() async {
+    final completer = Completer<String?>();
+    final listener = _GifPickerListener(
+      onSelect: (GiphyMedia media) {
+        final url = media.images.fixedWidth?.gifUrl ?? media.images.original?.gifUrl ?? '';
+        if (!completer.isCompleted) completer.complete(url.isNotEmpty ? url : null);
+      },
+      onDismissed: () { if (!completer.isCompleted) completer.complete(null); },
+    );
+    GiphyDialog.instance.addListener(listener);
+    GiphyDialog.instance.configure(
+      settings: GiphySettings(
+        theme: GiphyTheme.automaticTheme,
+        mediaTypeConfig: [GiphyContentType.gif, GiphyContentType.sticker],
+        selectedContentType: GiphyContentType.gif,
+        showSuggestionsBar: true,
+        showConfirmationScreen: false,
+      ),
+    );
+    GiphyDialog.instance.show();
+    final url = await completer.future;
+    GiphyDialog.instance.removeListener(listener);
+    if (!mounted || url == null || url.isEmpty) return;
+    setState(() { _gifUrl = url; _imageUrl = ''; });
+  }
+
 
   Future<void> _send() async {
     final text = _controller.text.trim();
-    if ((text.isEmpty && _imageUrl.isEmpty) || _sending) return;
+    if ((text.isEmpty && _imageUrl.isEmpty && _gifUrl.isEmpty) || _sending) return;
     setState(() => _sending = true);
     try {
       final res = await http.post(
@@ -3654,6 +3683,7 @@ class _CommentSheetState extends State<_CommentSheet> {
         body: jsonEncode({
           'text': text,
           if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
+          if (_gifUrl.isNotEmpty) 'imageUrl': _gifUrl,
           if (_replyingTo != null) 'parentId': _replyingTo!.id,
         }),
       );
@@ -3664,6 +3694,7 @@ class _CommentSheetState extends State<_CommentSheet> {
         setState(() {
           _replyingTo = null;
           _imageUrl = '';
+          _gifUrl   = '';
         });
         _controller.clear();
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3775,9 +3806,11 @@ class _CommentSheetState extends State<_CommentSheet> {
   Future<void> _toggleLike(FeedComment comment) async {
     final was = _liked[comment.id] ?? comment.liked;
     final next = (_likes[comment.id] ?? comment.likes) + (was ? -1 : 1);
+    final isOwner = widget.session.user.username == widget.post.author;
     setState(() {
       _liked[comment.id] = !was;
       _likes[comment.id] = next;
+      if (isOwner) _likedByOwner[comment.id] = !was;
     });
     try {
       await http.post(
@@ -3787,17 +3820,20 @@ class _CommentSheetState extends State<_CommentSheet> {
       );
       comment.liked = !was;
       comment.likes = next;
+      if (isOwner) comment.likedByOwner = !was;
     } catch (_) {
       setState(() {
         _liked[comment.id] = was;
         _likes[comment.id] = (_likes[comment.id] ?? comment.likes) + (was ? 1 : -1);
+        if (isOwner) _likedByOwner[comment.id] = was;
       });
     }
   }
 
   Widget _tile(BuildContext context, FeedComment c, bool isReply, bool isLight) {
     final bytes = decodeAvatarUrl(c.avatarUrl);
-    final imgBytes = c.imageUrl.isNotEmpty ? decodeAvatarUrl(c.imageUrl) : null;
+    final isNetworkImg = c.imageUrl.startsWith('http');
+    final imgBytes = (!isNetworkImg && c.imageUrl.isNotEmpty) ? decodeAvatarUrl(c.imageUrl) : null;
     final isLiked = _liked[c.id] ?? c.liked;
     final likeCount = _likes[c.id] ?? c.likes;
     DateTime? created;
@@ -3855,51 +3891,71 @@ class _CommentSheetState extends State<_CommentSheet> {
                   text: TextSpan(
                     children: [
                       TextSpan(
-                        text: '${c.author} ',
+                        text: c.author,
                         style: TextStyle(
                           color: isLight ? Colors.black : Colors.white,
                           fontWeight: FontWeight.w700,
                           fontSize: isReply ? 13.5 : 15,
-                          height: 1.5,
+                          height: 1.4,
                         ),
                         recognizer: TapGestureRecognizer()
                           ..onTap = () => widget.onOpenUserProfile(c.author),
                       ),
-                      if (c.author == widget.post.author)
+                      if (c.author == widget.post.author) ...[
                         TextSpan(
-                          text: 'Creator ',
+                          text: ' · ',
+                          style: TextStyle(
+                            color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                            fontWeight: FontWeight.w400,
+                            fontSize: isReply ? 12 : 13,
+                            height: 1.4,
+                          ),
+                        ),
+                        TextSpan(
+                          text: 'Creator',
                           style: TextStyle(
                             color: const Color(0xff3897f0),
                             fontWeight: FontWeight.w700,
                             fontSize: isReply ? 12 : 13,
-                            height: 1.5,
+                            height: 1.4,
                           ),
                         ),
-                      if (c.text.isNotEmpty)
-                        ...buildMentionSpans(
-                          c.text,
-                          style: TextStyle(
-                            color: isLight ? Colors.black : Colors.white,
-                            fontWeight: FontWeight.w400,
-                            fontSize: isReply ? 13.5 : 15,
-                            height: 1.5,
-                          ),
-                          mentionStyle: TextStyle(
-                            color: const Color(0xff3897f0),
-                            fontWeight: FontWeight.w600,
-                            fontSize: isReply ? 13.5 : 15,
-                            height: 1.5,
-                          ),
-                          onTapMention: widget.onOpenUserProfile,
-                        ),
+                      ],
                     ],
                   ),
                 ),
+                if (c.text.isNotEmpty)
+                  RichText(
+                    text: TextSpan(
+                      children: buildMentionSpans(
+                        c.text,
+                        style: TextStyle(
+                          color: isLight ? Colors.black : Colors.white,
+                          fontWeight: FontWeight.w400,
+                          fontSize: isReply ? 13.5 : 15,
+                          height: 1.5,
+                        ),
+                        mentionStyle: TextStyle(
+                          color: const Color(0xff3897f0),
+                          fontWeight: FontWeight.w600,
+                          fontSize: isReply ? 13.5 : 15,
+                          height: 1.5,
+                        ),
+                        onTapMention: widget.onOpenUserProfile,
+                      ),
+                    ),
+                  ),
                 if (imgBytes != null) ...[
                   const SizedBox(height: 8),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.memory(imgBytes, width: double.infinity, fit: BoxFit.cover),
+                  ),
+                ] else if (isNetworkImg) ...[
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(c.imageUrl, width: double.infinity, fit: BoxFit.cover),
                   ),
                 ],
                 const SizedBox(height: 6),
@@ -3927,7 +3983,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                     ),
                   ],
                 ),
-                if (c.likedByOwner && c.author != widget.post.author) ...[
+                if (_likedByOwner[c.id] ?? c.likedByOwner) ...[
                   const SizedBox(height: 3),
                   Text(
                     'Liked by creator',
@@ -4013,6 +4069,7 @@ class _CommentSheetState extends State<_CommentSheet> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final userBytes = decodeAvatarUrl(widget.session.user.avatarUrl);
     final previewBytes = _imageUrl.isNotEmpty ? decodeAvatarUrl(_imageUrl) : null;
+    final hasGif = _gifUrl.isNotEmpty;
 
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -4098,6 +4155,36 @@ class _CommentSheetState extends State<_CommentSheet> {
                     ),
                   ),
                 ),
+              if (hasGif)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: SizedBox(
+                    height: 72,
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.network(_gifUrl, height: 72, fit: BoxFit.cover),
+                        ),
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: GestureDetector(
+                            onTap: () => setState(() => _gifUrl = ''),
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: const BoxDecoration(
+                                color: Colors.black54,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close, size: 14, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               if (_replyingTo != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -4167,13 +4254,24 @@ class _CommentSheetState extends State<_CommentSheet> {
                         ),
                       ),
                     ),
+                    GestureDetector(
+                      onTap: _pickGif,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(
+                          Icons.gif,
+                          size: 28,
+                          color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 4),
                     Expanded(
                       child: ValueListenableBuilder<TextEditingValue>(
                         valueListenable: _controller,
                         builder: (context, value, _) {
                           final canSend =
-                              value.text.trim().isNotEmpty || _imageUrl.isNotEmpty;
+                              value.text.trim().isNotEmpty || _imageUrl.isNotEmpty || _gifUrl.isNotEmpty;
                           return TextField(
                             controller: _controller,
                             style: TextStyle(

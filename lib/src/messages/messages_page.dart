@@ -234,6 +234,7 @@ class _MessagesPageState extends State<MessagesPage> {
   bool _isOffline = false;
   final _search = TextEditingController();
   Timer? _presenceTimer;
+  Timer? _inboxPollTimer;
 
   @override
   void initState() {
@@ -241,12 +242,14 @@ class _MessagesPageState extends State<MessagesPage> {
     _loadInboxCache();
     _load();
     _pingPresence();
-    _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
+    _presenceTimer   = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
+    _inboxPollTimer  = Timer.periodic(const Duration(seconds: 3),  (_) => _load());
   }
 
   @override
   void dispose() {
     _presenceTimer?.cancel();
+    _inboxPollTimer?.cancel();
     _search.dispose();
     super.dispose();
   }
@@ -521,13 +524,17 @@ class _InboxRow extends StatelessWidget {
     final count     = summary.unreadCount;
     final timeStr   = _inboxTime(summary.updated);
 
-    // 2+ unread → "X new messages · time", 1 unread or read → preview · time
-    final previewText = (unread && count >= 2)
-        ? '$count new messages · $timeStr'
-        : '$_preview · $timeStr';
-    final previewColor = unread
-        ? (isLight ? Colors.black87 : Colors.white)
-        : (isLight ? _kSubLgt : _kSubDark);
+    // Typing takes priority; then 2+ unread → count; else preview · time
+    final previewText = summary.isTyping
+        ? 'Typing...'
+        : (unread && count >= 2)
+            ? '$count new messages · $timeStr'
+            : '$_preview · $timeStr';
+    final previewColor = summary.isTyping
+        ? (isLight ? const Color(0xff3880f4) : const Color(0xff5b9cf6))
+        : unread
+            ? (isLight ? Colors.black87 : Colors.white)
+            : (isLight ? _kSubLgt : _kSubDark);
 
     return InkWell(
       onTap: onTap,
@@ -952,10 +959,15 @@ class _ConversationPageState extends State<ConversationPage> {
   bool _sending = false;
   MessageItem? _replyTo;
   Timer? _presenceTimer;
+  Timer? _typingPollTimer;
+  Timer? _typingSignalDebounce;
+  bool _iTyping = false;
   DateTime? _otherLastActive;
+  bool _otherTyping = false;
   bool _blocked = false;
   bool _unavailable = false;
   bool _isOffline = false;
+  DateTime? _otherLastReadAt;
 
   Future<void> _react(int msgId, String emoji) async {
     final index = _messages.indexWhere((m) => m.id == msgId);
@@ -997,65 +1009,107 @@ class _ConversationPageState extends State<ConversationPage> {
     }
   }
 
-  void _showReactionPicker(BuildContext context, MessageItem msg, Offset pos) {
-    final size = MediaQuery.sizeOf(context);
-    showGeneralDialog(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: '',
-      barrierColor: Colors.black54,
-      transitionDuration: const Duration(milliseconds: 160),
-      transitionBuilder: (ctx, a1, a2, child) => FadeTransition(opacity: a1, child: child),
-      pageBuilder: (ctx, _, __) => _ReactionPickerOverlay(
-        pos: pos,
-        screenSize: size,
-        current: msg.reactionFor(widget.currentUsername),
-        onSelect: (emoji) { Navigator.of(ctx).pop(); _react(msg.id, emoji); },
-        onMore: () {
-          Navigator.of(ctx).pop();
-          showModalBottomSheet(
-            context: context,
-            backgroundColor: const Color(0xff1c1c1e),
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            builder: (_) => _FullEmojiPicker(onSelect: (emoji) {
-              Navigator.of(context).pop();
-              _react(msg.id, emoji);
-            }),
-          );
-        },
-      ),
-    );
-  }
-
-  void _showMessageOptionsSheet(MessageItem msg) {
+  void _showLongPressSheet(MessageItem msg) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final mine = msg.sender == widget.currentUsername;
+    final mine    = msg.sender == widget.currentUsername;
+    final bg      = isLight ? Colors.white : const Color(0xff1c1c1e);
+    final divClr  = isLight ? const Color(0xffe5e5ea) : const Color(0xff2c2c2e);
+    final fgClr   = isLight ? Colors.black87 : Colors.white;
+
     showModalBottomSheet(
       context: context,
-      backgroundColor: isLight ? _kBgLgt : _kBgDark,
+      backgroundColor: bg,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (sheetContext) => SafeArea(
+      builder: (sheetCtx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 4),
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: isLight ? const Color(0xffC7C7CC) : const Color(0xff48484A),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            // ── Emoji reactions ──────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  for (final emoji in _kQuickEmojis)
+                    GestureDetector(
+                      onTap: () { Navigator.of(sheetCtx).pop(); _react(msg.id, emoji); },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: msg.reactionFor(widget.currentUsername) == emoji
+                              ? const Color(0xff3880f4).withValues(alpha: 0.15)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(emoji, style: const TextStyle(fontSize: 28)),
+                      ),
+                    ),
+                  // + button → full emoji picker
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.of(sheetCtx).pop();
+                      showModalBottomSheet(
+                        context: context,
+                        backgroundColor: const Color(0xff1c1c1e),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                        ),
+                        isScrollControlled: true,
+                        builder: (_) => DraggableScrollableSheet(
+                          expand: false,
+                          initialChildSize: 0.5,
+                          minChildSize: 0.3,
+                          maxChildSize: 0.85,
+                          builder: (_, ctrl) => _FullEmojiPicker(
+                            scrollController: ctrl,
+                            onSelect: (emoji) { Navigator.of(context).pop(); _react(msg.id, emoji); },
+                          ),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isLight ? const Color(0xfff2f2f7) : const Color(0xff2c2c2e),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Icon(Icons.add_rounded, size: 28,
+                          color: isLight ? const Color(0xff3c3c43) : const Color(0xffaeaeb2)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Divider(color: divClr, height: 1),
+            // ── Actions ───────────────────────────────────────────────
+            if (!mine)
+              ListTile(
+                leading: Icon(Icons.reply_rounded, color: fgClr),
+                title: Text('Reply', style: TextStyle(color: fgClr)),
+                onTap: () { Navigator.of(sheetCtx).pop(); _setReplyTo(msg); },
+              ),
             if (mine)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
                 title: const Text('Delete message', style: TextStyle(color: Color(0xfff66c6c))),
-                onTap: () async {
-                  Navigator.of(sheetContext).pop();
-                  await _deleteMessage(msg);
-                },
+                onTap: () async { Navigator.of(sheetCtx).pop(); await _deleteMessage(msg); },
               ),
             ListTile(
-              leading: const Icon(Icons.flag_outlined),
-              title: const Text('Report message'),
+              leading: Icon(Icons.flag_outlined, color: fgClr),
+              title: Text('Report', style: TextStyle(color: fgClr)),
               onTap: () {
-                Navigator.of(sheetContext).pop();
+                Navigator.of(sheetCtx).pop();
                 showReportMessageSheet(
                   context,
                   conversationId: widget.conversationId,
@@ -1064,6 +1118,7 @@ class _ConversationPageState extends State<ConversationPage> {
                 );
               },
             ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -1144,38 +1199,109 @@ class _ConversationPageState extends State<ConversationPage> {
   void initState() {
     super.initState();
     _otherLastActive = widget.otherLastActive;
-    _loadCache();          // show cached messages instantly
-    _load(initial: true);  // then sync with server
+    _loadCache();
+    _load(initial: true);
     _pingPresence();
-    _presenceTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
+    _presenceTimer   = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
+    _typingPollTimer = Timer.periodic(const Duration(seconds: 3),  (_) => _poll());
+    _composer.addListener(_onComposerChanged);
   }
 
   @override
   void dispose() {
     _presenceTimer?.cancel();
+    _typingPollTimer?.cancel();
+    _typingSignalDebounce?.cancel();
+    _composer.removeListener(_onComposerChanged);
+    if (_iTyping) _sendTypingSignal(false);
     _composer.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
+  void _onComposerChanged() {
+    final hasText = _composer.text.isNotEmpty;
+    if (hasText && !_iTyping) {
+      _iTyping = true;
+      _sendTypingSignal(true);
+    }
+    _typingSignalDebounce?.cancel();
+    if (hasText) {
+      _typingSignalDebounce = Timer(const Duration(seconds: 4), () {
+        _iTyping = false;
+        _sendTypingSignal(false);
+      });
+    } else {
+      _iTyping = false;
+      _sendTypingSignal(false);
+    }
+  }
+
+  Future<void> _sendTypingSignal(bool typing) async {
+    try {
+      await http.post(
+        typingEndpoint(widget.conversationId),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'typing': typing}),
+      );
+    } catch (_) {}
+  }
+
+  // Fetches new messages + typing state every 3 seconds.
+  Future<void> _poll() async {
+    // Run both requests in parallel.
+    final results = await Future.wait([
+      http.get(messageConversationEndpoint(widget.conversationId),
+          headers: authGetHeaders(widget.token)).catchError((_) => http.Response('', 0)),
+      http.get(typingEndpoint(widget.conversationId),
+          headers: authGetHeaders(widget.token)).catchError((_) => http.Response('', 0)),
+    ]);
+    if (!mounted) return;
+
+    // ── messages ──────────────────────────────────────────────────────
+    final convRes = results[0];
+    if (convRes.statusCode == 200) {
+      final body = jsonDecode(convRes.body) as Map<String, dynamic>;
+      final conv = body['conversation'] as Map<String, dynamic>?;
+      final msgs = (body['messages'] as List? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(MessageItem.fromJson)
+          .toList();
+      final serverIds  = msgs.map((m) => m.id).toSet();
+      final serverKeys = msgs.map((m) => '${m.sender}\x00${m.text}').toSet();
+      final localOnly  = _messages
+          .where((m) => !serverIds.contains(m.id))
+          .where((m) => m.id >= 0 || !serverKeys.contains('${m.sender}\x00${m.text}'))
+          .toList();
+      final merged = [...msgs, ...localOnly]..sort((a, b) => a.created.compareTo(b.created));
+      final hadNewFromOther = merged.length > _messages.length &&
+          merged.last.sender != widget.currentUsername;
+      final lastActive  = DateTime.tryParse(conv?['otherLastActive']?.toString() ?? '');
+      final otherReadAt = DateTime.tryParse(conv?['otherLastReadAt']?.toString() ?? '');
+      setState(() {
+        _messages = merged;
+        if (lastActive != null)  _otherLastActive  = lastActive;
+        if (otherReadAt != null) _otherLastReadAt  = otherReadAt;
+        if (conv != null) _blocked = conv['viewerBlockedOther'] == true;
+      });
+      _saveCache(merged);
+      if (hadNewFromOther) _scrollToBottom();
+    }
+
+    // ── typing ────────────────────────────────────────────────────────
+    final typRes = results[1];
+    if (typRes.statusCode == 200 && mounted) {
+      final isTyping = (jsonDecode(typRes.body) as Map<String, dynamic>)['otherIsTyping'] == true;
+      if (isTyping != _otherTyping) {
+        setState(() => _otherTyping = isTyping);
+        if (isTyping) _scrollToBottom();
+      }
+    }
+  }
+
   Future<void> _pingPresence() async {
     try {
-      final res = await http.post(presenceEndpoint, headers: authJsonHeaders(widget.token));
-      if (res.statusCode == 200) {
-        // Also refresh conversation to get updated otherLastActive
-        final convRes = await http.get(
-          messageConversationEndpoint(widget.conversationId),
-          headers: authGetHeaders(widget.token),
-        );
-        if (convRes.statusCode == 200 && mounted) {
-          final body = jsonDecode(convRes.body) as Map<String, dynamic>;
-          final conv = body['conversation'] as Map<String, dynamic>?;
-          if (conv != null) {
-            final ts = DateTime.tryParse(conv['otherLastActive']?.toString() ?? '');
-            if (mounted) setState(() => _otherLastActive = ts);
-          }
-        }
-      }
+      await http.post(presenceEndpoint, headers: authJsonHeaders(widget.token));
     } catch (_) {}
   }
 
@@ -1226,10 +1352,12 @@ class _ConversationPageState extends State<ConversationPage> {
           .toList();
       final merged = [...msgs, ...localOnly]
         ..sort((a, b) => a.created.compareTo(b.created));
+      final otherReadAt = DateTime.tryParse(conv?['otherLastReadAt']?.toString() ?? '');
       setState(() {
         _messages = merged;
         _loading = false;
         if (conv != null) _blocked = conv['viewerBlockedOther'] == true;
+        if (otherReadAt != null) _otherLastReadAt = otherReadAt;
       });
       _saveCache(merged);
       _scrollToBottom(jump: initial);
@@ -1272,6 +1400,9 @@ class _ConversationPageState extends State<ConversationPage> {
   Future<void> _sendText() {
     final text = _composer.text.trim();
     if (text.isEmpty) return Future.value();
+    _typingSignalDebounce?.cancel();
+    _iTyping = false;
+    _sendTypingSignal(false);
     if (_replyTo != null) {
       final msg = _replyTo!;
       _clearReply();
@@ -1478,11 +1609,40 @@ class _ConversationPageState extends State<ConversationPage> {
                         controller: _scroll,
                         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                         padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-                        itemCount: _messages.length,
+                        itemCount: _messages.length + (_otherTyping ? 1 : 0),
                         itemBuilder: (_, i) {
+                          if (i == _messages.length) {
+                            // Typing indicator bubble
+                            return Padding(
+                              padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  _avatar(
+                                    username: widget.otherUsername,
+                                    url: widget.otherAvatarUrl,
+                                    radius: 14,
+                                    isLight: isLight,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  _TypingBubble(isLight: isLight),
+                                ],
+                              ),
+                            );
+                          }
                           final msg    = _messages[i];
                           final mine   = msg.sender == widget.currentUsername;
                           final isLast = _isLastInGroup(_messages, i);
+                          // Show "Read" under the last message I sent that the other person has read.
+                          bool showRead = false;
+                          if (mine && _otherLastReadAt != null) {
+                            final isRead = !msg.created.isAfter(_otherLastReadAt!);
+                            if (isRead) {
+                              showRead = !_messages.skip(i + 1).any((m) =>
+                                  m.sender == widget.currentUsername &&
+                                  !m.created.isAfter(_otherLastReadAt!));
+                            }
+                          }
                           return Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -1492,6 +1652,7 @@ class _ConversationPageState extends State<ConversationPage> {
                                 message: msg,
                                 mine: mine,
                                 isLast: isLast,
+                                showRead: showRead,
                                 otherUsername: widget.otherUsername,
                                 otherAvatarUrl: widget.otherAvatarUrl,
                                 isLight: isLight,
@@ -1499,11 +1660,10 @@ class _ConversationPageState extends State<ConversationPage> {
                                 onOpenUserProfile: widget.onOpenUserProfile != null
                                     ? () => widget.onOpenUserProfile!(widget.otherUsername)
                                     : null,
-                                onReply: mine ? null : () => _setReplyTo(msg),
                                 reaction: msg.reactionFor(widget.currentUsername),
+                                onReply: mine ? null : () => _setReplyTo(msg),
                                 onDoubleTap: () => _react(msg.id, '❤️'),
-                                onLongPressStart: (pos) => _showReactionPicker(context, msg, pos),
-                                onMore: msg.id >= 0 ? () => _showMessageOptionsSheet(msg) : null,
+                                onLongPress: msg.id >= 0 ? () => _showLongPressSheet(msg) : null,
                               ),
                             ],
                           );
@@ -1547,13 +1707,14 @@ class _MessageRow extends StatelessWidget {
     this.onReply,
     this.reaction,
     this.onDoubleTap,
-    this.onLongPressStart,
-    this.onMore,
+    this.onLongPress,
+    this.showRead = false,
   });
 
   final MessageItem message;
   final bool mine;
   final bool isLast;
+  final bool showRead;
   final String otherUsername;
   final String otherAvatarUrl;
   final bool isLight;
@@ -1562,21 +1723,7 @@ class _MessageRow extends StatelessWidget {
   final VoidCallback? onReply;
   final String? reaction;
   final VoidCallback? onDoubleTap;
-  final void Function(Offset)? onLongPressStart;
-  final VoidCallback? onMore;
-
-  Widget _moreButton() => GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onMore,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Icon(
-            Icons.more_horiz,
-            size: 18,
-            color: isLight ? const Color(0xff8e8e8e) : const Color(0xff8e8e8e),
-          ),
-        ),
-      );
+  final VoidCallback? onLongPress;
 
   Widget _content() {
     final replyData = _parseReply(message.text);
@@ -1620,9 +1767,7 @@ class _MessageRow extends StatelessWidget {
   Widget _wrapGesture(Widget child) => GestureDetector(
         behavior: HitTestBehavior.opaque,
         onDoubleTap: onDoubleTap,
-        onLongPressStart: onLongPressStart == null
-            ? null
-            : (d) => onLongPressStart!(d.globalPosition),
+        onLongPress: onLongPress,
         child: child,
       );
 
@@ -1645,6 +1790,7 @@ class _MessageRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final maxW      = MediaQuery.sizeOf(context).width * 0.70;
     final bottomPad = reaction != null ? 2.0 : (isLast ? 6.0 : 2.0);
+    final readColor = isLight ? const Color(0xff8e8e93) : const Color(0xff636366);
 
     if (mine) {
       return Padding(
@@ -1656,7 +1802,6 @@ class _MessageRow extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if (onMore != null) _moreButton(),
                 _wrapGesture(
                   ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()),
                 ),
@@ -1664,14 +1809,14 @@ class _MessageRow extends StatelessWidget {
             ),
             if (reaction != null) _reactionBadge(),
             if (reaction != null) SizedBox(height: isLast ? 4 : 2),
+            if (showRead)
+              Padding(
+                padding: const EdgeInsets.only(right: 6, top: 2),
+                child: Text('Read', style: TextStyle(fontSize: 11, color: readColor)),
+              ),
           ],
         ),
       );
-    }
-
-    Widget bubble = ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content());
-    if (onReply != null) {
-      bubble = _SwipeToReply(onReply: onReply!, isLight: isLight, child: bubble);
     }
 
     return Padding(
@@ -1692,8 +1837,12 @@ class _MessageRow extends StatelessWidget {
               else
                 const SizedBox(width: 32),
               const SizedBox(width: 6),
-              _wrapGesture(bubble),
-              if (onMore != null) _moreButton(),
+              _wrapGesture(
+                onReply != null
+                    ? _SwipeToReply(onReply: onReply!, isLight: isLight,
+                        child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()))
+                    : ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()),
+              ),
             ],
           ),
           if (reaction != null) _reactionBadge(),
@@ -1945,6 +2094,63 @@ class _TimeDivider extends StatelessWidget {
 }
 
 // ─── Blocked banner ───────────────────────────────────────────────────────────
+
+class _TypingBubble extends StatefulWidget {
+  const _TypingBubble({required this.isLight});
+  final bool isLight;
+  @override
+  State<_TypingBubble> createState() => _TypingBubbleState();
+}
+
+class _TypingBubbleState extends State<_TypingBubble> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = widget.isLight ? _kOtherLgt : _kOtherDark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(18)),
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (_, _) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (i) {
+            final t = ((_ctrl.value - i * 0.18) % 1.0).clamp(0.0, 1.0);
+            final dy = t < 0.5 ? -4.0 * (t / 0.5) : -4.0 * ((1.0 - t) / 0.5);
+            return Transform.translate(
+              offset: Offset(0, dy),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                child: Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: widget.isLight ? const Color(0xff8e8e8e) : const Color(0xff8e8e8e),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+}
 
 class _BlockedBanner extends StatelessWidget {
   const _BlockedBanner({required this.isLight, this.message = 'User blocked'});
@@ -2728,6 +2934,7 @@ class _ReplyPreviewBar extends StatelessWidget {
 
 const _kQuickEmojis = ['❤️', '😂', '😮', '😢', '😡', '👍'];
 
+// (overlay removed — long-press now opens bottom sheet)
 class _ReactionPickerOverlay extends StatelessWidget {
   const _ReactionPickerOverlay({
     required this.pos,
@@ -2976,8 +3183,9 @@ class _ConvOfflineBanner extends StatelessWidget {
 }
 
 class _FullEmojiPicker extends StatelessWidget {
-  const _FullEmojiPicker({required this.onSelect});
+  const _FullEmojiPicker({required this.onSelect, this.scrollController});
   final ValueChanged<String> onSelect;
+  final ScrollController? scrollController;
 
   @override
   Widget build(BuildContext context) {
@@ -2991,6 +3199,7 @@ class _FullEmojiPicker extends StatelessWidget {
           ),
           Flexible(
             child: GridView.builder(
+              controller: scrollController,
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 8,

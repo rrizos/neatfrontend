@@ -345,6 +345,7 @@ class ConversationSummary {
     required this.unreadCount,
     required this.lastReadAt,
     this.otherLastActive,
+    this.isTyping = false,
   });
 
   final int id;
@@ -357,6 +358,7 @@ class ConversationSummary {
   final int unreadCount;
   final DateTime? lastReadAt;
   final DateTime? otherLastActive;
+  final bool isTyping;
 
   factory ConversationSummary.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -373,6 +375,7 @@ class ConversationSummary {
       unreadCount: parseInt(json['unreadCount']),
       lastReadAt: DateTime.tryParse(json['lastReadAt']?.toString() ?? ''),
       otherLastActive: DateTime.tryParse(json['otherLastActive']?.toString() ?? ''),
+      isTyping: json['otherIsTyping'] == true,
     );
   }
 }
