@@ -36,6 +36,13 @@ target 'Runner' do
   end
 end
 
+# NotificationServiceExtension links FirebaseMessaging via the same Swift
+# Package Manager resolution Runner already uses (FlutterGeneratedPluginSwiftPackage
+# pulls in firebase-ios-sdk for firebase_core/firebase_messaging) — adding it a
+# second time via CocoaPods here caused a "Redefinition of module 'Firebase'"
+# build error, so it's wired as an SPM package dependency in project.pbxproj
+# instead (see scripts note in that target's build settings).
+
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)

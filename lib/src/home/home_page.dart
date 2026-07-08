@@ -23,6 +23,7 @@ import '../core/media_cache.dart';
 import '../core/mentions.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
+import '../core/push_service.dart';
 import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../events/events_page.dart';
@@ -95,6 +96,9 @@ class _HomePageState extends State<HomePage> {
     _setupNativeTabChannel();
     _load();
     _loadNotifications(silent: true);
+    PushService.instance.onDmTap = _openConversationById;
+    PushService.instance.onSoftTap = _openNotifications;
+    PushService.instance.replayPending();
   }
 
   void _setupNativeTabChannel() {
@@ -116,6 +120,12 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     if (_isIOS26) _kTabChannel.invokeMethod('hideTabBar');
     _kTabChannel.setMethodCallHandler(null);
+    if (identical(PushService.instance.onDmTap, _openConversationById)) {
+      PushService.instance.onDmTap = null;
+    }
+    if (identical(PushService.instance.onSoftTap, _openNotifications)) {
+      PushService.instance.onSoftTap = null;
+    }
     _compose.dispose();
     _cityScroll.dispose();
     _followingScroll.dispose();
@@ -808,6 +818,49 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     ).whenComplete(_showNativeBar);
+  }
+
+  /// Opens a DM conversation directly from a tapped push notification —
+  /// mirrors _MessagesPageState._open in messages_page.dart, but fetches the
+  /// conversation by id first since a push only carries the id (see
+  /// push_service.dart / push/senders.py on the backend).
+  Future<void> _openConversationById(int conversationId) async {
+    try {
+      final res = await http.get(
+        messageConversationEndpoint(conversationId),
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (res.statusCode == 401) {
+        await widget.onLogout();
+        return;
+      }
+      if (res.statusCode != 200) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final conv = ConversationSummary.fromJson(
+        decoded['conversation'] as Map<String, dynamic>,
+      );
+      if (!mounted) return;
+      _hideNativeBar();
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ConversationPage(
+          token: widget.session.token,
+          currentUsername: widget.session.user.username,
+          conversationId: conv.id,
+          otherUsername: conv.otherUser,
+          otherFullName: conv.otherFullName,
+          otherAvatarUrl: conv.otherAvatarUrl,
+          otherLastActive: conv.otherLastActive,
+          onLogout: widget.onLogout,
+          onOpenPost: (author, postId) {
+            Navigator.popUntil(context, (route) => route.isFirst);
+            _openProfileAtPost(author, postId);
+          },
+          onOpenUserProfile: _pushProfileRoute,
+        ),
+      ));
+      _showNativeBar();
+      _loadUnreadMessages();
+    } catch (_) {}
   }
 
   void _openComments(FeedPost post) {

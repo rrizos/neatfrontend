@@ -86,6 +86,10 @@ Uri searchUsersEndpoint([String query = '']) {
 }
 Uri get notificationsEndpoint =>
     Uri.parse('$apiBaseUrl/api/auth/notifications/');
+Uri get registerDeviceEndpoint =>
+    Uri.parse('$apiBaseUrl/api/push/devices/register/');
+Uri get unregisterDeviceEndpoint =>
+    Uri.parse('$apiBaseUrl/api/push/devices/unregister/');
 Uri get searchHistoryEndpoint =>
     Uri.parse('$apiBaseUrl/api/auth/search-history/');
 Uri searchHistoryItemEndpoint(String query) =>

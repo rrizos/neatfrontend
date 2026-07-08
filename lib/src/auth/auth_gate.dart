@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api.dart';
 import '../core/models.dart';
+import '../core/push_service.dart';
 import '../home/home_page.dart';
 import 'landing_page.dart';
 
@@ -19,6 +22,13 @@ class AuthGate extends StatefulWidget {
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
 
+  // Lets routes pushed outside this widget's subtree (e.g. a DM conversation
+  // opened from a tapped push notification, which reads the token straight
+  // out of SharedPreferences) trigger the same logout path as an in-tree 401
+  // — see push_service.dart / message_deep_link_page usage.
+  static Future<void> Function()? _activeForceLogout;
+  static Future<void> forceLogout() async => _activeForceLogout?.call();
+
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
@@ -31,7 +41,16 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
+    AuthGate._activeForceLogout = _logout;
     _restore();
+  }
+
+  @override
+  void dispose() {
+    if (identical(AuthGate._activeForceLogout, _logout)) {
+      AuthGate._activeForceLogout = null;
+    }
+    super.dispose();
   }
 
   Future<void> _restore() async {
@@ -58,6 +77,7 @@ class _AuthGateState extends State<AuthGate> {
           _loading = false;
         });
       }
+      if (!kIsWeb) unawaited(PushService.instance.registerForSession(token));
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -67,11 +87,13 @@ class _AuthGateState extends State<AuthGate> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, session.token);
     if (mounted) setState(() => _session = session);
+    if (!kIsWeb) unawaited(PushService.instance.registerForSession(session.token));
   }
 
   Future<void> _logout() async {
     final token = _session?.token;
     if (token != null) {
+      if (!kIsWeb) await PushService.instance.unregisterForSession(token);
       await http.post(logoutEndpoint, headers: authJsonHeaders(token));
     }
     final prefs = await SharedPreferences.getInstance();
