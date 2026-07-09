@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' show Color;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -13,9 +12,6 @@ import 'api.dart';
 
 const _softChannelId = 'soft_channel';
 const _messagesChannelId = 'messages_channel';
-// Brand blue for the small-icon badge — without this Android shows it in a
-// plain gray/white circle instead of a colored one.
-const _brandColor = Color(0xFF1479FF);
 
 /// Background isolate entry point required by firebase_messaging. Real
 /// notification display for background/killed app states is handled
@@ -25,9 +21,10 @@ const _brandColor = Color(0xFF1479FF);
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {}
 
 /// Wires up Firebase Cloud Messaging: permission requests, device-token
-/// registration, foreground display (Android needs it built manually —
-/// unlike iOS, it doesn't auto-present FCM notifications while the app is
-/// foregrounded), and tap-to-navigate.
+/// registration, and tap-to-navigate. No tray notification is ever shown
+/// while the app is foregrounded (on either platform) — only when
+/// backgrounded/killed, which Android/iOS handle natively from the FCM
+/// `notification` payload without any app code running.
 ///
 /// Every push is either a "soft" notification-center item (likes, follows,
 /// comments, event activity — silent, channel `soft_channel`) or a DM alert
@@ -74,7 +71,12 @@ class PushService {
       if (authToken != null) unawaited(_postToken(authToken, token));
     });
 
-    FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+    // Deliberately no FirebaseMessaging.onMessage listener: while the app is
+    // foregrounded (the only time that stream fires), pushes shouldn't
+    // interrupt with a tray notification — matching Instagram, and per
+    // explicit request not to notify while already inside the app. The
+    // in-app UI (notifications bell, conversation view) reflects new
+    // activity through its own existing polling instead.
     FirebaseMessaging.onMessageOpenedApp.listen((m) => _dispatchTap(m.data));
 
     // Fire-and-forget: this is only for routing a cold-start tap, unrelated
@@ -197,77 +199,6 @@ class PushService {
       debugPrint('PushService._postToken: response ${res.statusCode} ${res.body}');
     } catch (e) {
       debugPrint('PushService._postToken failed: $e');
-    }
-  }
-
-  // ── Foreground display (Android only — iOS auto-presents natively) ─────
-
-  Future<void> _handleForegroundMessage(RemoteMessage message) async {
-    if (kIsWeb || !Platform.isAndroid) return;
-
-    final data = message.data;
-    final isDm = data['type'] == 'dm';
-    final title = message.notification?.title ?? '';
-    final body = message.notification?.body ?? '';
-    final payload = jsonEncode(data);
-
-    if (isDm) {
-      final imageUrl = message.notification?.android?.imageUrl;
-      final avatarBytes = await _fetchImageBytes(imageUrl);
-      await _local.show(
-        message.hashCode,
-        title,
-        body,
-        NotificationDetails(
-          android: AndroidNotificationDetails(
-            _messagesChannelId,
-            'Messages',
-            importance: Importance.high,
-            priority: Priority.high,
-            color: _brandColor,
-            styleInformation: avatarBytes != null
-                ? BigPictureStyleInformation(
-                    ByteArrayAndroidBitmap(avatarBytes),
-                    largeIcon: ByteArrayAndroidBitmap(avatarBytes),
-                  )
-                : null,
-            largeIcon:
-                avatarBytes != null ? ByteArrayAndroidBitmap(avatarBytes) : null,
-          ),
-        ),
-        payload: payload,
-      );
-    } else {
-      await _local.show(
-        message.hashCode,
-        title,
-        body,
-        NotificationDetails(
-          android: AndroidNotificationDetails(
-            _softChannelId,
-            'Activity',
-            importance: Importance.defaultImportance,
-            priority: Priority.defaultPriority,
-            playSound: false,
-            enableVibration: false,
-            color: _brandColor,
-          ),
-        ),
-        payload: payload,
-      );
-    }
-  }
-
-  Future<Uint8List?> _fetchImageBytes(String? url) async {
-    if (url == null || !(url.startsWith('http://') || url.startsWith('https://'))) {
-      return null;
-    }
-    try {
-      final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
-      if (res.statusCode != 200) return null;
-      return res.bodyBytes;
-    } catch (_) {
-      return null;
     }
   }
 
