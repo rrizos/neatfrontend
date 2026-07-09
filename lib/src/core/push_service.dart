@@ -114,11 +114,29 @@ class PushService {
     _authToken = authToken;
     try {
       await init();
+      if (!kIsWeb && Platform.isIOS) await _waitForApnsToken();
       final token = await FirebaseMessaging.instance.getToken();
       if (token == null) return;
       _fcmToken = token;
       await _postToken(authToken, token);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('PushService.registerForSession failed: $e');
+    }
+  }
+
+  /// On iOS, FirebaseMessaging.getToken() errors out ("APNS device token not
+  /// set") if called before the native APNs token has round-tripped through
+  /// Apple's servers via didRegisterForRemoteNotificationsWithDeviceToken —
+  /// which requestPermission() only kicks off, it doesn't wait for it. This
+  /// has no Android equivalent, and getToken()'s failure here was previously
+  /// swallowed silently, so registration always silently failed on iOS.
+  Future<void> _waitForApnsToken() async {
+    final messaging = FirebaseMessaging.instance;
+    for (var i = 0; i < 10; i++) {
+      if (await messaging.getAPNSToken() != null) return;
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+    debugPrint('PushService: APNS token never arrived after 5s');
   }
 
   Future<void> unregisterForSession(String authToken) async {
@@ -131,7 +149,9 @@ class PushService {
         headers: authJsonHeaders(authToken),
         body: jsonEncode({'token': token}),
       );
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('PushService.unregisterForSession failed: $e');
+    }
   }
 
   Future<void> _postToken(String authToken, String fcmToken) async {
@@ -144,7 +164,9 @@ class PushService {
           'platform': Platform.isIOS ? 'ios' : 'android',
         }),
       );
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('PushService._postToken failed: $e');
+    }
   }
 
   // ── Foreground display (Android only — iOS auto-presents natively) ─────
