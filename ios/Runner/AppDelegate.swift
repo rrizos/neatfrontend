@@ -11,6 +11,14 @@ import UIKit
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        // firebase_messaging normally does this itself, by observing
+        // UIApplicationDidFinishLaunchingNotification when its plugin is
+        // registered — but GeneratedPluginRegistrant.register(with:) here
+        // only runs later, in didInitializeImplicitFlutterEngine(_:), by
+        // which point that one-shot notification has already fired and been
+        // missed. Without this, the app never asks Apple for an APNs device
+        // token at all (confirmed via device syslog: no apsd connection).
+        application.registerForRemoteNotifications()
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 

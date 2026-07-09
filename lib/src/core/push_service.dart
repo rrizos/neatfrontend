@@ -73,8 +73,21 @@ class PushService {
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
     FirebaseMessaging.onMessageOpenedApp.listen((m) => _dispatchTap(m.data));
 
-    final initialMessage = await messaging.getInitialMessage();
-    if (initialMessage != null) _dispatchTap(initialMessage.data);
+    // Fire-and-forget: this is only for routing a cold-start tap, unrelated
+    // to token registration. On this device it has been observed to hang
+    // indefinitely (a known FlutterFire/iOS issue), which must never block
+    // init() — registerForSession() awaits the same _initFuture.
+    unawaited(_checkInitialMessage(messaging));
+  }
+
+  Future<void> _checkInitialMessage(FirebaseMessaging messaging) async {
+    try {
+      final initialMessage =
+          await messaging.getInitialMessage().timeout(const Duration(seconds: 10));
+      if (initialMessage != null) _dispatchTap(initialMessage.data);
+    } catch (e) {
+      debugPrint('PushService._checkInitialMessage failed: $e');
+    }
   }
 
   Future<void> _initLocalNotifications() async {
@@ -115,14 +128,21 @@ class PushService {
   // ── Session wiring (called from auth_gate.dart on login/logout) ─────────
 
   Future<void> registerForSession(String authToken) async {
+    debugPrint('PushService.registerForSession: starting');
     _authToken = authToken;
     try {
       await init();
+      debugPrint('PushService.registerForSession: init done');
       if (!kIsWeb && Platform.isIOS) await _waitForApnsToken();
-      final token = await FirebaseMessaging.instance.getToken();
+      debugPrint('PushService.registerForSession: apns wait done, calling getToken');
+      final token = await FirebaseMessaging.instance
+          .getToken()
+          .timeout(const Duration(seconds: 15));
+      debugPrint('PushService.registerForSession: getToken returned $token');
       if (token == null) return;
       _fcmToken = token;
       await _postToken(authToken, token);
+      debugPrint('PushService.registerForSession: done');
     } catch (e) {
       debugPrint('PushService.registerForSession failed: $e');
     }
@@ -160,14 +180,17 @@ class PushService {
 
   Future<void> _postToken(String authToken, String fcmToken) async {
     try {
-      await http.post(
-        registerDeviceEndpoint,
-        headers: authJsonHeaders(authToken),
-        body: jsonEncode({
-          'token': fcmToken,
-          'platform': Platform.isIOS ? 'ios' : 'android',
-        }),
-      );
+      final res = await http
+          .post(
+            registerDeviceEndpoint,
+            headers: authJsonHeaders(authToken),
+            body: jsonEncode({
+              'token': fcmToken,
+              'platform': Platform.isIOS ? 'ios' : 'android',
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      debugPrint('PushService._postToken: response ${res.statusCode} ${res.body}');
     } catch (e) {
       debugPrint('PushService._postToken failed: $e');
     }
