@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "449378002358",
+    "project_id": "neat-31562",
+    "storage_bucket": "neat-31562.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:449378002358:android:a3c575375bcc7d09150d17",
+        "android_client_info": {
+          "package_name": "gr.app.neat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCo_PahmCCr9JAkDgb371F-wdQyr5Bahv4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
