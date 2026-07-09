@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,16 +27,11 @@ void main() {
     );
     // Fire-and-forget: Firebase/push setup must never block the first frame.
     // Requesting notification permission before the app is on screen has
-    // also been known to hang the native launch screen on iOS.
-    unawaited(_initPush());
+    // also been known to hang the native launch screen on iOS. PushService.
+    // init() is the single gate (Firebase.initializeApp() included) that
+    // registerForSession() also awaits, so an auto-login racing this on cold
+    // start can't hit FirebaseMessaging before Firebase itself is ready.
+    unawaited(PushService.instance.init());
   }
   runApp(const NeatApp());
-}
-
-Future<void> _initPush() async {
-  try {
-    await Firebase.initializeApp();
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    await PushService.instance.init();
-  } catch (_) {}
 }
