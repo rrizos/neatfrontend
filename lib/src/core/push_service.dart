@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show Color;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -12,6 +13,9 @@ import 'api.dart';
 
 const _softChannelId = 'soft_channel';
 const _messagesChannelId = 'messages_channel';
+// Brand blue for the small-icon badge — without this Android shows it in a
+// plain gray/white circle instead of a colored one.
+const _brandColor = Color(0xFF1479FF);
 
 /// Background isolate entry point required by firebase_messaging. Real
 /// notification display for background/killed app states is handled
@@ -220,6 +224,7 @@ class PushService {
             'Messages',
             importance: Importance.high,
             priority: Priority.high,
+            color: _brandColor,
             styleInformation: avatarBytes != null
                 ? BigPictureStyleInformation(
                     ByteArrayAndroidBitmap(avatarBytes),
@@ -237,7 +242,7 @@ class PushService {
         message.hashCode,
         title,
         body,
-        const NotificationDetails(
+        NotificationDetails(
           android: AndroidNotificationDetails(
             _softChannelId,
             'Activity',
@@ -245,6 +250,7 @@ class PushService {
             priority: Priority.defaultPriority,
             playSound: false,
             enableVibration: false,
+            color: _brandColor,
           ),
         ),
         payload: payload,
