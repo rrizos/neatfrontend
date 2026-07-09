@@ -42,7 +42,14 @@ class PushService {
   int? _pendingConversationId;
   bool _pendingSoft = false;
 
-  Future<void> init() async {
+  Future<void>? _initFuture;
+
+  /// Idempotent — safe to call from main() and to await from
+  /// registerForSession/unregisterForSession, which may run before main()'s
+  /// fire-and-forget init() has finished (e.g. an auto-login on cold start).
+  Future<void> init() => _initFuture ??= _doInit();
+
+  Future<void> _doInit() async {
     await _initLocalNotifications();
 
     final messaging = FirebaseMessaging.instance;
@@ -106,6 +113,7 @@ class PushService {
   Future<void> registerForSession(String authToken) async {
     _authToken = authToken;
     try {
+      await init();
       final token = await FirebaseMessaging.instance.getToken();
       if (token == null) return;
       _fcmToken = token;

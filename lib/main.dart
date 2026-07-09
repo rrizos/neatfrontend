@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -10,7 +11,7 @@ import 'package:giphy_flutter_sdk/giphy_flutter_sdk.dart';
 import 'src/app.dart';
 import 'src/core/push_service.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -26,9 +27,18 @@ void main() async {
           ? 'phQaZvEZeoJTE7GqZ2LnOxUAXWMyEPbM'
           : 'dmecPhhlED6LaEOrcnBOjVGYOQd62EYj',
     );
+    // Fire-and-forget: Firebase/push setup must never block the first frame.
+    // Requesting notification permission before the app is on screen has
+    // also been known to hang the native launch screen on iOS.
+    unawaited(_initPush());
+  }
+  runApp(const NeatApp());
+}
+
+Future<void> _initPush() async {
+  try {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     await PushService.instance.init();
-  }
-  runApp(const NeatApp());
+  } catch (_) {}
 }
