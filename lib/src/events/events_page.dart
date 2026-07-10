@@ -3297,10 +3297,19 @@ class _EventMapViewState extends State<_EventMapView> {
   }
 
   Future<void> _init() async {
-    if (_eventMapkitJs == null) {
-      try {
-        _eventMapkitJs = await rootBundle.loadString('assets/mapkit.js');
-      } catch (_) {}
+    // On iOS we inline mapkit.js (WKWebView/Nitro parses it quickly and there
+    // is no network hit). On Android the 807 KB inline causes a noticeable
+    // parse stall on every open; instead we let the WebView load it from the
+    // CDN — Android's WebView (Chromium) caches the response on disk, so only
+    // the very first ever open in the app's lifetime pays the network cost.
+    String? js;
+    if (!Platform.isAndroid) {
+      if (_eventMapkitJs == null) {
+        try {
+          _eventMapkitJs = await rootBundle.loadString('assets/mapkit.js');
+        } catch (_) {}
+      }
+      js = _eventMapkitJs;
     }
     if (!mounted) return;
     final ctrl = WebViewController()
@@ -3310,7 +3319,7 @@ class _EventMapViewState extends State<_EventMapView> {
         onWebResourceError: (e) => debugPrint('[eventmap] ${e.description}'),
       ))
       ..loadHtmlString(
-        _buildMapHtml(widget.location, inlineJs: _eventMapkitJs),
+        _buildMapHtml(widget.location, inlineJs: js),
         baseUrl: 'https://netnest.net',
       );
     if (mounted) setState(() => _ctrl = ctrl);

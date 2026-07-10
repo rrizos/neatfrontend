@@ -49,6 +49,10 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Impeller is still immature on many Android GPUs; Skia is smoother. -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
 
         <!-- FCM: default channel/icon used when the app is backgrounded or
              killed and Android auto-displays the notification itself. The

@@ -25,7 +25,7 @@ void main() {
           ? 'phQaZvEZeoJTE7GqZ2LnOxUAXWMyEPbM'
           : 'dmecPhhlED6LaEOrcnBOjVGYOQd62EYj',
     );
-<<<<<<< HEAD
+
     // Fire-and-forget: Firebase/push setup must never block the first frame.
     // Requesting notification permission before the app is on screen has
     // also been known to hang the native launch screen on iOS. PushService.
@@ -33,15 +33,7 @@ void main() {
     // registerForSession() also awaits, so an auto-login racing this on cold
     // start can't hit FirebaseMessaging before Firebase itself is ready.
     unawaited(PushService.instance.init());
-=======
-    try {
-      await Firebase.initializeApp();
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-      await PushService.instance.init();
-    } catch (_) {
-      // Firebase config file missing — push notifications disabled but app runs normally.
-    }
->>>>>>> c230615 (update project files)
+
   }
   runApp(const NeatApp());
 }
