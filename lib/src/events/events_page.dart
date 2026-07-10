@@ -899,7 +899,9 @@ class _EventCard extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              '${event.city} • Community',
+                              event.location.isNotEmpty
+                                  ? '${_locationDisplay(event.location)} • Community'
+                                  : '${event.city} • Community',
                               style: const TextStyle(
                                 color: Color(0xff8f8f8f),
                                 fontSize: 12,
@@ -1313,7 +1315,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       'hasTickets': _tickets,
                       'date': _dateTimeIso(_date!, _time),
                       if (_official) 'category': _category,
-                      if (_official && _location.text.trim().isNotEmpty)
+                      if (_location.text.trim().isNotEmpty)
                         'location': (_selectedLat != null && _selectedLon != null)
                             ? '$_selectedLat,$_selectedLon|${_location.text.trim()}'
                             : _location.text.trim(),
@@ -1419,19 +1421,22 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 ),
               ),
             ],
-            if (_official) ...[
-              const SizedBox(height: 10),
-              TextField(
-                controller: _location,
-                focusNode: _locationFocus,
-                onChanged: (v) {
-                  if (_showLocationError && v.trim().isNotEmpty) setState(() => _showLocationError = false);
-                  _onLocationChanged(v);
-                },
-                style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                decoration: _dec('Venue / Address (required)', isLight, error: _showLocationError),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _location,
+              focusNode: _locationFocus,
+              onChanged: (v) {
+                if (_showLocationError && v.trim().isNotEmpty) setState(() => _showLocationError = false);
+                _onLocationChanged(v);
+              },
+              style: TextStyle(color: isLight ? Colors.black : Colors.white),
+              decoration: _dec(
+                _official ? 'Venue / Address (required)' : 'Venue / Address (optional)',
+                isLight,
+                error: _showLocationError,
               ),
-              if (_loadingSuggestions) ...[
+            ),
+            if (_loadingSuggestions) ...[
                 const SizedBox(height: 6),
                 const Center(
                   child: SizedBox(
@@ -1507,16 +1512,15 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                   ),
                 ),
               ],
-              if (_tickets) ...[
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _ticketsUrl,
-                  style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                  keyboardType: TextInputType.url,
-                  onChanged: (_) { if (_showTicketsUrlError) setState(() => _showTicketsUrlError = false); },
-                  decoration: _dec('Tickets website URL (required)', isLight, error: _showTicketsUrlError),
-                ),
-              ],
+            if (_official && _tickets) ...[
+              const SizedBox(height: 10),
+              TextField(
+                controller: _ticketsUrl,
+                style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                keyboardType: TextInputType.url,
+                onChanged: (_) { if (_showTicketsUrlError) setState(() => _showTicketsUrlError = false); },
+                decoration: _dec('Tickets website URL (required)', isLight, error: _showTicketsUrlError),
+              ),
             ],
             const SizedBox(height: 12),
             GestureDetector(
@@ -1906,14 +1910,6 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              // Location — read-only
-              TextField(
-                controller: _location,
-                enabled: false,
-                style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                decoration: _dec('Venue / Address', isLight),
-              ),
               if (_tickets) ...[
                 const SizedBox(height: 10),
                 // Tickets URL — read-only
@@ -1925,6 +1921,16 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                   decoration: _dec('Tickets website URL', isLight),
                 ),
               ],
+            ],
+            if (_location.text.trim().isNotEmpty) ...[
+              const SizedBox(height: 10),
+              // Location — read-only
+              TextField(
+                controller: _location,
+                enabled: false,
+                style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                decoration: _dec('Venue / Address', isLight),
+              ),
             ],
             const SizedBox(height: 12),
             GestureDetector(

@@ -190,7 +190,7 @@ Uint8List? _parseImage(String t) {
   } catch (_) { return null; }
 }
 
-({String sender, String preview, String text})? _parseReply(String t) {
+({String sender, String preview, String text, int? id})? _parseReply(String t) {
   if (!t.startsWith(_kReplyPrefix)) return null;
   try {
     final d = jsonDecode(t.substring(_kReplyPrefix.length)) as Map<String, dynamic>;
@@ -198,6 +198,7 @@ Uint8List? _parseImage(String t) {
       sender: d['sender']?.toString() ?? '',
       preview: d['preview']?.toString() ?? '',
       text: d['text']?.toString() ?? '',
+      id: d['id'] != null ? int.tryParse(d['id'].toString()) : null,
     );
   } catch (_) { return null; }
 }
@@ -968,6 +969,7 @@ class _ConversationPageState extends State<ConversationPage> {
   bool _unavailable = false;
   bool _isOffline = false;
   DateTime? _otherLastReadAt;
+  final _messageKeys = <int, GlobalKey>{};
 
   Future<void> _react(int msgId, String emoji) async {
     final index = _messages.indexWhere((m) => m.id == msgId);
@@ -1093,12 +1095,11 @@ class _ConversationPageState extends State<ConversationPage> {
             ),
             Divider(color: divClr, height: 1),
             // ── Actions ───────────────────────────────────────────────
-            if (!mine)
-              ListTile(
-                leading: Icon(Icons.reply_rounded, color: fgClr),
-                title: Text('Reply', style: TextStyle(color: fgClr)),
-                onTap: () { Navigator.of(sheetCtx).pop(); _setReplyTo(msg); },
-              ),
+            ListTile(
+              leading: Icon(Icons.reply_rounded, color: fgClr),
+              title: Text('Reply', style: TextStyle(color: fgClr)),
+              onTap: () { Navigator.of(sheetCtx).pop(); _setReplyTo(msg); },
+            ),
             if (mine)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
@@ -1407,7 +1408,7 @@ class _ConversationPageState extends State<ConversationPage> {
       final msg = _replyTo!;
       _clearReply();
       return _sendRaw(
-        '$_kReplyPrefix${jsonEncode({'sender': msg.sender, 'preview': _replyPreview(msg), 'text': text})}',
+        '$_kReplyPrefix${jsonEncode({'sender': msg.sender, 'preview': _replyPreview(msg), 'text': text, 'id': msg.id})}',
         clearInput: true,
       );
     }
@@ -1423,11 +1424,49 @@ class _ConversationPageState extends State<ConversationPage> {
   void _setReplyTo(MessageItem msg) => setState(() => _replyTo = msg);
   void _clearReply() => setState(() => _replyTo = null);
 
+  int? _findReplyTarget({required String sender, required String preview, required int? id}) {
+    if (id != null && _messageKeys.containsKey(id)) return id;
+    for (final m in _messages.reversed) {
+      if (m.sender != sender) continue;
+      if (_replyPreview(m) == preview) return m.id;
+    }
+    return null;
+  }
+
+  Future<void> _scrollToMessage(int msgId) async {
+    final idx = _messages.indexWhere((m) => m.id == msgId);
+    if (idx == -1) return;
+
+    // Step 1: animate to approx position so ListView builds the target item.
+    if (_scroll.hasClients) {
+      final max = _scroll.position.maxScrollExtent;
+      final rough = (idx / _messages.length * max).clamp(0.0, max);
+      await _scroll.animateTo(
+        rough,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+      );
+    }
+
+    // Step 2: fine-tune now that the item is in the tree.
+    await Future.delayed(const Duration(milliseconds: 32));
+    final key = _messageKeys[msgId];
+    if (!mounted || key?.currentContext == null) return;
+    Scrollable.ensureVisible(
+      key!.currentContext!,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      alignment: 0.15,
+    );
+  }
+
   String _replyPreview(MessageItem msg) {
     if (_parseImage(msg.text) != null) return '📷 Photo';
     if (_parseVoice(msg.text) != null) return '🎤 Voice message';
     if (_parsePost(msg.text) != null) return '📎 Post';
-    final t = msg.text;
+    // Unwrap nested reply so we never store raw JSON as preview.
+    final inner = _parseReply(msg.text);
+    final t = inner != null ? inner.text : msg.text;
     return t.length > 80 ? '${t.substring(0, 80)}…' : t;
   }
 
@@ -1643,7 +1682,10 @@ class _ConversationPageState extends State<ConversationPage> {
                                   !m.created.isAfter(_otherLastReadAt!));
                             }
                           }
+                          final msgKey = _messageKeys.putIfAbsent(msg.id, () => GlobalKey());
+                          final replyData = _parseReply(msg.text);
                           return Column(
+                            key: msgKey,
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (_showDivider(_messages, i))
@@ -1661,9 +1703,17 @@ class _ConversationPageState extends State<ConversationPage> {
                                     ? () => widget.onOpenUserProfile!(widget.otherUsername)
                                     : null,
                                 reaction: msg.reactionFor(widget.currentUsername),
-                                onReply: mine ? null : () => _setReplyTo(msg),
+                                onReply: () => _setReplyTo(msg),
                                 onDoubleTap: () => _react(msg.id, '❤️'),
                                 onLongPress: msg.id >= 0 ? () => _showLongPressSheet(msg) : null,
+                                onTapQuote: replyData != null ? () {
+                                  final targetId = _findReplyTarget(
+                                    sender: replyData.sender,
+                                    preview: replyData.preview,
+                                    id: replyData.id,
+                                  );
+                                  if (targetId != null) _scrollToMessage(targetId);
+                                } : null,
                               ),
                             ],
                           );
@@ -1709,6 +1759,7 @@ class _MessageRow extends StatelessWidget {
     this.onDoubleTap,
     this.onLongPress,
     this.showRead = false,
+    this.onTapQuote,
   });
 
   final MessageItem message;
@@ -1724,11 +1775,12 @@ class _MessageRow extends StatelessWidget {
   final String? reaction;
   final VoidCallback? onDoubleTap;
   final VoidCallback? onLongPress;
+  final VoidCallback? onTapQuote;
 
   Widget _content() {
     final replyData = _parseReply(message.text);
     if (replyData != null) {
-      return _ReplyMessageBubble(replyData: replyData, mine: mine, isLast: isLast, isLight: isLight);
+      return _ReplyMessageBubble(replyData: replyData, mine: mine, isLast: isLast, isLight: isLight, onTapQuote: onTapQuote);
     }
 
     final imgBytes  = _parseImage(message.text);
@@ -1803,7 +1855,11 @@ class _MessageRow extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 _wrapGesture(
-                  ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()),
+                  onReply != null
+                      ? _SwipeToReply(
+                          onReply: onReply!, isLight: isLight, reverse: true,
+                          child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()))
+                      : ConstrainedBox(constraints: BoxConstraints(maxWidth: maxW), child: _content()),
                 ),
               ],
             ),
@@ -2710,10 +2766,16 @@ class _SharedPostCard extends StatelessWidget {
 // ─── Swipe-to-reply wrapper ───────────────────────────────────────────────────
 
 class _SwipeToReply extends StatefulWidget {
-  const _SwipeToReply({required this.child, required this.onReply, required this.isLight});
+  const _SwipeToReply({
+    required this.child,
+    required this.onReply,
+    required this.isLight,
+    this.reverse = false,
+  });
   final Widget child;
   final VoidCallback onReply;
   final bool isLight;
+  final bool reverse; // true → swipe left (own messages)
 
   @override
   State<_SwipeToReply> createState() => _SwipeToReplyState();
@@ -2737,8 +2799,10 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
-    if (d.delta.dx < 0 && _offset <= 0) return;
-    final newOffset = (_offset + d.delta.dx).clamp(0.0, 72.0);
+    // For reverse (left-swipe), invert dx so offset is always positive internally.
+    final delta = widget.reverse ? -d.delta.dx : d.delta.dx;
+    if (delta < 0 && _offset <= 0) return;
+    final newOffset = (_offset + delta).clamp(0.0, 72.0);
     setState(() => _offset = newOffset);
     if (_offset >= 56 && !_triggered) {
       _triggered = true;
@@ -2759,38 +2823,47 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
 
   @override
   Widget build(BuildContext context) {
-    final progress = (_offset / 56).clamp(0.0, 1.0);
+    final progress   = (_offset / 56).clamp(0.0, 1.0);
+    final translate  = widget.reverse ? -_offset : _offset;
+    final iconCircle = Container(
+      width: 28, height: 28,
+      decoration: BoxDecoration(
+        color: widget.isLight ? const Color(0xffe0e0e0) : const Color(0xff3a3a3a),
+        shape: BoxShape.circle,
+      ),
+      child: Icon(Icons.reply_rounded, size: 16,
+          color: widget.isLight ? Colors.black54 : Colors.white54),
+    );
     return GestureDetector(
       onHorizontalDragUpdate: _onDragUpdate,
       onHorizontalDragEnd: _onDragEnd,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Positioned(
-            left: _offset - 36,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: Opacity(
-                opacity: progress,
-                child: Transform.scale(
-                  scale: 0.7 + progress * 0.3,
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: widget.isLight ? const Color(0xffe0e0e0) : const Color(0xff3a3a3a),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.reply_rounded, size: 16,
-                        color: widget.isLight ? Colors.black54 : Colors.white54),
-                  ),
+          if (widget.reverse)
+            Positioned(
+              right: _offset - 36,
+              top: 0, bottom: 0,
+              child: Center(
+                child: Opacity(
+                  opacity: progress,
+                  child: Transform.scale(scale: 0.7 + progress * 0.3, child: iconCircle),
+                ),
+              ),
+            )
+          else
+            Positioned(
+              left: _offset - 36,
+              top: 0, bottom: 0,
+              child: Center(
+                child: Opacity(
+                  opacity: progress,
+                  child: Transform.scale(scale: 0.7 + progress * 0.3, child: iconCircle),
                 ),
               ),
             ),
-          ),
           Transform.translate(
-            offset: Offset(_offset, 0),
+            offset: Offset(translate, 0),
             child: widget.child,
           ),
         ],
@@ -2807,57 +2880,73 @@ class _ReplyMessageBubble extends StatelessWidget {
     required this.mine,
     required this.isLast,
     required this.isLight,
+    this.onTapQuote,
   });
 
-  final ({String sender, String preview, String text}) replyData;
+  final ({String sender, String preview, String text, int? id}) replyData;
   final bool mine;
   final bool isLast;
   final bool isLight;
+  final VoidCallback? onTapQuote;
 
   @override
   Widget build(BuildContext context) {
-    final bubbleBg    = mine ? _kBlue : (isLight ? _kOtherLgt : _kOtherDark);
-    final textColor   = mine ? Colors.white : (isLight ? Colors.black : Colors.white);
-    final quoteBg     = mine
-        ? Colors.white.withValues(alpha: 0.15)
+    final bubbleBg   = mine ? _kBlue : (isLight ? _kOtherLgt : _kOtherDark);
+    final textColor  = mine ? Colors.white : (isLight ? Colors.black : Colors.white);
+    final quoteBg    = mine
+        ? Colors.white.withValues(alpha: 0.18)
         : (isLight ? Colors.black.withValues(alpha: 0.07) : Colors.white.withValues(alpha: 0.10));
-    final quoteBar    = mine ? Colors.white.withValues(alpha: 0.8) : _kBlue;
-    final quoteSender = mine ? Colors.white.withValues(alpha: 0.9) : _kBlue;
-    final quoteText   = mine
-        ? Colors.white.withValues(alpha: 0.72)
-        : (isLight ? Colors.black54 : Colors.white60);
+    final senderClr  = mine ? Colors.white : _kBlue;
+    final previewClr = mine
+        ? Colors.white.withValues(alpha: 0.68)
+        : (isLight ? Colors.black54 : Colors.white54);
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-      decoration: BoxDecoration(color: bubbleBg, borderRadius: _bubbleRadius(mine, isLast)),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-            decoration: BoxDecoration(
-              color: quoteBg,
-              borderRadius: BorderRadius.circular(8),
-              border: Border(left: BorderSide(color: quoteBar, width: 3)),
+    return ClipRRect(
+      borderRadius: _bubbleRadius(mine, isLast),
+      child: Container(
+        color: bubbleBg,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── quoted block ─────────────────────────────────────────
+            GestureDetector(
+              onTap: onTapQuote,
+              child: Container(
+                width: double.infinity,
+                color: quoteBg,
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      replyData.sender,
+                      style: TextStyle(color: senderClr, fontSize: 12.5, fontWeight: FontWeight.w700),
+                    ),
+                    if (replyData.preview.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        replyData.preview,
+                        style: TextStyle(color: previewClr, fontSize: 12.5, height: 1.3),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('@${replyData.sender}',
-                    style: TextStyle(color: quoteSender, fontSize: 12, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 2),
-                Text(replyData.preview,
-                    style: TextStyle(color: quoteText, fontSize: 12, height: 1.3),
-                    maxLines: 2, overflow: TextOverflow.ellipsis),
-              ],
+            // ── reply text ───────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+              child: Text(
+                replyData.text,
+                style: TextStyle(color: textColor, fontSize: 15, height: 1.35),
+              ),
             ),
-          ),
-          Text(replyData.text,
-              style: TextStyle(color: textColor, fontSize: 15, height: 1.35)),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -2941,8 +3030,7 @@ class _ReactionPickerOverlay extends StatelessWidget {
     required this.screenSize,
     required this.onSelect,
     required this.onMore,
-    this.current,
-  });
+  }) : current = null;
 
   final Offset pos;
   final Size screenSize;
