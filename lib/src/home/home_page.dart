@@ -1554,7 +1554,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildViralPostCard(FeedPost post) {
+  Widget _buildViralPostCard(FeedPost post, {required bool interactive}) {
     return FeedPostCard(
       key: ValueKey('viral_${post.id}'),
       post: post,
@@ -1562,8 +1562,9 @@ class _HomePageState extends State<HomePage> {
       currentUser: widget.session.user,
       followingAuthors: _followingAuthors,
       followerAuthors: _followerAuthors,
-      onLike: () => _likePost(post),
-      onSave: () => _savePost(post),
+      likingEnabled: interactive,
+      onLike: interactive ? () => _likePost(post) : () async => false,
+      onSave: interactive ? () => _savePost(post) : () async => false,
       onShare: () {
         _hideNativeBar();
         showShareSheet(
@@ -1600,11 +1601,27 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-      onComment: () => _openComments(post),
+      onComment: () {
+        _hideNativeBar();
+        final isLight = Theme.of(context).brightness == Brightness.light;
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          showDragHandle: true,
+          backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+          builder: (_) => _CommentSheet(
+            post: post,
+            session: widget.session,
+            onRefresh: () {},
+            onOpenUserProfile: _pushProfileRoute,
+            likingEnabled: interactive,
+          ),
+        ).whenComplete(_showNativeBar);
+      },
       onProfileTap: () => _pushProfileRoute(post.author),
       onOpenUserProfile: _pushProfileRoute,
-      onFollow: post.author != widget.session.user.username ? () => _follow(post.author) : null,
-      onUnfollow: post.author != widget.session.user.username ? () => _unfollow(post.author) : null,
+      onFollow: (interactive && post.author != widget.session.user.username) ? () => _follow(post.author) : null,
+      onUnfollow: (interactive && post.author != widget.session.user.username) ? () => _unfollow(post.author) : null,
       isFollowing: _followingAuthors.contains(post.author),
       onHideNavBar: _hideNativeBar,
       onShowNavBar: _showNativeBar,
@@ -2262,7 +2279,7 @@ class _ViralView extends StatefulWidget {
   final UserProfile currentUser;
   final Set<String> followingAuthors;
   final Set<String> followerAuthors;
-  final Widget Function(FeedPost) buildPostCard;
+  final Widget Function(FeedPost, {required bool interactive}) buildPostCard;
   final ValueChanged<String> onOpenUserProfile;
 
   @override
@@ -2283,6 +2300,17 @@ class _ViralViewState extends State<_ViralView> {
 
   double _score(FeedPost p) => (p.likes * 0.45 + p.comments.length * 0.55) * 100;
 
+  // Minutes elapsed since the most recent Monday at 00:00 local time.
+  int _minutesSinceWeekStart() {
+    final now = DateTime.now();
+    final weekStart = DateTime(
+      now.year, now.month,
+      now.day - (now.weekday - 1), // rewind to Monday
+      0, 0, 0,
+    );
+    return now.difference(weekStart).inMinutes;
+  }
+
   Future<void> _load() async {
     if (mounted) setState(() => _loading = true);
     try {
@@ -2296,9 +2324,11 @@ class _ViralViewState extends State<_ViralView> {
         return;
       }
       final decoded = jsonDecode(res.body) as List<dynamic>;
+      final weekMinutes = _minutesSinceWeekStart();
       final posts = decoded
           .whereType<Map<String, dynamic>>()
           .map(FeedPost.fromJson)
+          .where((p) => p.minutesAgo <= weekMinutes)
           .toList();
       posts.sort((a, b) {
         final diff = _score(b).compareTo(_score(a));
@@ -2650,10 +2680,10 @@ class _ViralViewState extends State<_ViralView> {
                                       ),
                                     ),
                                   ),
-                                  child: widget.buildPostCard(post),
+                                  child: widget.buildPostCard(post, interactive: _city == widget.currentUser.city),
                                 )
                               else
-                                widget.buildPostCard(post),
+                                widget.buildPostCard(post, interactive: _city == widget.currentUser.city),
                               Divider(
                                 height: 1,
                                 color: isLight
@@ -3056,19 +3086,20 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
                   ),
                 ),
               ),
-            ),
-          Center(
-            child: TextButton(
-              onPressed: _clearHistory,
-              child: Text(
-                'Clear all',
-                style: TextStyle(
-                  color: isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af),
-                  fontSize: 14,
+            )
+          else
+            Center(
+              child: TextButton(
+                onPressed: _clearHistory,
+                child: Text(
+                  'Clear all',
+                  style: TextStyle(
+                    color: isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af),
+                    fontSize: 14,
+                  ),
                 ),
               ),
             ),
-          ),
           Divider(height: 1, color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a)),
         ],
         // Who to follow
@@ -3246,93 +3277,96 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
   }
 
   Widget _buildResults(bool isLight, String query) {
+    const tabs = ['People', 'Posts'];
+    final divider = isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336);
     return Column(
       children: [
-        // ── 3-tab segment ─────────────────────────────────────────────────
+        // ── Tab bar with sliding underline ────────────────────────────────
         Container(
-          color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-          child: Container(
-            decoration: BoxDecoration(
-              color: isLight ? const Color(0xffe8eaed) : const Color(0xff1e1e1e),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
+          color: isLight ? Colors.white : const Color(0xff000000),
+          child: Stack(
+            children: [
+              Row(
+                children: List.generate(tabs.length, (i) {
+                  final sel = _section == i;
+                  return Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => setState(() => _section = i),
+                      child: AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 200),
+                        style: TextStyle(
+                          color: sel
+                              ? (isLight ? Colors.black : Colors.white)
+                              : (isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
+                          fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                          fontSize: 15,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          child: Center(child: Text(tabs[i])),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
               ),
-            ),
-            child: Row(
-              children: [
-                _seg('Top', 0, isLight),
-                _seg('People', 1, isLight),
-                _seg('Posts', 2, isLight),
-              ],
-            ),
+              // Sliding indicator
+              Positioned(
+                left: 0, right: 0, bottom: 0,
+                child: LayoutBuilder(builder: (_, c) {
+                  final w = c.maxWidth / tabs.length;
+                  return Stack(children: [
+                    Divider(height: 1, color: divider),
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeInOut,
+                      left: _section * w + w * 0.2,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        width: w * 0.6,
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: const Color(0xff1d9bf0),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                  ]);
+                }),
+              ),
+            ],
           ),
         ),
-        // ── Results ────────────────────────────────────────────────────────
+        // ── Results with fade transition ───────────────────────────────────
         Expanded(
           child: _loading
               ? const Center(child: CircularProgressIndicator())
-              : _buildResultsList(isLight, query),
+              : AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: KeyedSubtree(
+                    key: ValueKey(_section),
+                    child: _buildResultsList(isLight, query),
+                  ),
+                ),
         ),
       ],
     );
   }
 
-  Widget _seg(String label, int idx, bool isLight) {
-    final sel = _section == idx;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _section = idx),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          margin: const EdgeInsets.all(4),
-          padding: const EdgeInsets.symmetric(vertical: 9),
-          decoration: BoxDecoration(
-            color: sel
-                ? (isLight ? Colors.white : const Color(0xff2a2a2a))
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: sel
-                ? [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: isLight ? 0.07 : 0.4),
-                      blurRadius: 6,
-                      offset: const Offset(0, 1),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: sel
-                    ? (isLight ? Colors.black : Colors.white)
-                    : (isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
-                fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                fontSize: 14,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildResultsList(bool isLight, String query) {
-    if (_section == 2) {
+    final divider = isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336);
+    // Posts tab
+    if (_section == 1) {
       final posts = _searchPosts(query);
       if (posts.isEmpty) return _buildEmpty(query, isLight);
       return ListView.separated(
         itemCount: posts.length,
-        separatorBuilder: (_, _) => Divider(
-          height: 1,
-          color: isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336),
-        ),
+        separatorBuilder: (_, _) => Divider(height: 1, color: divider),
         itemBuilder: (_, i) => _buildPostRow(posts[i], isLight),
       );
     }
+    // People tab
     final people = _users.isEmpty ? _topUsers : _users;
     if (people.isEmpty) {
       return _loadingTop
@@ -3341,10 +3375,7 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
     }
     return ListView.separated(
       itemCount: people.length,
-      separatorBuilder: (_, _) => Divider(
-        height: 1,
-        color: isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336),
-      ),
+      separatorBuilder: (_, _) => Divider(height: 1, color: divider),
       itemBuilder: (_, i) => _buildPersonRow(people[i], isLight),
     );
   }
