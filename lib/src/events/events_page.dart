@@ -36,6 +36,147 @@ String _locationDisplay(String loc) {
   return pipe >= 0 ? loc.substring(pipe + 1) : loc;
 }
 
+// --- Android event map: single warm WebView, reused for the app's lifetime ---
+//
+// On Android the cost that makes the event-location map feel laggy isn't the
+// network (mapkit.js is CDN-cached after the first load) — it's that every
+// time an event's detail sheet opened, we tore down the WebView and paid the
+// ~807 KB mapkit.js parse + mapkit.init() cost all over again. Only one event
+// sheet can be open at a time, so instead we keep exactly one WebViewController
+// alive for the whole session: it's created (and mapkit.js parsed) once, and
+// every subsequent event just runs a small JS call on the already-initialized
+// map to move the pin, instead of reloading the page. It's pre-warmed as soon
+// as the events tab opens, so the JS parse happens while the user is still
+// scrolling the feed, well before they tap into an event.
+WebViewController? _androidSharedMapCtrl;
+Completer<void>? _androidSharedMapReady;
+
+Future<WebViewController> _ensureAndroidSharedMapController() async {
+  if (_androidSharedMapCtrl != null) return _androidSharedMapCtrl!;
+  if (_androidSharedMapReady != null) {
+    await _androidSharedMapReady!.future;
+    return _androidSharedMapCtrl!;
+  }
+  final ready = Completer<void>();
+  _androidSharedMapReady = ready;
+  final ctrl = WebViewController()
+    ..setJavaScriptMode(JavaScriptMode.unrestricted)
+    ..setBackgroundColor(const Color(0xff1a1a1b))
+    ..setNavigationDelegate(NavigationDelegate(
+      onPageFinished: (_) {
+        if (!ready.isCompleted) ready.complete();
+      },
+      onWebResourceError: (e) => debugPrint('[eventmap] ${e.description}'),
+    ))
+    ..loadHtmlString(_buildSharedAndroidMapHtml(), baseUrl: 'https://netnest.net');
+  _androidSharedMapCtrl = ctrl;
+  await ready.future;
+  return ctrl;
+}
+
+// Pushes a location update to the shared map controller. Safe to call before
+// mapkit finishes loading — the JS side queues the request and applies it as
+// soon as the map is ready.
+Future<void> _applyLocationToSharedMap(WebViewController ctrl, String location, bool isLight) async {
+  await ctrl.setBackgroundColor(isLight ? const Color(0xfff0f2f5) : const Color(0xff1a1a1b));
+  await ctrl.runJavaScript('neatSetColorScheme(${!isLight});');
+  final (:lat, :lon) = _parseCoords(location);
+  if (lat != null && lon != null) {
+    await ctrl.runJavaScript('neatSetPin($lat, $lon);');
+  } else {
+    final escaped = _locationDisplay(location).replaceAll("'", "\\'").replaceAll('\n', ' ');
+    await ctrl.runJavaScript("neatSetAddress('$escaped');");
+  }
+}
+
+String _buildSharedAndroidMapHtml() {
+  return '''<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="initial-scale=1.0,width=device-width">
+  <style>
+    html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map;
+    var pendingLat, pendingLon, pendingAddr;
+    function placePin(lat, lon) {
+      (map.annotations || []).slice().forEach(function(a){ map.removeAnnotation(a); });
+      var coord = new mapkit.Coordinate(lat, lon);
+      var pin = new mapkit.MarkerAnnotation(coord, { color: '#ff3040', calloutEnabled: false });
+      map.addAnnotation(pin);
+      map.setRegionAnimated(new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.008, 0.008)), false);
+    }
+    function neatApply() {
+      if (!map) return;
+      if (pendingLat != null && pendingLon != null) {
+        placePin(pendingLat, pendingLon);
+      } else if (pendingAddr) {
+        var geocoder = new mapkit.Geocoder({ language: 'en-GB' });
+        var addr = pendingAddr;
+        geocoder.lookup(addr, function(err, data) {
+          if (err || !data.results || !data.results.length || pendingAddr !== addr) return;
+          var c = data.results[0].coordinate;
+          placePin(c.latitude, c.longitude);
+        });
+      }
+    }
+    function neatSetPin(lat, lon) {
+      pendingLat = lat; pendingLon = lon; pendingAddr = null;
+      neatApply();
+    }
+    function neatSetAddress(addr) {
+      pendingLat = null; pendingLon = null; pendingAddr = addr;
+      neatApply();
+    }
+    function neatSetColorScheme(dark) {
+      if (map) map.colorScheme = dark ? mapkit.Map.ColorSchemes.Dark : mapkit.Map.ColorSchemes.Light;
+    }
+    function initMap() {
+      mapkit.init({ authorizationCallback: function(done) { done('$_kMapToken'); } });
+      map = new mapkit.Map('map', {
+        colorScheme: mapkit.Map.ColorSchemes.Dark,
+        showsCompass: mapkit.FeatureVisibility.Hidden,
+        showsScale: mapkit.FeatureVisibility.Hidden,
+        showsMapTypeControl: false,
+        showsZoomControl: false,
+        showsUserLocationControl: false,
+      });
+      map.isScrollEnabled = false;
+      map.isZoomEnabled = false;
+      map.isRotationEnabled = false;
+      map.isPitchEnabled = false;
+      try { map.pointOfInterestFilter = mapkit.PointOfInterestFilter.excludingAllCategories; } catch(_) {}
+      neatApply();
+    }
+  </script>
+  <script>
+    (function(){
+      var s = document.createElement('script');
+      s.src = '$_kMapKitCdn';
+      s.onload = initMap;
+      document.head.appendChild(s);
+    })();
+  </script>
+</body>
+</html>''';
+}
+
+// Parses the "lat,lon|Display Name" format written by _selectSuggestion.
+// Returns nulls when the location has no embedded coordinates (e.g. it was
+// typed by hand rather than picked from a suggestion).
+({double? lat, double? lon}) _parseCoords(String location) {
+  final pipe = location.indexOf('|');
+  if (pipe <= 0) return (lat: null, lon: null);
+  final coords = location.substring(0, pipe).split(',');
+  if (coords.length != 2) return (lat: null, lon: null);
+  return (lat: double.tryParse(coords[0]), lon: double.tryParse(coords[1]));
+}
+
 // Persists attending state for the app session, scoped per username.
 // Survives EventsPage being popped and re-pushed; isolated per account.
 final _kSessionAttending = <String, Map<int, bool>>{};
@@ -87,6 +228,10 @@ class _EventsPageState extends State<EventsPage> {
     super.initState();
     if (widget.preferredTab != null) _tab = widget.preferredTab!;
     _loadEventsCache().then((_) => _load());
+    // Pay the one-time mapkit.js parse cost now, in the background, while the
+    // user is still scrolling the feed — so the first event they open doesn't
+    // pay it on the critical path.
+    if (!kIsWeb && Platform.isAndroid) unawaited(_ensureAndroidSharedMapController());
   }
 
   Future<void> _saveEventsCache(List<dynamic> raw) async {
@@ -3208,15 +3353,7 @@ class _MapCard extends StatelessWidget {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final display = _locationDisplay(location);
     // If we have exact coordinates, use them for more accurate deep links.
-    double? lat, lon;
-    final pipe = location.indexOf('|');
-    if (pipe > 0) {
-      final coords = location.substring(0, pipe).split(',');
-      if (coords.length == 2) {
-        lat = double.tryParse(coords[0]);
-        lon = double.tryParse(coords[1]);
-      }
-    }
+    final (:lat, :lon) = _parseCoords(location);
     final encoded = Uri.encodeComponent(display);
     final appleMapsUri = (lat != null && lon != null)
         ? Uri.parse('https://maps.apple.com/?ll=$lat,$lon&q=$encoded')
@@ -3292,23 +3429,27 @@ class _EventMapViewState extends State<_EventMapView> {
   @override
   void initState() {
     super.initState();
-    if (!kIsWeb) _init();
+    if (kIsWeb) return;
+    if (Platform.isAndroid) {
+      _initAndroid();
+    } else {
+      _initIOS();
+    }
   }
 
-  Future<void> _init() async {
-    // On iOS we inline mapkit.js (WKWebView/Nitro parses it quickly and there
-    // is no network hit). On Android the 807 KB inline causes a noticeable
-    // parse stall on every open; instead we let the WebView load it from the
-    // CDN — Android's WebView (Chromium) caches the response on disk, so only
-    // the very first ever open in the app's lifetime pays the network cost.
-    String? js;
-    if (!Platform.isAndroid) {
-      if (_eventMapkitJs == null) {
-        try {
-          _eventMapkitJs = await rootBundle.loadString('assets/mapkit.js');
-        } catch (_) {}
-      }
-      js = _eventMapkitJs;
+  Future<void> _initAndroid() async {
+    final ctrl = await _ensureAndroidSharedMapController();
+    if (!mounted) return;
+    await _applyLocationToSharedMap(ctrl, widget.location, widget.isLight);
+    if (mounted) setState(() => _ctrl = ctrl);
+  }
+
+  Future<void> _initIOS() async {
+    // We inline mapkit.js so WKWebView parses it quickly with no network hit.
+    if (_eventMapkitJs == null) {
+      try {
+        _eventMapkitJs = await rootBundle.loadString('assets/mapkit.js');
+      } catch (_) {}
     }
     if (!mounted) return;
     final ctrl = WebViewController()
@@ -3318,7 +3459,7 @@ class _EventMapViewState extends State<_EventMapView> {
         onWebResourceError: (e) => debugPrint('[eventmap] ${e.description}'),
       ))
       ..loadHtmlString(
-        _buildMapHtml(widget.location, inlineJs: js),
+        _buildMapHtml(widget.location, inlineJs: _eventMapkitJs),
         baseUrl: 'https://netnest.net',
       );
     if (mounted) setState(() => _ctrl = ctrl);
@@ -3332,7 +3473,13 @@ class _EventMapViewState extends State<_EventMapView> {
         child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
-    return WebViewWidget(controller: _ctrl!);
+    return WebViewWidget(
+      // The Android controller is a shared singleton reused across every
+      // event's map view — keying on it keeps Flutter from tearing down and
+      // recreating the underlying platform view when the widget rebuilds.
+      key: Platform.isAndroid ? const ValueKey('android-shared-event-map') : null,
+      controller: _ctrl!,
+    );
   }
 }
 

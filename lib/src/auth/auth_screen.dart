@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 
@@ -36,6 +37,21 @@ bool _loading = false;
 String? _error;
 final _termsRecognizer = TapGestureRecognizer();
 final _privacyRecognizer = TapGestureRecognizer();
+
+bool _cityMapPrewarmed = false;
+
+@override
+void didChangeDependencies() {
+super.didChangeDependencies();
+// The signup flow always ends at the city-picker map — warm its WebView in
+// the background as soon as we know we're in that flow (rather than when
+// the map screen actually opens), so the mapkit.js parse hides behind
+// whatever time the user spends filling in the form.
+if (_signup && !_cityMapPrewarmed) {
+_cityMapPrewarmed = true;
+unawaited(prewarmCityMap(homeCity: '', isDark: Theme.of(context).brightness == Brightness.dark));
+}
+}
 
 @override
 void initState() {
@@ -253,7 +269,13 @@ if (!_signup) ...[
 TextButton(
 onPressed: _loading
 ? null
-: () => setState(() => _signup = !_signup),
+: () {
+setState(() => _signup = !_signup);
+if (_signup && !_cityMapPrewarmed) {
+_cityMapPrewarmed = true;
+unawaited(prewarmCityMap(homeCity: '', isDark: Theme.of(context).brightness == Brightness.dark));
+}
+},
 child: Text(
 _signup
 ? 'Already have an account? Sign in'

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
 
@@ -18,6 +19,75 @@ const _kMapKitToken =
     'FnbZOlvx5LcYZELtt4Q7MBQEGDFICKLp-9nUpsMlA-ZuQ';
 
 const _kMapKitCdnUrl = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Android: prewarm the map WebView ahead of time
+//
+// The ~807 KB mapkit.js inline parse is a real, visible stall the first time
+// a WebViewController evaluates it. The home map tab is already kept alive
+// once visited (IndexedStack), so that stall only happens once — but it used
+// to happen exactly when the user tapped the Map tab. The signup city-picker
+// is a brand-new screen/route every time, so it always pays the cost fresh.
+// `prewarmCityMap` lets callers (home_page.dart, auth_screen.dart) kick off
+// the WebView creation + JS parse in the background, before the map is
+// actually shown, so the cost lands on idle time instead of a tap or a
+// network round-trip that's already in flight.
+String? _cachedMapkitJs;
+WebViewController? _prewarmedCityMapCtrl;
+String? _prewarmedCityMapKey;
+Future<void>? _prewarmingCityMap;
+String? _prewarmingCityMapKey;
+ValueChanged<String>? _cityMapPinHandler;
+
+String _cityMapCacheKey(String homeCity, bool isDark) => '${homeCity.trim().toLowerCase()}|$isDark';
+
+Future<void> prewarmCityMap({required String homeCity, required bool isDark}) {
+  if (kIsWeb || !Platform.isAndroid) return Future.value();
+  final key = _cityMapCacheKey(homeCity, isDark);
+  if (_prewarmedCityMapKey == key && _prewarmedCityMapCtrl != null) return Future.value();
+  if (_prewarmingCityMap != null && _prewarmingCityMapKey == key) return _prewarmingCityMap!;
+  final done = Completer<void>();
+  _prewarmingCityMap = done.future;
+  _prewarmingCityMapKey = key;
+  () async {
+    if (_cachedMapkitJs == null) {
+      try {
+        _cachedMapkitJs = await rootBundle.loadString('assets/mapkit.js');
+      } catch (e) {
+        debugPrint('[map] MapKit JS asset load: $e');
+      }
+    }
+    _prewarmedCityMapCtrl = _buildCityMapController(homeCity: homeCity, isDark: isDark);
+    _prewarmedCityMapKey = key;
+    _prewarmingCityMap = null;
+    _prewarmingCityMapKey = null;
+    done.complete();
+  }();
+  return done.future;
+}
+
+WebViewController _buildCityMapController({required String homeCity, required bool isDark}) {
+  final home = homeCity.trim().toLowerCase();
+  final citiesJson = jsonEncode(
+    greeceCities
+        .where((c) => c.name.trim().toLowerCase() != home)
+        .map((c) => {'name': c.name, 'lat': c.latitude, 'lng': c.longitude})
+        .toList(),
+  );
+  return WebViewController()
+    ..setJavaScriptMode(JavaScriptMode.unrestricted)
+    ..setBackgroundColor(isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7))
+    ..setNavigationDelegate(NavigationDelegate(
+      onWebResourceError: (e) => debugPrint('[map] ${e.description}'),
+    ))
+    ..addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+      _cityMapPinHandler?.call(msg.message);
+    })
+    ..loadHtmlString(
+      _mapHtml(citiesJson, inlineJs: _cachedMapkitJs, isDark: isDark),
+      baseUrl: 'https://netnest.net',
+    );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public widget
@@ -46,11 +116,6 @@ class CityMapView extends StatefulWidget {
 class _CityMapViewState extends State<CityMapView> {
   // ── iOS channel ──────────────────────────────────────────────────────────
   static const _iosChannel = MethodChannel('neat/native_city_map_channel');
-
-  // ── Android WebView ───────────────────────────────────────────────────────
-  // mapkit.js content cached for the lifetime of the app process so subsequent
-  // map opens are instant and only the first ever visit pays the fetch cost.
-  static String? _cachedMapkitJs;
 
   WebViewController? _webCtrl;
 
@@ -92,6 +157,7 @@ class _CityMapViewState extends State<CityMapView> {
   @override
   void dispose() {
     _iosChannel.setMethodCallHandler(null);
+    if (identical(_cityMapPinHandler, _onCityPinTapped)) _cityMapPinHandler = null;
     super.dispose();
   }
 
@@ -110,46 +176,39 @@ class _CityMapViewState extends State<CityMapView> {
   // Android WebView
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Load mapkit.js from the bundled Flutter asset (assets/mapkit.js).
-  // This is instant (reads from the app bundle, no network) and works on every
-  // device including emulators where CDN DNS may fail.  The CDN URL in the
-  // HTML is only ever used as a last-resort fallback if the asset load fails.
   Future<void> _initAndroid() async {
-    if (_cachedMapkitJs == null) {
-      try {
-        _cachedMapkitJs = await rootBundle.loadString('assets/mapkit.js');
-      } catch (e) {
-        debugPrint('[map] MapKit JS asset load: $e');
-      }
+    final isDark = _brightness == Brightness.dark;
+    final key = _cityMapCacheKey(widget.homeCity, isDark);
+    // A matching prewarm may still be running (e.g. kicked off alongside the
+    // signup network call) — wait for it rather than starting a redundant
+    // second WebView build.
+    if (_prewarmingCityMapKey == key && _prewarmingCityMap != null) {
+      await _prewarmingCityMap;
+      if (!mounted) return;
     }
-    if (!mounted) return;
-    _buildWebView();
-    setState(() {});
+    // Reuse a controller warmed ahead of time (see prewarmCityMap) instead of
+    // paying the mapkit.js parse cost right when the map becomes visible.
+    if (_prewarmedCityMapKey == key && _prewarmedCityMapCtrl != null) {
+      _webCtrl = _prewarmedCityMapCtrl;
+      _prewarmedCityMapCtrl = null;
+      _prewarmedCityMapKey = null;
+    } else {
+      if (_cachedMapkitJs == null) {
+        try {
+          _cachedMapkitJs = await rootBundle.loadString('assets/mapkit.js');
+        } catch (e) {
+          debugPrint('[map] MapKit JS asset load: $e');
+        }
+      }
+      if (!mounted) return;
+      _buildWebView();
+    }
+    _cityMapPinHandler = _onCityPinTapped;
+    if (mounted) setState(() {});
   }
 
   void _buildWebView() {
-    final homeCity = widget.homeCity.trim().toLowerCase();
-    final citiesJson = jsonEncode(
-      greeceCities
-          .where((c) => c.name.trim().toLowerCase() != homeCity)
-          .map((c) => {'name': c.name, 'lat': c.latitude, 'lng': c.longitude})
-          .toList(),
-    );
-
-    final isDark = _brightness == Brightness.dark;
-    _webCtrl = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7))
-      ..setNavigationDelegate(NavigationDelegate(
-        onWebResourceError: (e) => debugPrint('[map] ${e.description}'),
-      ))
-      ..addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
-        if (mounted) _onCityPinTapped(msg.message);
-      })
-      ..loadHtmlString(
-        _mapHtml(citiesJson, inlineJs: _cachedMapkitJs, isDark: isDark),
-        baseUrl: 'https://netnest.net',
-      );
+    _webCtrl = _buildCityMapController(homeCity: widget.homeCity, isDark: _brightness == Brightness.dark);
   }
 
   // ─────────────────────────────────────────────────────────────────────────

@@ -102,6 +102,24 @@ class _HomePageState extends State<HomePage> {
     PushService.instance.replayPending();
   }
 
+  bool _cityMapPrewarmed = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Warm the Map tab's WebView in the background as soon as home loads,
+    // well before the user actually taps the tab — the Map tab itself still
+    // mounts lazily on first visit, but by then the slow part (mapkit.js
+    // parse) is already done.
+    if (!_cityMapPrewarmed) {
+      _cityMapPrewarmed = true;
+      unawaited(prewarmCityMap(
+        homeCity: widget.session.user.city,
+        isDark: Theme.of(context).brightness == Brightness.dark,
+      ));
+    }
+  }
+
   void _setupNativeTabChannel() {
     _kTabChannel.setMethodCallHandler((call) async {
       switch (call.method) {
