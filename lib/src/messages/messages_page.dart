@@ -272,9 +272,8 @@ class _MessagesPageState extends State<MessagesPage> {
       final items = rawList.map(ConversationSummary.fromJson).toList();
       unawaited(_saveInboxCache(rawList));
       if (mounted) setState(() { _convs = items; _loading = false; _isOffline = false; });
-    } catch (e) {
-      final offline = e is SocketException || e is HandshakeException || e is HttpException;
-      if (mounted) setState(() { _loading = false; _isOffline = offline; });
+    } catch (_) {
+      if (mounted) setState(() { _loading = false; _isOffline = true; });
     }
   }
 
@@ -1380,10 +1379,9 @@ class _ConversationPageState extends State<ConversationPage> {
       });
       _saveCache(merged);
       _scrollToBottom(jump: initial);
-    } catch (e) {
+    } catch (_) {
       // keep whatever messages are already loaded rather than blanking the screen
-      final offline = e is SocketException || e is HandshakeException || e is HttpException;
-      if (mounted) setState(() { _loading = false; _isOffline = offline; });
+      if (mounted) setState(() { _loading = false; _isOffline = true; });
     }
   }
 

@@ -142,9 +142,8 @@ class _EventsPageState extends State<EventsPage> {
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
       if (!mounted) return;
       setState(() { _events = events; _loading = false; _isOffline = false; });
-    } catch (e) {
-      final offline = e is SocketException || e is HandshakeException || e is HttpException;
-      if (mounted) setState(() { _loading = false; _isOffline = offline; });
+    } catch (_) {
+      if (mounted) setState(() { _loading = false; _isOffline = true; });
     }
   }
 

@@ -28,6 +28,7 @@ import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../events/events_page.dart';
 import '../map/city_map_view.dart';
+import '../map/greece_cities.dart';
 import '../messages/messages_page.dart';
 import '../profile/profile_page.dart';
 
@@ -66,7 +67,7 @@ class _HomePageState extends State<HomePage> {
   int _nav = 0;
   int _selectedTab = 0;
   final Set<int> _visitedTabs = <int>{0};
-  final _searchViewKey = GlobalKey<_SearchViewState>();
+  final _viralViewKey = GlobalKey<_ViralViewState>();
   bool _loading = true;
   bool _isOffline = false;
   String? _activeCity;
@@ -176,10 +177,9 @@ class _HomePageState extends State<HomePage> {
         _isOffline = false;
       });
       await Future.wait([_loadFollowingAuthors(), _loadFollowerAuthors(), _loadUnreadMessages(), _loadOfficialEventsBadge()]);
-    } catch (e) {
-      final offline = e is SocketException || e is HandshakeException || e is HttpException;
-      if (offline) await _loadCachedPosts();
-      if (mounted) setState(() { _loading = false; _isOffline = offline; });
+    } catch (_) {
+      await _loadCachedPosts();
+      if (mounted) setState(() { _loading = false; _isOffline = true; });
     }
   }
 
@@ -1554,6 +1554,63 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildViralPostCard(FeedPost post) {
+    return FeedPostCard(
+      key: ValueKey('viral_${post.id}'),
+      post: post,
+      token: widget.session.token,
+      currentUser: widget.session.user,
+      followingAuthors: _followingAuthors,
+      followerAuthors: _followerAuthors,
+      onLike: () => _likePost(post),
+      onSave: () => _savePost(post),
+      onShare: () {
+        _hideNativeBar();
+        showShareSheet(
+          context: context,
+          post: post,
+          token: widget.session.token,
+          currentUser: widget.session.user,
+          onLogout: widget.onLogout,
+        ).whenComplete(_showNativeBar);
+      },
+      onMore: () => _openSheet(
+        title: post.author,
+        child: Column(
+          children: [
+            if (post.author == widget.session.user.username || widget.session.user.isAdmin)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
+                title: const Text('Delete post'),
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _deletePost(post);
+                },
+              ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.flag_outlined),
+              title: const Text('Report post'),
+              onTap: () {
+                Navigator.of(context).pop();
+                showReportPostSheet(context, postId: post.id, token: widget.session.token);
+              },
+            ),
+          ],
+        ),
+      ),
+      onComment: () => _openComments(post),
+      onProfileTap: () => _pushProfileRoute(post.author),
+      onOpenUserProfile: _pushProfileRoute,
+      onFollow: post.author != widget.session.user.username ? () => _follow(post.author) : null,
+      onUnfollow: post.author != widget.session.user.username ? () => _unfollow(post.author) : null,
+      isFollowing: _followingAuthors.contains(post.author),
+      onHideNavBar: _hideNativeBar,
+      onShowNavBar: _showNativeBar,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -1634,15 +1691,16 @@ class _HomePageState extends State<HomePage> {
                             _buildFeedScrollView(followingPosts, _followingScroll, isLight),
                           ],
                         ),
-                        // 1: Search — mounted lazily on first visit
+                        // 1: Viral — mounted lazily on first visit
                         _visitedTabs.contains(1)
-                            ? _SearchView(
-                                key: _searchViewKey,
+                            ? _ViralView(
+                                key: _viralViewKey,
                                 token: widget.session.token,
                                 currentUser: widget.session.user,
-                                onOpenUserProfile: _pushProfileRoute,
-                                onOpenPost: (u, id) => _pushProfileRoute(u, postId: id),
+                                followingAuthors: _followingAuthors,
                                 followerAuthors: _followerAuthors,
+                                buildPostCard: _buildViralPostCard,
+                                onOpenUserProfile: _pushProfileRoute,
                               )
                             : const SizedBox.shrink(),
                         // 2: Create (intercepted by bottom nav, never shown)
@@ -1837,14 +1895,13 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     if (i == _nav && !_showInlineProfile) {
-      if (i == 1) { _searchViewKey.currentState?.refresh(); return; }
+      if (i == 1) { _viralViewKey.currentState?.refresh(); return; }
     }
     setState(() {
       _nav = i;
       _visitedTabs.add(i);
       _showInlineProfile = false;
     });
-    if (i == 1) _searchViewKey.currentState?._refreshFollowState();
     if (_isIOS26) _kTabChannel.invokeMethod('syncTab', i);
   }
 }
@@ -2188,27 +2245,452 @@ class _LogoMark extends StatelessWidget {
   }
 }
 
-class _SearchView extends StatefulWidget {
-  _SearchView({
+// ── Viral posts tab ───────────────────────────────────────────────────────────
+
+class _ViralView extends StatefulWidget {
+  _ViralView({
     super.key,
     required this.token,
     required this.currentUser,
+    required this.followingAuthors,
+    required this.followerAuthors,
+    required this.buildPostCard,
     required this.onOpenUserProfile,
-    required this.onOpenPost,
-    this.followerAuthors = const {},
   });
 
   final String token;
   final UserProfile currentUser;
-  final ValueChanged<String> onOpenUserProfile;
-  final void Function(String username, int postId) onOpenPost;
+  final Set<String> followingAuthors;
   final Set<String> followerAuthors;
+  final Widget Function(FeedPost) buildPostCard;
+  final ValueChanged<String> onOpenUserProfile;
 
   @override
-  State<_SearchView> createState() => _SearchViewState();
+  State<_ViralView> createState() => _ViralViewState();
 }
 
-class _SearchViewState extends State<_SearchView> {
+class _ViralViewState extends State<_ViralView> {
+  String _city = '';
+  List<FeedPost> _viralPosts = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _city = widget.currentUser.city;
+    _load();
+  }
+
+  double _score(FeedPost p) => (p.likes * 0.45 + p.comments.length * 0.55) * 100;
+
+  Future<void> _load() async {
+    if (mounted) setState(() => _loading = true);
+    try {
+      final res = await http.get(
+        postsEndpoint(city: _city),
+        headers: authGetHeaders(widget.token),
+      );
+      if (!mounted) return;
+      if (res.statusCode != 200) {
+        setState(() => _loading = false);
+        return;
+      }
+      final decoded = jsonDecode(res.body) as List<dynamic>;
+      final posts = decoded
+          .whereType<Map<String, dynamic>>()
+          .map(FeedPost.fromJson)
+          .toList();
+      posts.sort((a, b) {
+        final diff = _score(b).compareTo(_score(a));
+        if (diff != 0) return diff;
+        return a.minutesAgo.compareTo(b.minutesAgo);
+      });
+      setState(() {
+        _viralPosts = posts.take(10).toList();
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void refresh() => _load();
+
+  Future<void> _selectCity(BuildContext context) async {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.55,
+        maxChildSize: 0.9,
+        builder: (ctx, sc) => Column(
+          children: [
+            Container(
+              width: 36, height: 4,
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: isLight ? const Color(0xffd1d5db) : const Color(0xff3a3a3a),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Text(
+                'Select City',
+                style: TextStyle(
+                  color: isLight ? Colors.black : Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Builder(builder: (ctx) {
+              final userCity = widget.currentUser.city;
+              final sorted = [
+                ...greeceCities.where((c) => c.name == userCity),
+                ...greeceCities.where((c) => c.name != userCity),
+              ];
+              return Expanded(
+              child: ListView.builder(
+                controller: sc,
+                itemCount: sorted.length,
+                itemBuilder: (_, i) {
+                  final city = sorted[i];
+                  final selected = city.name == _city;
+                  return ListTile(
+                    title: Text(
+                      city.name,
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                      ),
+                    ),
+                    trailing: selected
+                        ? const Icon(Icons.check_rounded, color: Color(0xff1d9bf0))
+                        : null,
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      if (city.name != _city) {
+                        setState(() => _city = city.name);
+                        _load();
+                      }
+                    },
+                  );
+                },
+              ),
+            );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openSearch() {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => _ViralSearchPage(
+        token: widget.token,
+        currentUser: widget.currentUser,
+        followerAuthors: widget.followerAuthors,
+        onOpenUserProfile: widget.onOpenUserProfile,
+      ),
+    ));
+  }
+
+  Color _mc(int rank) => rank == 1
+      ? const Color(0xffffb700)
+      : rank == 2
+          ? const Color(0xffb8bec8)
+          : const Color(0xffcd7f32);
+
+  String _emoji(int rank) => rank == 1 ? '🥇' : rank == 2 ? '🥈' : '🥉';
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ── Header ──────────────────────────────────────────────────────────
+        Container(
+          decoration: BoxDecoration(
+            color: isLight ? Colors.white : const Color(0xff121212),
+            border: Border(
+              bottom: BorderSide(
+                color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
+                width: 0.5,
+              ),
+            ),
+          ),
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+          child: Row(
+            children: [
+              // Search icon → opens search page
+              Material(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(24),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(24),
+                  onTap: _openSearch,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      Icons.search_rounded,
+                      size: 24,
+                      color: isLight ? Colors.black : Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              // Centered title + city selector
+              Expanded(
+                child: Center(
+                  child: GestureDetector(
+                    onTap: () => _selectCity(context),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Viral στην',
+                          style: TextStyle(
+                            color: isLight ? Colors.black : Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: isLight
+                                ? const Color(0xfff0f2f5)
+                                : const Color(0xff1e1e1e),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: isLight
+                                  ? const Color(0xffe0e3e8)
+                                  : const Color(0xff3a3a3a),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _city,
+                                style: TextStyle(
+                                  color: isLight ? Colors.black : Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(width: 2),
+                              Icon(
+                                Icons.expand_more_rounded,
+                                size: 16,
+                                color: isLight
+                                    ? const Color(0xff6b7280)
+                                    : const Color(0xff9ca3af),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Spacer to balance the search icon
+              const SizedBox(width: 40),
+            ],
+          ),
+        ),
+        // ── Post list ────────────────────────────────────────────────────────
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _viralPosts.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.local_fire_department_rounded,
+                            size: 48,
+                            color: isLight
+                                ? const Color(0xffb8c0cc)
+                                : const Color(0xff4a5568),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No posts in $_city yet',
+                            style: TextStyle(
+                              color: isLight
+                                  ? const Color(0xff9ca3af)
+                                  : const Color(0xff6b7280),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: _load,
+                      child: ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 40),
+                        itemCount: _viralPosts.length,
+                        itemBuilder: (_, i) {
+                          final post = _viralPosts[i];
+                          final rank = i + 1;
+                          final score = _score(post);
+                          final isTop3 = rank <= 3;
+                          final mc = isTop3 ? _mc(rank) : null;
+                          final scoreStr = '${score.toInt()} neat pts';
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // ── Rank header strip ─────────────────────────
+                              if (isTop3)
+                                Container(
+                                  padding: const EdgeInsets.fromLTRB(
+                                      16, 12, 16, 10),
+                                  decoration: BoxDecoration(
+                                    color: mc!.withValues(alpha: 0.07),
+                                    border: Border(
+                                      left: BorderSide(
+                                          color: mc, width: 3.5),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Text(
+                                        _emoji(rank),
+                                        style:
+                                            const TextStyle(fontSize: 22),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        '#$rank',
+                                        style: TextStyle(
+                                          color: mc,
+                                          fontSize: 19,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: -0.5,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Container(
+                                        padding:
+                                            const EdgeInsets.symmetric(
+                                                horizontal: 10,
+                                                vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: mc.withValues(alpha: 0.14),
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                        ),
+                                        child: Text(
+                                          scoreStr,
+                                          style: TextStyle(
+                                            color: mc,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                      16, 10, 16, 2),
+                                  child: Row(
+                                    children: [
+                                      Text(
+                                        '#$rank',
+                                        style: TextStyle(
+                                          color: isLight
+                                              ? const Color(0xffb8c0cc)
+                                              : const Color(0xff4a5568),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        scoreStr,
+                                        style: TextStyle(
+                                          color: isLight
+                                              ? const Color(0xffb8c0cc)
+                                              : const Color(0xff4a5568),
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              // ── Post card ─────────────────────────────────
+                              if (isTop3)
+                                DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: mc!.withValues(alpha: 0.03),
+                                    border: Border(
+                                      left: BorderSide(
+                                        color: mc.withValues(alpha: 0.25),
+                                        width: 3.5,
+                                      ),
+                                    ),
+                                  ),
+                                  child: widget.buildPostCard(post),
+                                )
+                              else
+                                widget.buildPostCard(post),
+                              Divider(
+                                height: 1,
+                                color: isLight
+                                    ? const Color(0xffe8eaed)
+                                    : const Color(0xff1f1f1f),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Search page (pushed route from viral view) ────────────────────────────────
+
+class _ViralSearchPage extends StatefulWidget {
+  const _ViralSearchPage({
+    required this.token,
+    required this.currentUser,
+    required this.followerAuthors,
+    required this.onOpenUserProfile,
+  });
+
+  final String token;
+  final UserProfile currentUser;
+  final Set<String> followerAuthors;
+  final ValueChanged<String> onOpenUserProfile;
+
+  @override
+  State<_ViralSearchPage> createState() => _ViralSearchPageState();
+}
+
+class _ViralSearchPageState extends State<_ViralSearchPage> {
   final _controller = TextEditingController();
   Timer? _debounce;
   final List<String> _recentQueries = [];
@@ -2216,21 +2698,23 @@ class _SearchViewState extends State<_SearchView> {
   List<UserProfile> _users = [];
   List<UserProfile> _topUsers = [];
   List<FeedPost> _cityPosts = [];
-  bool _loading = false;
+  final Set<String> _followingAuthors = {};
+  final Map<String, UserProfile> _historyUsers = {};
   bool _loadingSuggestions = true;
   bool _loadingTop = true;
+  bool _loading = false;
+  bool _didSearch = false;
+  int _historyShown = 5;
   int _section = 0;
-  final Set<String> _followingAuthors = {};
 
   @override
   void initState() {
     super.initState();
     _loadSuggestions();
-    _loadTopUsers();
-    _loadCityPosts();
-    _load('');
     _loadRecentQueries();
     _loadFollowingAuthors();
+    _loadTopUsers();
+    _loadCityPosts();
   }
 
   @override
@@ -2242,201 +2726,43 @@ class _SearchViewState extends State<_SearchView> {
 
   void _onChanged(String value) {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 250), () {
-      _load(value);
+    _debounce = Timer(const Duration(milliseconds: 300), () {
       if (value.trim().isEmpty) {
-        _loadTopUsers();
+        if (mounted) setState(() { _users = []; _didSearch = false; });
+      } else {
+        _doSearch(value.trim());
       }
     });
   }
 
-  Future<void> _load(String query) async {
-    setState(() => _loading = true);
-    try {
-      final res = await http.get(
-        searchUsersEndpoint(query),
-        headers: authGetHeaders(widget.token),
-      );
-      if (res.statusCode == 401) return;
-      if (res.statusCode != 200) {
-        if (mounted) setState(() => _loading = false);
-        return;
-      }
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final users = (decoded['users'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(UserProfile.fromJson)
-          .toList();
-      if (!mounted) return;
-      setState(() {
-        _users = users;
-        _loading = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
   Future<void> _loadSuggestions() async {
+    if (mounted) setState(() => _loadingSuggestions = true);
     try {
-      final res = await http.get(
-        suggestionsEndpoint,
-        headers: authGetHeaders(widget.token),
-      );
-      if (res.statusCode != 200) {
-        if (mounted) setState(() => _loadingSuggestions = false);
-        return;
-      }
+      final res = await http.get(suggestionsEndpoint, headers: authGetHeaders(widget.token));
+      if (!mounted) return;
+      if (res.statusCode != 200) { setState(() => _loadingSuggestions = false); return; }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
       final users = (decoded['users'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(UserProfile.fromJson)
           .toList();
-      if (!mounted) return;
-      setState(() {
-        _suggestedUsers = users;
-        _loadingSuggestions = false;
-      });
+      setState(() { _suggestedUsers = users; _loadingSuggestions = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingSuggestions = false);
     }
   }
 
-  Future<void> _loadRecentQueries() async {
-    try {
-      final res = await http.get(
-        searchHistoryEndpoint,
-        headers: authGetHeaders(widget.token),
-      );
-      if (!mounted) return;
-      if (res.statusCode != 200) return;
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final items = (decoded['queries'] as List<dynamic>? ?? const [])
-          .whereType<String>()
-          .toList();
-      setState(() {
-        _recentQueries
-          ..clear()
-          ..addAll(items);
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _addToHistory(String query) async {
-    if (query.isEmpty) return;
-    setState(() {
-      _recentQueries.remove(query);
-      _recentQueries.insert(0, query);
-      if (_recentQueries.length > 8) _recentQueries.removeLast();
-    });
-    try {
-      await http.post(
-        searchHistoryEndpoint,
-        headers: authJsonHeaders(widget.token),
-        body: jsonEncode({'query': query}),
-      );
-    } catch (_) {}
-  }
-
-  Future<void> _clearHistory() async {
-    setState(() => _recentQueries.clear());
-    try {
-      await http.delete(
-        searchHistoryEndpoint,
-        headers: authGetHeaders(widget.token),
-      );
-    } catch (_) {}
-  }
-
-  void _refreshFollowState() => _loadFollowingAuthors();
-
-  void refresh() {
-    _controller.clear();
-    _load('');
-    _loadSuggestions();
-    _loadTopUsers();
-  }
-
-  Future<void> _loadFollowingAuthors() async {
-    try {
-      final res = await http.get(
-        followingEndpoint(widget.currentUser.username),
-        headers: authGetHeaders(widget.token),
-      );
-      if (res.statusCode != 200 || !mounted) return;
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final usernames = (decoded['users'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map((u) => u['username']?.toString() ?? '')
-          .where((u) => u.isNotEmpty)
-          .toSet();
-      setState(() {
-        _followingAuthors..clear()..addAll(usernames);
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _toggleFollow(UserProfile user) async {
-    final isFollowing = _followingAuthors.contains(user.username);
-    setState(() {
-      if (isFollowing) {
-        _followingAuthors.remove(user.username);
-      } else {
-        _followingAuthors.add(user.username);
-      }
-    });
-    try {
-      final res = await http.post(
-        followEndpoint(user.username),
-        headers: authJsonHeaders(widget.token),
-        body: jsonEncode({'follow': !isFollowing}),
-      );
-      if (res.statusCode == 401 && mounted) {
-        setState(() {
-          if (isFollowing) {
-            _followingAuthors.add(user.username);
-          } else {
-            _followingAuthors.remove(user.username);
-          }
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          if (isFollowing) {
-            _followingAuthors.add(user.username);
-          } else {
-            _followingAuthors.remove(user.username);
-          }
-        });
-      }
-    }
-  }
-
   Future<void> _loadTopUsers() async {
-    if (_loadingTop) {
-      // no-op; this keeps top users lazy but avoids duplicate network calls.
-    }
     try {
-      final query = _controller.text.trim();
-      final res = await http.get(
-        searchUsersEndpoint(query),
-        headers: authGetHeaders(widget.token),
-      );
-      if (res.statusCode != 200) {
-        if (mounted) setState(() => _loadingTop = false);
-        return;
-      }
+      final res = await http.get(searchUsersEndpoint(''), headers: authGetHeaders(widget.token));
+      if (!mounted) return;
+      if (res.statusCode != 200) { setState(() => _loadingTop = false); return; }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
       final users = (decoded['users'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(UserProfile.fromJson)
           .toList();
-      if (!mounted) return;
-      setState(() {
-        _topUsers = users;
-        _loadingTop = false;
-      });
+      setState(() { _topUsers = users; _loadingTop = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingTop = false);
     }
@@ -2448,275 +2774,778 @@ class _SearchViewState extends State<_SearchView> {
         postsEndpoint(city: widget.currentUser.city),
         headers: authGetHeaders(widget.token),
       );
-      if (res.statusCode != 200) {
-        return;
-      }
+      if (!mounted || res.statusCode != 200) return;
       final decoded = jsonDecode(res.body) as List<dynamic>;
       final posts = decoded
           .whereType<Map<String, dynamic>>()
           .map(FeedPost.fromJson)
           .toList();
-      if (!mounted) return;
-      setState(() {
-        _cityPosts = posts;
-      });
+      if (mounted) setState(() => _cityPosts = posts);
     } catch (_) {}
   }
 
-  void _openProfileAndRemember(UserProfile user) {
+  static const _historyPrefsKey = 'search_history_queries';
+
+  Future<void> _loadRecentQueries() async {
+    final prefs = await SharedPreferences.getInstance();
+    final local = prefs.getStringList(_historyPrefsKey) ?? [];
+    if (local.isNotEmpty) {
+      if (mounted) setState(() { _recentQueries..clear()..addAll(local); });
+      return;
+    }
+    // No local cache yet — seed from server (first install / fresh device)
+    try {
+      final res = await http.get(searchHistoryEndpoint(), headers: authGetHeaders(widget.token));
+      if (!mounted || res.statusCode != 200) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = (decoded['queries'] as List<dynamic>? ?? const []).whereType<String>().toList();
+      await prefs.setStringList(_historyPrefsKey, items);
+      if (mounted) setState(() { _recentQueries..clear()..addAll(items); });
+    } catch (_) {}
+  }
+
+  Future<void> _loadFollowingAuthors() async {
+    try {
+      final res = await http.get(
+        followingEndpoint(widget.currentUser.username),
+        headers: authGetHeaders(widget.token),
+      );
+      if (!mounted || res.statusCode != 200) return;
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final usernames = (decoded['users'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((u) => u['username']?.toString() ?? '')
+          .where((u) => u.isNotEmpty)
+          .toSet();
+      setState(() => _followingAuthors..clear()..addAll(usernames));
+    } catch (_) {}
+  }
+
+  Future<void> _addToHistory(String query) async {
+    if (query.isEmpty) return;
+    setState(() {
+      _recentQueries.remove(query);
+      _recentQueries.insert(0, query);
+      if (_recentQueries.length > 20) _recentQueries.removeLast();
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_historyPrefsKey, _recentQueries.toList());
+    try {
+      await http.post(
+        searchHistoryEndpoint(),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'query': query}),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _deleteHistoryItem(String q) async {
+    setState(() => _recentQueries.remove(q));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_historyPrefsKey, _recentQueries.toList());
+    try { await http.delete(searchHistoryItemEndpoint(q), headers: authGetHeaders(widget.token)); } catch (_) {}
+  }
+
+  Future<void> _clearHistory() async {
+    setState(() { _recentQueries.clear(); _historyShown = 5; });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_historyPrefsKey);
+    try { await http.delete(searchHistoryEndpoint(), headers: authGetHeaders(widget.token)); } catch (_) {}
+  }
+
+  Future<void> _doSearch(String query) async {
+    if (query.isEmpty) return;
+    setState(() { _loading = true; _didSearch = true; });
+    try {
+      final res = await http.get(searchUsersEndpoint(query), headers: authGetHeaders(widget.token));
+      if (!mounted) return;
+      if (res.statusCode != 200) { setState(() => _loading = false); return; }
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final users = (decoded['users'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(UserProfile.fromJson)
+          .toList();
+      setState(() { _users = users; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _search() async {
     final query = _controller.text.trim();
-    if (query.isNotEmpty) _addToHistory(query);
+    if (query.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    _debounce?.cancel();
+    await _addToHistory(query);
+    await _doSearch(query);
+  }
+
+  List<FeedPost> _searchPosts(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return _cityPosts;
+    return _cityPosts.where((p) =>
+      p.text.toLowerCase().contains(q) ||
+      p.author.toLowerCase().contains(q) ||
+      p.city.toLowerCase().contains(q)
+    ).toList();
+  }
+
+  void _openProfile(UserProfile user) {
+    _historyUsers[user.username] = user;
+    unawaited(_addToHistory(user.username));
     widget.onOpenUserProfile(user.username);
   }
 
-  void _onSearchSubmitted() {
-    final query = _controller.text.trim();
-    if (query.isNotEmpty) _addToHistory(query);
-    _load(query);
+  Future<void> _toggleFollow(UserProfile user) async {
+    final was = _followingAuthors.contains(user.username);
+    setState(() {
+      if (was) { _followingAuthors.remove(user.username); } else { _followingAuthors.add(user.username); }
+    });
+    try {
+      final res = await http.post(
+        followEndpoint(user.username),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'follow': !was}),
+      );
+      if (res.statusCode >= 400 && mounted) {
+        setState(() {
+          if (was) { _followingAuthors.add(user.username); } else { _followingAuthors.remove(user.username); }
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          if (was) { _followingAuthors.add(user.username); } else { _followingAuthors.remove(user.username); }
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: _controller,
-      builder: (context, value, _) {
-        final query = value.text.trim();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildSearchBar(isLight, query),
-            Expanded(
-              child: query.isEmpty
-                  ? _buildExplore(isLight)
-                  : _buildResults(isLight, query),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildSearchBar(bool isLight, String query) {
-    return Container(
-      decoration: BoxDecoration(
-        color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
-        border: Border(
-          bottom: BorderSide(
-            color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
-            width: 0.5,
-          ),
-        ),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: TextField(
-        controller: _controller,
-        onChanged: _onChanged,
-        onSubmitted: (_) => _onSearchSubmitted(),
-        onTapOutside: (_) => FocusScope.of(context).unfocus(),
-        style: TextStyle(
-          color: isLight ? Colors.black : Colors.white,
-          fontSize: 16,
-        ),
-        cursorColor: const Color(0xff1d9bf0),
-        decoration: InputDecoration(
-          prefixIcon: Icon(
-            Icons.search_rounded,
-            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
-            size: 20,
-          ),
-          suffixIcon: query.isNotEmpty
-              ? GestureDetector(
-                  onTap: () {
-                    _controller.clear();
-                    _onChanged('');
-                    setState(() {});
-                  },
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 18,
-                    color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
-                  ),
-                )
-              : null,
-          hintText: 'Search',
-          hintStyle: TextStyle(
-            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
-            fontSize: 16,
-          ),
-          filled: true,
-          fillColor: isLight ? const Color(0xfff4f6f8) : const Color(0xff161616),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(
-              color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
-            ),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Color(0xff1d9bf0), width: 1.5),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildExplore(bool isLight) {
-    if (_loadingSuggestions && _loadingTop) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    final trends = _popularPosts.take(5).toList();
-    final suggestions = _suggestedUsers.take(5).toList();
-    return ListView(
-      children: [
-        if (_recentQueries.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 8, 10),
-            child: Row(
+    return Scaffold(
+      backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+      body: SafeArea(
+        child: ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _controller,
+          builder: (context, tv, _) {
+            final query = tv.text.trim();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Text(
-                    'Recent searches',
-                    style: TextStyle(
-                      color: isLight ? Colors.black : Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
-                    ),
+                // ── Top bar ──────────────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 6, 16, 6),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        onPressed: () => Navigator.of(context).pop(),
+                        color: isLight ? Colors.black : Colors.white,
+                      ),
+                      Expanded(
+                        child: Container(
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: isLight ? const Color(0xfff4f6f8) : const Color(0xff1a1a1a),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
+                            ),
+                          ),
+                          child: TextField(
+                            controller: _controller,
+                            autofocus: true,
+                            onChanged: _onChanged,
+                            onSubmitted: (_) => _search(),
+                            onTapOutside: (_) => FocusScope.of(context).unfocus(),
+                            style: TextStyle(
+                                color: isLight ? Colors.black : Colors.white,
+                                fontSize: 15),
+                            cursorColor: const Color(0xff1d9bf0),
+                            decoration: InputDecoration(
+                              prefixIcon: Icon(
+                                Icons.search_rounded,
+                                color: isLight
+                                    ? const Color(0xff9ca3af)
+                                    : const Color(0xff6b7280),
+                                size: 19,
+                              ),
+                              suffixIcon: query.isNotEmpty
+                                  ? GestureDetector(
+                                      onTap: () {
+                                        _controller.clear();
+                                        _onChanged('');
+                                      },
+                                      child: Icon(
+                                        Icons.close_rounded,
+                                        size: 17,
+                                        color: isLight
+                                            ? const Color(0xff9ca3af)
+                                            : const Color(0xff6b7280),
+                                      ),
+                                    )
+                                  : null,
+                              hintText: 'Search',
+                              hintStyle: TextStyle(
+                                color: isLight
+                                    ? const Color(0xff9ca3af)
+                                    : const Color(0xff6b7280),
+                                fontSize: 15,
+                              ),
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 4, vertical: 12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      GestureDetector(
+                        onTap: _search,
+                        child: const Text(
+                          'Search',
+                          style: TextStyle(
+                            color: Color(0xff1d9bf0),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                TextButton(
-                  onPressed: _clearHistory,
-                  child: Text(
-                    'Clear all',
-                    style: TextStyle(
-                      color: isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af),
-                      fontSize: 14,
-                    ),
-                  ),
+                Divider(
+                    height: 1,
+                    color: isLight
+                        ? const Color(0xffe8eaed)
+                        : const Color(0xff2a2a2a)),
+                // ── Body ─────────────────────────────────────────────────
+                Expanded(
+                  child: _didSearch
+                      ? _buildResults(isLight, query)
+                      : _buildDefault(isLight),
                 ),
               ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDefault(bool isLight) {
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 32),
+      children: [
+        if (_recentQueries.isNotEmpty) ...[
+          ..._recentQueries
+              .take(_historyShown)
+              .map((q) => _buildHistoryRow(q, isLight)),
+          if (_recentQueries.length > _historyShown)
+            Center(
+              child: TextButton(
+                onPressed: () => setState(() => _historyShown += 5),
+                child: Text(
+                  'See more',
+                  style: TextStyle(
+                    color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
             ),
-          ),
-          SizedBox(
-            height: 40,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _recentQueries.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (_, i) => _buildRecentChip(_recentQueries[i], isLight),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Divider(
-            height: 1,
-            color: isLight ? const Color(0xffe8eaed) : const Color(0xff1f1f1f),
-          ),
-        ],
-        if (trends.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-            child: Text(
-              'Trends for you',
-              style: TextStyle(
-                color: isLight ? Colors.black : Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.3,
+          Center(
+            child: TextButton(
+              onPressed: _clearHistory,
+              child: Text(
+                'Clear all',
+                style: TextStyle(
+                  color: isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af),
+                  fontSize: 14,
+                ),
               ),
             ),
           ),
-          ...trends.asMap().entries.map(
-            (e) => _buildTrendingRow(e.value, isLight, rank: e.key + 1),
-          ),
-          Divider(
-            height: 1,
-            color: isLight ? const Color(0xffe8eaed) : const Color(0xff1f1f1f),
-          ),
+          Divider(height: 1, color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a)),
         ],
-        if (suggestions.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
-            child: Text(
-              'Who to follow',
-              style: TextStyle(
-                color: isLight ? Colors.black : Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.3,
+        // Who to follow
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 4, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Who to follow',
+                  style: TextStyle(
+                    color: isLight ? Colors.black : Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                  ),
+                ),
               ),
-            ),
+              IconButton(
+                icon: Icon(
+                  Icons.refresh_rounded,
+                  color: isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af),
+                  size: 22,
+                ),
+                onPressed: _loadSuggestions,
+                tooltip: 'Refresh',
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(8),
+                constraints: const BoxConstraints(),
+              ),
+            ],
           ),
+        ),
+        if (_loadingSuggestions)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_suggestedUsers.isNotEmpty)
           SizedBox(
-            height: 169,
+            height: 172,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: suggestions.length,
+              itemCount: _suggestedUsers.length,
               separatorBuilder: (_, _) => const SizedBox(width: 10),
-              itemBuilder: (_, i) => _buildSuggestionCard(suggestions[i], isLight),
+              itemBuilder: (_, i) => _buildSuggestionCard(_suggestedUsers[i], isLight),
             ),
           ),
-          const SizedBox(height: 16),
-        ],
-        const SizedBox(height: 32),
+        const SizedBox(height: 16),
       ],
     );
   }
 
-  Widget _buildRecentChip(String q, bool isLight) {
-    return GestureDetector(
+  Widget _buildHistoryRow(String q, bool isLight) {
+    final user = _historyUsers[q];
+    if (user != null) {
+      // ── User profile entry ─────────────────────────────────────────────
+      final bytes = decodeAvatarUrl(user.avatarUrl);
+      final displayName =
+          user.fullName.isNotEmpty ? user.fullName : user.username;
+      return InkWell(
+        onTap: () => widget.onOpenUserProfile(user.username),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor:
+                    isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+                foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+                child: bytes == null
+                    ? Text(
+                        initialFor(user.username),
+                        style: TextStyle(
+                          color: isLight ? Colors.black : Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      displayName,
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '@${user.username}',
+                      style: TextStyle(
+                        color: isLight
+                            ? const Color(0xff536471)
+                            : const Color(0xff71767b),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  _deleteHistoryItem(q);
+                  setState(() => _historyUsers.remove(q));
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: isLight
+                        ? const Color(0xff9ca3af)
+                        : const Color(0xff6b7280),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ── Text search entry ────────────────────────────────────────────────
+    return InkWell(
       onTap: () {
         _controller.text = q;
         _controller.selection = TextSelection.collapsed(offset: q.length);
-        _onChanged(q);
+        _search();
       },
-      child: Container(
-        alignment: Alignment.center,
-        padding: const EdgeInsets.fromLTRB(10, 0, 8, 0),
-        decoration: BoxDecoration(
-          color: isLight ? const Color(0xfff4f6f8) : const Color(0xff1a1a1a),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
-          ),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               Icons.history_rounded,
-              size: 13,
+              size: 20,
               color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
             ),
-            const SizedBox(width: 5),
-            Text(
-              q,
-              style: TextStyle(
-                color: isLight ? Colors.black : Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                q,
+                style: TextStyle(
+                  color: isLight ? Colors.black : Colors.white,
+                  fontSize: 16,
+                ),
               ),
             ),
-            const SizedBox(width: 8),
             GestureDetector(
-              onTap: () {
-                setState(() => _recentQueries.remove(q));
-                http.delete(
-                  searchHistoryItemEndpoint(q),
-                  headers: authGetHeaders(widget.token),
-                );
-              },
-              child: Icon(
-                Icons.close_rounded,
-                size: 12,
-                color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
+              onTap: () => _deleteHistoryItem(q),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 18,
+                  color: isLight
+                      ? const Color(0xff9ca3af)
+                      : const Color(0xff6b7280),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResults(bool isLight, String query) {
+    return Column(
+      children: [
+        // ── 3-tab segment ─────────────────────────────────────────────────
+        Container(
+          color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Container(
+            decoration: BoxDecoration(
+              color: isLight ? const Color(0xffe8eaed) : const Color(0xff1e1e1e),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
+              ),
+            ),
+            child: Row(
+              children: [
+                _seg('Top', 0, isLight),
+                _seg('People', 1, isLight),
+                _seg('Posts', 2, isLight),
+              ],
+            ),
+          ),
+        ),
+        // ── Results ────────────────────────────────────────────────────────
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _buildResultsList(isLight, query),
+        ),
+      ],
+    );
+  }
+
+  Widget _seg(String label, int idx, bool isLight) {
+    final sel = _section == idx;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _section = idx),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          margin: const EdgeInsets.all(4),
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(
+            color: sel
+                ? (isLight ? Colors.white : const Color(0xff2a2a2a))
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: sel
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isLight ? 0.07 : 0.4),
+                      blurRadius: 6,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: sel
+                    ? (isLight ? Colors.black : Colors.white)
+                    : (isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
+                fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResultsList(bool isLight, String query) {
+    if (_section == 2) {
+      final posts = _searchPosts(query);
+      if (posts.isEmpty) return _buildEmpty(query, isLight);
+      return ListView.separated(
+        itemCount: posts.length,
+        separatorBuilder: (_, _) => Divider(
+          height: 1,
+          color: isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336),
+        ),
+        itemBuilder: (_, i) => _buildPostRow(posts[i], isLight),
+      );
+    }
+    final people = _users.isEmpty ? _topUsers : _users;
+    if (people.isEmpty) {
+      return _loadingTop
+          ? const Center(child: CircularProgressIndicator())
+          : _buildEmpty(query, isLight);
+    }
+    return ListView.separated(
+      itemCount: people.length,
+      separatorBuilder: (_, _) => Divider(
+        height: 1,
+        color: isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336),
+      ),
+      itemBuilder: (_, i) => _buildPersonRow(people[i], isLight),
+    );
+  }
+
+  Widget _buildEmpty(String query, bool isLight) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              query.isNotEmpty ? 'No results for\n"$query"' : 'Nothing here yet.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isLight ? Colors.black : Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            if (query.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Try a different search term.',
+                style: TextStyle(
+                  color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                  fontSize: 15,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPostRow(FeedPost post, bool isLight) {
+    final text = post.text;
+    final snippet = text.length > 80 ? '${text.substring(0, 80)}…' : text;
+    final bytes = decodeAvatarUrl(post.avatarUrl);
+    return InkWell(
+      onTap: () => widget.onOpenUserProfile(post.author),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+              child: bytes == null
+                  ? Text(
+                      initialFor(post.author),
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        '@${post.author}',
+                        style: TextStyle(
+                          color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (post.city.isNotEmpty) ...[
+                        Text(
+                          ' · ${post.city}',
+                          style: TextStyle(
+                            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    snippet,
+                    style: TextStyle(
+                      color: isLight ? Colors.black : Colors.white,
+                      fontSize: 14,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      Icon(Icons.favorite_border_rounded, size: 13,
+                          color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
+                      const SizedBox(width: 3),
+                      Text('${post.likes}',
+                          style: TextStyle(
+                            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
+                            fontSize: 12,
+                          )),
+                      const SizedBox(width: 12),
+                      Icon(Icons.mode_comment_outlined, size: 13,
+                          color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
+                      const SizedBox(width: 3),
+                      Text('${post.comments.length}',
+                          style: TextStyle(
+                            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
+                            fontSize: 12,
+                          )),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPersonRow(UserProfile user, bool isLight) {
+    final bytes = decodeAvatarUrl(user.avatarUrl);
+    final displayName = user.fullName.isNotEmpty ? user.fullName : user.username;
+    return InkWell(
+      onTap: () => _openProfile(user),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+              child: bytes == null
+                  ? Text(
+                      initialFor(user.username),
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    displayName,
+                    style: TextStyle(
+                      color: isLight ? Colors.black : Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    '@${user.username}',
+                    style: TextStyle(
+                      color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: () => _toggleFollow(user),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _followingAuthors.contains(user.username)
+                    ? (isLight ? const Color(0xff536471) : const Color(0xff71767b))
+                    : (isLight ? Colors.black : Colors.white),
+                side: BorderSide(
+                  color: _followingAuthors.contains(user.username)
+                      ? (isLight ? const Color(0xffb8c0cc) : const Color(0xff3a3a3a))
+                      : (isLight ? Colors.black : Colors.white),
+                  width: 1.5,
+                ),
+                shape: const StadiumBorder(),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                _followingAuthors.contains(user.username)
+                    ? 'Following'
+                    : widget.followerAuthors.contains(user.username)
+                        ? 'Follow Back'
+                        : 'Follow',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
               ),
             ),
           ],
@@ -2729,7 +3558,7 @@ class _SearchViewState extends State<_SearchView> {
     final bytes = decodeAvatarUrl(user.avatarUrl);
     final displayName = user.fullName.isNotEmpty ? user.fullName : user.username;
     return GestureDetector(
-      onTap: () => _openProfileAndRemember(user),
+      onTap: () => widget.onOpenUserProfile(user.username),
       child: Container(
         width: 136,
         padding: const EdgeInsets.fromLTRB(12, 16, 12, 11),
@@ -2792,334 +3621,28 @@ class _SearchViewState extends State<_SearchView> {
                         ? (isLight ? const Color(0xffb8c0cc) : const Color(0xff3a3a3a))
                         : (isLight ? Colors.black : Colors.white),
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(vertical: 7),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 child: Text(
-                  _followingAuthors.contains(user.username) ? 'Following' : widget.followerAuthors.contains(user.username) ? 'Follow Back' : 'Follow',
+                  _followingAuthors.contains(user.username)
+                      ? 'Following'
+                      : widget.followerAuthors.contains(user.username)
+                          ? 'Follow Back'
+                          : 'Follow',
                 ),
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildResults(bool isLight, String query) {
-    return Column(
-      children: [
-        Container(
-          color: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-          child: Container(
-            decoration: BoxDecoration(
-              color: isLight ? const Color(0xffe8eaed) : const Color(0xff1e1e1e),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(child: _SearchSegment(label: 'Top', selected: _section == 0, onTap: () => setState(() => _section = 0))),
-                Expanded(child: _SearchSegment(label: 'People', selected: _section == 1, onTap: () => setState(() => _section = 1))),
-                Expanded(child: _SearchSegment(label: 'Posts', selected: _section == 2, onTap: () => setState(() => _section = 2))),
-              ],
-            ),
-          ),
-        ),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _buildResultsList(isLight, query),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildResultsList(bool isLight, String query) {
-    if (_section == 2) {
-      final posts = _searchPosts(query);
-      if (posts.isEmpty) return _buildEmptyResult(query, isLight);
-      return ListView.separated(
-        itemCount: posts.length,
-        separatorBuilder: (_, _) => Divider(
-          height: 1,
-          color: isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336),
-        ),
-        itemBuilder: (_, i) => _buildTrendingRow(posts[i], isLight),
-      );
-    }
-    final people = _users.isEmpty ? _topUsers : _users;
-    if (people.isEmpty) return _buildEmptyResult(query, isLight);
-    return ListView.separated(
-      itemCount: people.length,
-      separatorBuilder: (_, _) => Divider(
-        height: 1,
-        color: isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336),
-      ),
-      itemBuilder: (_, i) => _buildPersonRow(people[i], isLight),
-    );
-  }
-
-  Widget _buildEmptyResult(String query, bool isLight) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'No results for\n"$query"',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: isLight ? Colors.black : Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Try a different search term.',
-              style: TextStyle(
-                color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
-                fontSize: 15,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPersonRow(UserProfile user, bool isLight, {bool showBio = false}) {
-    final bytes = decodeAvatarUrl(user.avatarUrl);
-    final displayName = user.fullName.isNotEmpty ? user.fullName : user.username;
-    return InkWell(
-      onTap: () => _openProfileAndRemember(user),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            CircleAvatar(
-              radius: 20,
-              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-              child: bytes == null
-                  ? Text(
-                      initialFor(user.username),
-                      style: TextStyle(
-                        color: isLight ? Colors.black : Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    displayName,
-                    style: TextStyle(
-                      color: isLight ? Colors.black : Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    '@${user.username}',
-                    style: TextStyle(
-                      color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
-                      fontSize: 14,
-                    ),
-                  ),
-                  if (showBio && user.bio.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      user.bio,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: isLight ? Colors.black : Colors.white,
-                        fontSize: 14,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            OutlinedButton(
-              onPressed: () => _openProfileAndRemember(user),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: isLight ? Colors.black : Colors.white,
-                side: BorderSide(
-                  color: isLight ? Colors.black : Colors.white,
-                  width: 1.5,
-                ),
-                shape: const StadiumBorder(),
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: Text(
-                widget.followerAuthors.contains(user.username) ? 'Follow Back' : 'Follow',
-                style: TextStyle(
-                  color: isLight ? Colors.black : Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTrendingRow(FeedPost post, bool isLight, {int? rank}) {
-    final text = post.text;
-    final snippet = text.length > 70 ? '${text.substring(0, 70)}…' : text;
-    final city = post.city.trim().isEmpty ? 'Trending' : post.city;
-    return InkWell(
-      onTap: () => widget.onOpenPost(post.author, post.id),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (rank != null) ...[
-              SizedBox(
-                width: 30,
-                child: Text(
-                  '$rank',
-                  style: TextStyle(
-                    color: isLight ? const Color(0xffb8c0cc) : const Color(0xff3a4a5a),
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$city · Trending',
-                    style: TextStyle(
-                      color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    snippet,
-                    style: TextStyle(
-                      color: isLight ? Colors.black : Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    post.likes > 0 ? '${post.likes} posts' : 'Trending',
-                    style: TextStyle(
-                      color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<FeedPost> get _popularPosts {
-    final posts = _cityPosts.where((post) => post.likes >= 1).toList();
-    posts.sort((a, b) => b.likes.compareTo(a.likes));
-    return posts;
-  }
-
-  List<FeedPost> _searchPosts(String query) {
-    final q = query.trim().toLowerCase();
-    final posts = _cityPosts.where((post) {
-      if (q.isEmpty) return true;
-      return post.text.toLowerCase().contains(q) ||
-          post.author.toLowerCase().contains(q) ||
-          post.city.toLowerCase().contains(q);
-    }).toList();
-    posts.sort((a, b) => b.likes.compareTo(a.likes));
-    return posts;
-  }
-}
-
-class _SearchSegment extends StatelessWidget {
-  const _SearchSegment({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        margin: const EdgeInsets.all(4),
-        padding: const EdgeInsets.symmetric(vertical: 9),
-        decoration: BoxDecoration(
-          color: selected
-              ? (isLight ? Colors.white : const Color(0xff2a2a2a))
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: isLight ? 0.07 : 0.4),
-                    blurRadius: 6,
-                    offset: const Offset(0, 1),
-                  ),
-                ]
-              : null,
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected
-                  ? (isLight ? Colors.black : Colors.white)
-                  : (isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              fontSize: 14,
-            ),
-          ),
         ),
       ),
     );
   }
 }
+
 
 class _ComposeAction extends StatelessWidget {
   const _ComposeAction({required this.icon, required this.onTap, this.iconSize = 19});
@@ -3371,6 +3894,36 @@ class _NotifSectionHeader extends StatelessWidget {
   }
 }
 
+class _NotifAvatar extends StatelessWidget {
+  const _NotifAvatar({required this.url, required this.actor, required this.isLight});
+  final String url;
+  final String actor;
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = decodeAvatarUrl(url);
+    final ImageProvider? img = bytes != null
+        ? MemoryImage(bytes)
+        : (url.startsWith('http')
+            ? CachedNetworkImageProvider(url, cacheManager: imageCacheManager)
+            : null);
+    return CircleAvatar(
+      radius: 22,
+      backgroundColor: isLight ? const Color(0xffe0e0e0) : const Color(0xff2a2a2a),
+      foregroundImage: img,
+      child: Text(
+        initialFor(actor),
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 15,
+          color: isLight ? const Color(0xff333333) : Colors.white,
+        ),
+      ),
+    );
+  }
+}
+
 class _NotifTile extends StatelessWidget {
   const _NotifTile({
     required this.item,
@@ -3497,26 +4050,10 @@ class _NotifTile extends StatelessWidget {
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onOpenUserProfile,
-              child: CircleAvatar(
-                radius: 22,
-                backgroundColor: isLight
-                    ? const Color(0xffe0e0e0)
-                    : const Color(0xff2a2a2a),
-                foregroundImage: item.actorAvatarUrl.isNotEmpty
-                    ? CachedNetworkImageProvider(
-                        item.actorAvatarUrl,
-                        cacheManager: imageCacheManager,
-                      )
-                    : null,
-                // always provide child as letter fallback in case foregroundImage fails
-                child: Text(
-                  initialFor(item.actor),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: isLight ? const Color(0xff333333) : Colors.white,
-                  ),
-                ),
+              child: _NotifAvatar(
+                url: item.actorAvatarUrl,
+                actor: item.actor,
+                isLight: isLight,
               ),
             ),
             const SizedBox(width: 12),

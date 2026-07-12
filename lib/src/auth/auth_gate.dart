@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -63,12 +62,19 @@ class _AuthGateState extends State<AuthGate> {
       return;
     }
     try {
-      final res = await http.get(meEndpoint, headers: authGetHeaders(token));
-      if (res.statusCode != 200) {
+      final res = await http
+          .get(meEndpoint, headers: authGetHeaders(token))
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 401 || res.statusCode == 403) {
+        // Token genuinely revoked — clear everything and go to signup.
         await prefs.remove(_tokenKey);
         await prefs.remove(_userCacheKey);
         if (mounted) setState(() => _loading = false);
         return;
+      }
+      if (res.statusCode != 200) {
+        // Non-auth error (server down, captive portal, etc.) — use cache.
+        throw Exception('status ${res.statusCode}');
       }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
       final userJson = decoded['user'] as Map<String, dynamic>;
@@ -81,13 +87,12 @@ class _AuthGateState extends State<AuthGate> {
         });
       }
       if (!kIsWeb) unawaited(PushService.instance.registerForSession(token));
-    } catch (e) {
-      // Offline on cold start with a previously-valid session: behave like Instagram
-      // — open straight into the app with the last-known profile rather than bouncing
-      // to sign-in. HomePage's own offline handling (banner + cached feed) takes over
-      // from here once it mounts.
-      final offline = e is SocketException || e is HandshakeException || e is HttpException;
-      final cachedUserJson = offline ? prefs.getString(_userCacheKey) : null;
+    } catch (_) {
+      // Any network failure, timeout, or temporary server error:
+      // open into the app with the last-known profile (same as Instagram).
+      // On Android the http package wraps SocketException in ClientException,
+      // so we catch everything here rather than specific exception types.
+      final cachedUserJson = prefs.getString(_userCacheKey);
       if (cachedUserJson != null) {
         try {
           final user = UserProfile.fromJson(

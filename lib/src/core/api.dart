@@ -90,8 +90,8 @@ Uri get registerDeviceEndpoint =>
     Uri.parse('$apiBaseUrl/api/push/devices/register/');
 Uri get unregisterDeviceEndpoint =>
     Uri.parse('$apiBaseUrl/api/push/devices/unregister/');
-Uri get searchHistoryEndpoint =>
-    Uri.parse('$apiBaseUrl/api/auth/search-history/');
+Uri searchHistoryEndpoint({int limit = 20}) =>
+    Uri.parse('$apiBaseUrl/api/auth/search-history/?limit=$limit');
 Uri searchHistoryItemEndpoint(String query) =>
     Uri.parse('$apiBaseUrl/api/auth/search-history/${Uri.encodeComponent(query)}/');
 Uri get citiesEndpoint => Uri.parse('$apiBaseUrl/api/posts/cities/');
