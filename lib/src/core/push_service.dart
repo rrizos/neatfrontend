@@ -144,7 +144,7 @@ class PushService {
       final token = await FirebaseMessaging.instance
           .getToken()
           .timeout(const Duration(seconds: 15));
-      debugPrint('PushService.registerForSession: getToken returned $token');
+      debugPrint('PushService.registerForSession: getToken returned ${token == null ? 'null' : 'a token'}');
       if (token == null) return;
       _fcmToken = token;
       await _postToken(authToken, token);
@@ -196,7 +196,7 @@ class PushService {
             }),
           )
           .timeout(const Duration(seconds: 15));
-      debugPrint('PushService._postToken: response ${res.statusCode} ${res.body}');
+      debugPrint('PushService._postToken: response ${res.statusCode}');
     } catch (e) {
       debugPrint('PushService._postToken failed: $e');
     }

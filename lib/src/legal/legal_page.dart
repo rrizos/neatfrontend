@@ -217,19 +217,29 @@ To connect you with your community, we collect:
 • Coarse (Approximate) Location Data: Neat operates by city. We provide a map interface where you manually select a city or general region. This city choice is saved to display localized posts and conversations.
 • Account Identifiers: Your username, email address, profile picture, and account credentials created during signup.
 • User-Generated Content: The text, photos, comments, and posts you choose to share within your selected city's feed.
+• Direct Messages: The text, photos, and voice messages you send in private conversations with other users. These are stored to deliver and display your conversation history.
+• Push Notification Token: A device identifier used solely to deliver notifications to your device (see Third-Party Services below).
 • Diagnostics: Basic crash logs and app performance data to keep Neat running smoothly.
 
-3. HOW WE USE YOUR INFORMATION
+3. THIRD-PARTY SERVICES
+Some features are provided by outside services, which process the minimum data needed to make that feature work:
+• Firebase Cloud Messaging (Google): delivers push notifications to your device.
+• Apple Maps / MapKit: powers map displays for events and locations.
+• OpenStreetMap / Nominatim: looks up locations when you search for an address.
+• Giphy: powers GIF search inside messages.
+These providers only receive what's needed for their specific feature (e.g. a device token, or a location search term) — we do not share your account identifiers, posts, or messages with them beyond that.
+
+4. HOW WE USE YOUR INFORMATION
 • To place your profile and posts inside the city feed you selected.
 • To authenticate your account and maintain platform safety.
 • We DO NOT sell your data, your city choices, or your profile information to third-party advertisers or data brokers.
 
-4. ACCOUNT DELETION & DATA RETENTION
+5. ACCOUNT DELETION & DATA RETENTION
 In strict compliance with Apple App Store rules, you can completely erase your footprint at any time:
 • You can trigger account deletion instantly from the App Settings / Signup screen by selecting "Delete Account".
 • Upon deletion, your personal account identifiers, email, and profile details are permanently purged from our databases within 30 days. Any text posts you made will be completely anonymized and detached from your identity.
 
-5. CONTACT US
+6. CONTACT US
 For privacy questions, contact us at: neatgreece@gmail.com
 ''';
 
@@ -250,18 +260,28 @@ const privacyPolicyTextEl = '''
 • Κατά Προσέγγιση Δεδομένα Τοποθεσίας: Το Neat λειτουργεί ανά πόλη. Παρέχουμε μια διεπαφή χάρτη όπου επιλέγετε χειροκίνητα μια πόλη ή γενική περιοχή. Αυτή η επιλογή πόλης αποθηκεύεται για την εμφάνιση τοπικών αναρτήσεων και συνομιλιών.
 • Στοιχεία Λογαριασμού: Το όνομα χρήστη, τη διεύθυνση email, τη φωτογραφία προφίλ και τα διαπιστευτήρια λογαριασμού που δημιουργήσατε κατά την εγγραφή.
 • Περιεχόμενο Χρήστη: Το κείμενο, τις φωτογραφίες, τα σχόλια και τις αναρτήσεις που επιλέγετε να μοιραστείτε στη ροή της επιλεγμένης πόλης σας.
+• Προσωπικά Μηνύματα: Το κείμενο, τις φωτογραφίες και τα φωνητικά μηνύματα που στέλνετε σε ιδιωτικές συνομιλίες με άλλους χρήστες. Αποθηκεύονται για την παράδοση και εμφάνιση του ιστορικού της συνομιλίας σας.
+• Διακριτικό Ειδοποιήσεων (Push Token): Ένα αναγνωριστικό συσκευής που χρησιμοποιείται αποκλειστικά για την παράδοση ειδοποιήσεων στη συσκευή σας (δείτε Υπηρεσίες Τρίτων παρακάτω).
 • Διαγνωστικά: Βασικά αρχεία καταγραφής σφαλμάτων και δεδομένα απόδοσης της εφαρμογής, ώστε το Neat να λειτουργεί ομαλά.
 
-3. ΠΩΣ ΧΡΗΣΙΜΟΠΟΙΟΥΜΕ ΤΙΣ ΠΛΗΡΟΦΟΡΙΕΣ ΣΑΣ
+3. ΥΠΗΡΕΣΙΕΣ ΤΡΙΤΩΝ
+Ορισμένες λειτουργίες παρέχονται από εξωτερικές υπηρεσίες, οι οποίες επεξεργάζονται μόνο τα ελάχιστα απαραίτητα δεδομένα για τη λειτουργία τους:
+• Firebase Cloud Messaging (Google): παραδίδει ειδοποιήσεις push στη συσκευή σας.
+• Apple Maps / MapKit: υποστηρίζει την εμφάνιση χαρτών για εκδηλώσεις και τοποθεσίες.
+• OpenStreetMap / Nominatim: αναζητά τοποθεσίες όταν ψάχνετε μια διεύθυνση.
+• Giphy: υποστηρίζει την αναζήτηση GIF μέσα στα μηνύματα.
+Αυτοί οι πάροχοι λαμβάνουν μόνο ό,τι είναι απαραίτητο για τη συγκεκριμένη λειτουργία τους (π.χ. ένα διακριτικό συσκευής ή έναν όρο αναζήτησης τοποθεσίας) — δεν μοιραζόμαστε τα στοιχεία λογαριασμού, τις αναρτήσεις ή τα μηνύματά σας μαζί τους πέραν αυτού.
+
+4. ΠΩΣ ΧΡΗΣΙΜΟΠΟΙΟΥΜΕ ΤΙΣ ΠΛΗΡΟΦΟΡΙΕΣ ΣΑΣ
 • Για να τοποθετήσουμε το προφίλ και τις αναρτήσεις σας μέσα στη ροή της πόλης που επιλέξατε.
 • Για την πιστοποίηση του λογαριασμού σας και τη διατήρηση της ασφάλειας της πλατφόρμας.
 • ΔΕΝ πουλάμε τα δεδομένα σας, τις επιλογές πόλης σας ή τις πληροφορίες προφίλ σας σε τρίτους διαφημιστές ή μεσίτες δεδομένων.
 
-4. ΔΙΑΓΡΑΦΗ ΛΟΓΑΡΙΑΣΜΟΥ & ΔΙΑΤΗΡΗΣΗ ΔΕΔΟΜΕΝΩΝ
+5. ΔΙΑΓΡΑΦΗ ΛΟΓΑΡΙΑΣΜΟΥ & ΔΙΑΤΗΡΗΣΗ ΔΕΔΟΜΕΝΩΝ
 Σε αυστηρή συμμόρφωση με τους κανόνες του Apple App Store, μπορείτε να διαγράψετε πλήρως το ίχνος σας ανά πάσα στιγμή:
 • Μπορείτε να ενεργοποιήσετε τη διαγραφή λογαριασμού άμεσα από την οθόνη Ρυθμίσεις εφαρμογής / Εγγραφή, επιλέγοντας «Διαγραφή Λογαριασμού».
 • Μετά τη διαγραφή, τα προσωπικά στοιχεία του λογαριασμού σας, το email και τα στοιχεία προφίλ διαγράφονται οριστικά από τις βάσεις δεδομένων μας εντός 30 ημερών. Οποιεσδήποτε αναρτήσεις κειμένου έχετε κάνει θα ανωνυμοποιηθούν πλήρως και θα αποσυνδεθούν από την ταυτότητά σας.
 
-5. ΕΠΙΚΟΙΝΩΝΙΑ ΜΑΖΙ ΜΑΣ
+6. ΕΠΙΚΟΙΝΩΝΙΑ ΜΑΖΙ ΜΑΣ
 Για ερωτήσεις σχετικά με το απόρρητο, επικοινωνήστε μαζί μας στο: neatgreece@gmail.com
 ''';

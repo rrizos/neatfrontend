@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 
 const String _kServerUrl = String.fromEnvironment(
   'NEAT_API_BASE_URL',
-  defaultValue: 'http://63.181.201.175',
+  defaultValue: 'https://63.181.201.175',
 );
 
 // On web the app runs on Netlify (HTTPS). Using empty base means all paths

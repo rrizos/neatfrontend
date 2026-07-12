@@ -13,8 +13,8 @@ import 'package:giphy_flutter_sdk/giphy_dialog.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:record/record.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api.dart';
 import '../core/media_cache.dart';
@@ -277,17 +277,17 @@ class _MessagesPageState extends State<MessagesPage> {
     }
   }
 
+  static const _secureStorage = FlutterSecureStorage();
+
   Future<void> _saveInboxCache(List<dynamic> raw) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('neat_inbox_cache', jsonEncode(raw));
+      await _secureStorage.write(key: 'neat_inbox_cache', value: jsonEncode(raw));
     } catch (_) {}
   }
 
   Future<void> _loadInboxCache() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('neat_inbox_cache');
+      final raw = await _secureStorage.read(key: 'neat_inbox_cache');
       if (raw == null || !mounted) return;
       final list = (jsonDecode(raw) as List).whereType<Map<String, dynamic>>().toList();
       final items = list.map(ConversationSummary.fromJson).toList();

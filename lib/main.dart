@@ -7,10 +7,12 @@ import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/giphy_flutter_sdk.dart';
 
 import 'src/app.dart';
+import 'src/core/pinned_http.dart';
 import 'src/core/push_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  setupPinnedHttpOverrides();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.white,

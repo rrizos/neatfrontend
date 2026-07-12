@@ -9,6 +9,10 @@ GeneratedPluginRegistrant.java
 
 # Remember to never publicly share your keystore.
 # See https://flutter.dev/to/reference-keystore
+#
+# Match *anywhere* .jks/.keystore appears in the name, not just as a strict
+# suffix — a renamed backup like "my-release-key.jks.WRONG_KEY_BACKUP" doesn't
+# end in ".jks" and previously slipped past this gitignore and got committed.
 key.properties
-**/*.keystore
-**/*.jks
+**/*keystore*
+**/*.jks*

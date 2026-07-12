@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -36,8 +37,23 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   static const _tokenKey = 'neat_auth_token';
   static const _userCacheKey = 'neat_cached_user';
+  static const _secureStorage = FlutterSecureStorage();
   bool _loading = true;
   AuthSession? _session;
+
+  // Reads a value from Keychain/Keystore-backed secure storage, migrating a
+  // legacy plaintext SharedPreferences value (from before this moved off
+  // SharedPreferences) on first read so existing sessions aren't logged out.
+  Future<String?> _readSecure(SharedPreferences prefs, String key) async {
+    final secureValue = await _secureStorage.read(key: key);
+    if (secureValue != null && secureValue.isNotEmpty) return secureValue;
+    final legacyValue = prefs.getString(key);
+    if (legacyValue != null && legacyValue.isNotEmpty) {
+      await _secureStorage.write(key: key, value: legacyValue);
+      await prefs.remove(key);
+    }
+    return legacyValue;
+  }
 
   @override
   void initState() {
@@ -56,7 +72,7 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _restore() async {
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(_tokenKey);
+    final token = await _readSecure(prefs, _tokenKey);
     if (token == null || token.isEmpty) {
       if (mounted) setState(() => _loading = false);
       return;
@@ -67,8 +83,8 @@ class _AuthGateState extends State<AuthGate> {
           .timeout(const Duration(seconds: 10));
       if (res.statusCode == 401 || res.statusCode == 403) {
         // Token genuinely revoked — clear everything and go to signup.
-        await prefs.remove(_tokenKey);
-        await prefs.remove(_userCacheKey);
+        await _secureStorage.delete(key: _tokenKey);
+        await _secureStorage.delete(key: _userCacheKey);
         if (mounted) setState(() => _loading = false);
         return;
       }
@@ -79,7 +95,7 @@ class _AuthGateState extends State<AuthGate> {
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
       final userJson = decoded['user'] as Map<String, dynamic>;
       final user = UserProfile.fromJson(userJson);
-      await prefs.setString(_userCacheKey, jsonEncode(userJson));
+      await _secureStorage.write(key: _userCacheKey, value: jsonEncode(userJson));
       if (mounted) {
         setState(() {
           _session = AuthSession(token: token, user: user);
@@ -92,7 +108,7 @@ class _AuthGateState extends State<AuthGate> {
       // open into the app with the last-known profile (same as Instagram).
       // On Android the http package wraps SocketException in ClientException,
       // so we catch everything here rather than specific exception types.
-      final cachedUserJson = prefs.getString(_userCacheKey);
+      final cachedUserJson = await _readSecure(prefs, _userCacheKey);
       if (cachedUserJson != null) {
         try {
           final user = UserProfile.fromJson(
@@ -112,9 +128,8 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _save(AuthSession session) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, session.token);
-    await prefs.setString(_userCacheKey, jsonEncode(session.user.toJson()));
+    await _secureStorage.write(key: _tokenKey, value: session.token);
+    await _secureStorage.write(key: _userCacheKey, value: jsonEncode(session.user.toJson()));
     if (mounted) setState(() => _session = session);
     if (!kIsWeb) unawaited(PushService.instance.registerForSession(session.token));
   }
@@ -125,9 +140,8 @@ class _AuthGateState extends State<AuthGate> {
       if (!kIsWeb) await PushService.instance.unregisterForSession(token);
       await http.post(logoutEndpoint, headers: authJsonHeaders(token));
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_tokenKey);
-    await prefs.remove(_userCacheKey);
+    await _secureStorage.delete(key: _tokenKey);
+    await _secureStorage.delete(key: _userCacheKey);
     if (mounted) setState(() => _session = null);
   }
 

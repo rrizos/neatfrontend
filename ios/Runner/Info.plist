@@ -50,11 +50,26 @@
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>instagram</string>
+		<string>whatsapp</string>
+		<string>tg</string>
 	</array>
+	<!-- Scoped to the one backend host, which has no domain name (so it can't
+	     get a public-CA cert) and serves a pinned self-signed cert instead —
+	     needed for native AVPlayer video playback to trust it. Every other
+	     host the app talks to (Firebase, Nominatim, MapKit's CDN, Netlify)
+	     keeps full ATS enforcement. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>63.181.201.175</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<false/>
+			</dict>
+		</dict>
 	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
