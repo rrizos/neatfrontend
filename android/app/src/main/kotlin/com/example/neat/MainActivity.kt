@@ -1,5 +1,6 @@
 package com.example.neat
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -40,9 +41,15 @@ class MainActivity : FlutterActivity() {
             putExtra(Intent.EXTRA_TEXT, text)
             setPackage("com.instagram.android")
         }
-        if (intent.resolveActivity(packageManager) != null) {
+        try {
+            // Don't gate this on resolveActivity(): on Android 11+ it uses
+            // MATCH_DEFAULT_ONLY, which returns a false negative for apps like
+            // Instagram whose share-target activity doesn't declare the
+            // DEFAULT category — even though startActivity() with the same
+            // explicit package works fine. Catching the failure is the
+            // reliable way to detect "not installed" here.
             startActivity(intent)
-        } else {
+        } catch (_: ActivityNotFoundException) {
             // Instagram not installed — fall back to generic share sheet
             val fallback = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"

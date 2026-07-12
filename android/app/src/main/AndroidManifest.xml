@@ -76,5 +76,25 @@
             <data android:mimeType="text/plain"/>
         </intent>
         <package android:name="com.instagram.android" />
+        <!-- Without these, PackageManager hides all app-visibility queries on
+             Android 11+, so url_launcher's canLaunchUrl silently returns false
+             for every https link — this is what broke the WhatsApp/X/Telegram/
+             Facebook share buttons on Android. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="http"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="whatsapp"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="tg"/>
+        </intent>
     </queries>
 </manifest>

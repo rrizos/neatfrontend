@@ -255,6 +255,18 @@ class _ShareSheetState extends State<_ShareSheet> {
     if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
+  // Tries the target app's own URL scheme first (opens straight into the app,
+  // no browser hop) and falls back to the https link — which itself may open
+  // the app via a universal link, or the web version if it isn't installed.
+  Future<void> _launchPreferNative(String nativeUrl, String fallbackUrl) async {
+    final native = Uri.parse(nativeUrl);
+    if (await canLaunchUrl(native)) {
+      await launchUrl(native, mode: LaunchMode.externalApplication);
+      return;
+    }
+    await _launch(fallbackUrl);
+  }
+
   Future<void> _copyLink() async {
     await Clipboard.setData(ClipboardData(text: _shareLink));
     if (!mounted) return;
@@ -430,11 +442,25 @@ class _ShareSheetState extends State<_ShareSheet> {
                   children: [
                     _ExtBtn(label: 'Instagram', onTap: _shareToInstagramDm, child: const _IgIcon()),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'WhatsApp', onTap: () => _launch('https://wa.me/?text=${Uri.encodeComponent('$_shareText\n$_shareLink')}'), child: const _WhatsAppIcon()),
+                    _ExtBtn(
+                      label: 'WhatsApp',
+                      onTap: () => _launchPreferNative(
+                        'whatsapp://send?text=${Uri.encodeComponent('$_shareText\n$_shareLink')}',
+                        'https://wa.me/?text=${Uri.encodeComponent('$_shareText\n$_shareLink')}',
+                      ),
+                      child: const _WhatsAppIcon(),
+                    ),
                     const SizedBox(width: 16),
                     _ExtBtn(label: 'X (Twitter)', onTap: () => _launch('https://x.com/intent/tweet?text=${Uri.encodeComponent('$_shareText\n$_shareLink')}'), child: const _XIcon()),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'Telegram', onTap: () => _launch('https://t.me/share/url?url=${Uri.encodeComponent(_shareLink)}&text=${Uri.encodeComponent(_shareText)}'), child: const _TelegramIcon()),
+                    _ExtBtn(
+                      label: 'Telegram',
+                      onTap: () => _launchPreferNative(
+                        'tg://msg_url?url=${Uri.encodeComponent(_shareLink)}&text=${Uri.encodeComponent(_shareText)}',
+                        'https://t.me/share/url?url=${Uri.encodeComponent(_shareLink)}&text=${Uri.encodeComponent(_shareText)}',
+                      ),
+                      child: const _TelegramIcon(),
+                    ),
                     const SizedBox(width: 16),
                     _ExtBtn(label: 'Facebook', onTap: () => _launch('https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(_shareLink)}'), child: const _FbIcon()),
                     const SizedBox(width: 16),
