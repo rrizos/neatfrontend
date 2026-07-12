@@ -517,6 +517,17 @@ class _InboxRow extends StatelessWidget {
     return me ? 'You: $msg' : msg;
   }
 
+  // Instagram-style "Sent Xh"/"Read Xh" — only meaningful for the last message
+  // *you* sent, comparing its time (conversation.updated is bumped exactly
+  // when it's created) against the other person's read cursor.
+  String get _statusLabel {
+    if (summary.lastSender != currentUsername) return '';
+    if (summary.lastMessage.isEmpty) return '';
+    final otherRead = summary.otherLastReadAt != null &&
+        !summary.otherLastReadAt!.isBefore(summary.updated);
+    return otherRead ? 'Read' : 'Sent';
+  }
+
   @override
   Widget build(BuildContext context) {
     final unread    = summary.unreadCount > 0;
@@ -524,13 +535,15 @@ class _InboxRow extends StatelessWidget {
     final activeNow = _isActiveNow(summary.otherLastActive);
     final count     = summary.unreadCount;
     final timeStr   = _inboxTime(summary.updated);
+    final status    = _statusLabel;
+    final timeLabel = status.isEmpty ? timeStr : '$status $timeStr';
 
     // Typing takes priority; then 2+ unread → count; else preview · time
     final previewText = summary.isTyping
         ? 'Typing...'
         : (unread && count >= 2)
             ? '$count new messages · $timeStr'
-            : '$_preview · $timeStr';
+            : '$_preview · $timeLabel';
     final previewColor = summary.isTyping
         ? (isLight ? const Color(0xff3880f4) : const Color(0xff5b9cf6))
         : unread
@@ -1273,6 +1286,7 @@ class _ConversationPageState extends State<ConversationPage> {
       final localOnly  = _messages
           .where((m) => !serverIds.contains(m.id))
           .where((m) => m.id >= 0 || !serverKeys.contains('${m.sender}\x00${m.text}'))
+          .where((m) => m.id >= 0 || DateTime.now().difference(m.created) < const Duration(seconds: 20))
           .toList();
       final merged = [...msgs, ...localOnly]..sort((a, b) => a.created.compareTo(b.created));
       final hadNewFromOther = merged.length > _messages.length &&
@@ -1350,6 +1364,10 @@ class _ConversationPageState extends State<ConversationPage> {
       final localOnly   = _messages
           .where((m) => !serverIds.contains(m.id))
           .where((m) => m.id >= 0 || !serverKeys.contains('${m.sender}\x00${m.text}'))
+          // An optimistic (negative-ID) message the server still hasn't echoed back after
+          // this long clearly failed to send (e.g. a send error the client didn't catch) —
+          // drop it so it doesn't linger forever as an unremovable, undeletable phantom.
+          .where((m) => m.id >= 0 || DateTime.now().difference(m.created) < const Duration(seconds: 20))
           .toList();
       final merged = [...msgs, ...localOnly]
         ..sort((a, b) => a.created.compareTo(b.created));
@@ -1391,6 +1409,14 @@ class _ConversationPageState extends State<ConversationPage> {
         body: jsonEncode({'text': text}),
       );
       if (res.statusCode == 401) return widget.onLogout();
+      if (res.statusCode != 201) {
+        if (mounted) {
+          setState(() => _messages.removeWhere((m) => m.id == opt.id));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Message failed to send')),
+          );
+        }
+      }
     } catch (_) {
       if (mounted) setState(() => _messages.removeWhere((m) => m.id == opt.id));
     } finally {

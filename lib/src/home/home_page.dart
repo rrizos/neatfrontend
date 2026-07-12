@@ -392,6 +392,7 @@ class _HomePageState extends State<HomePage> {
             _notificationsList[index] = NotificationItem(
               id: item.id,
               actor: item.actor,
+              actorAvatarUrl: item.actorAvatarUrl,
               verb: item.verb,
               targetType: item.targetType,
               targetId: item.targetId,
@@ -3501,6 +3502,13 @@ class _NotifTile extends StatelessWidget {
                 backgroundColor: isLight
                     ? const Color(0xffe0e0e0)
                     : const Color(0xff2a2a2a),
+                foregroundImage: item.actorAvatarUrl.isNotEmpty
+                    ? CachedNetworkImageProvider(
+                        item.actorAvatarUrl,
+                        cacheManager: imageCacheManager,
+                      )
+                    : null,
+                // always provide child as letter fallback in case foregroundImage fails
                 child: Text(
                   initialFor(item.actor),
                   style: TextStyle(

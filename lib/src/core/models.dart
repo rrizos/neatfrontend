@@ -34,6 +34,12 @@ class MutualUser {
     fullName: json['fullName']?.toString() ?? '',
     avatarUrl: json['avatarUrl']?.toString() ?? '',
   );
+
+  Map<String, dynamic> toJson() => {
+    'username': username,
+    'fullName': fullName,
+    'avatarUrl': avatarUrl,
+  };
 }
 
 class MediaItem {
@@ -150,6 +156,28 @@ class UserProfile {
       hasBlockedYou: json['hasBlockedYou'] == true,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'username': username,
+    'email': email,
+    'fullName': fullName,
+    'bio': bio,
+    'city': city,
+    'avatarUrl': avatarUrl,
+    'followers': followers,
+    'following': following,
+    'isFollowing': isFollowing,
+    'followsYou': followsYou,
+    'mutuals': mutuals.map((m) => m.toJson()).toList(),
+    'mutualsCount': mutualsCount,
+    'avatarZoomable': avatarZoomable,
+    'isVerified': isVerified,
+    'isAdmin': isAdmin,
+    'canCreateOfficialEvents': canCreateOfficialEvents,
+    'isBlocked': isBlocked,
+    'hasBlockedYou': hasBlockedYou,
+  };
 }
 
 class FeedPost {
@@ -293,6 +321,7 @@ class NotificationItem {
   const NotificationItem({
     required this.id,
     required this.actor,
+    required this.actorAvatarUrl,
     required this.verb,
     required this.targetType,
     required this.targetId,
@@ -305,6 +334,7 @@ class NotificationItem {
 
   final int id;
   final String actor;
+  final String actorAvatarUrl;
   final String verb;
   final String targetType;
   final String targetId;
@@ -319,6 +349,7 @@ class NotificationItem {
     return NotificationItem(
       id: parseInt(json['id']),
       actor: json['actor']?.toString() ?? '',
+      actorAvatarUrl: json['actorAvatarUrl']?.toString() ?? '',
       verb: json['verb']?.toString() ?? '',
       targetType: json['targetType']?.toString() ?? '',
       targetId: json['targetId']?.toString() ?? '',
@@ -345,6 +376,7 @@ class ConversationSummary {
     required this.unreadCount,
     required this.lastReadAt,
     this.otherLastActive,
+    this.otherLastReadAt,
     this.isTyping = false,
   });
 
@@ -358,6 +390,7 @@ class ConversationSummary {
   final int unreadCount;
   final DateTime? lastReadAt;
   final DateTime? otherLastActive;
+  final DateTime? otherLastReadAt;
   final bool isTyping;
 
   factory ConversationSummary.fromJson(Map<String, dynamic> json) {
@@ -375,6 +408,7 @@ class ConversationSummary {
       unreadCount: parseInt(json['unreadCount']),
       lastReadAt: DateTime.tryParse(json['lastReadAt']?.toString() ?? ''),
       otherLastActive: DateTime.tryParse(json['otherLastActive']?.toString() ?? ''),
+      otherLastReadAt: DateTime.tryParse(json['otherLastReadAt']?.toString() ?? ''),
       isTyping: json['otherIsTyping'] == true,
     );
   }

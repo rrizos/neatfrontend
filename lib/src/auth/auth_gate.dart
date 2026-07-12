@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -35,6 +36,7 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   static const _tokenKey = 'neat_auth_token';
+  static const _userCacheKey = 'neat_cached_user';
   bool _loading = true;
   AuthSession? _session;
 
@@ -64,13 +66,14 @@ class _AuthGateState extends State<AuthGate> {
       final res = await http.get(meEndpoint, headers: authGetHeaders(token));
       if (res.statusCode != 200) {
         await prefs.remove(_tokenKey);
+        await prefs.remove(_userCacheKey);
         if (mounted) setState(() => _loading = false);
         return;
       }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final user = UserProfile.fromJson(
-        decoded['user'] as Map<String, dynamic>,
-      );
+      final userJson = decoded['user'] as Map<String, dynamic>;
+      final user = UserProfile.fromJson(userJson);
+      await prefs.setString(_userCacheKey, jsonEncode(userJson));
       if (mounted) {
         setState(() {
           _session = AuthSession(token: token, user: user);
@@ -78,7 +81,27 @@ class _AuthGateState extends State<AuthGate> {
         });
       }
       if (!kIsWeb) unawaited(PushService.instance.registerForSession(token));
-    } catch (_) {
+    } catch (e) {
+      // Offline on cold start with a previously-valid session: behave like Instagram
+      // — open straight into the app with the last-known profile rather than bouncing
+      // to sign-in. HomePage's own offline handling (banner + cached feed) takes over
+      // from here once it mounts.
+      final offline = e is SocketException || e is HandshakeException || e is HttpException;
+      final cachedUserJson = offline ? prefs.getString(_userCacheKey) : null;
+      if (cachedUserJson != null) {
+        try {
+          final user = UserProfile.fromJson(
+            jsonDecode(cachedUserJson) as Map<String, dynamic>,
+          );
+          if (mounted) {
+            setState(() {
+              _session = AuthSession(token: token, user: user);
+              _loading = false;
+            });
+          }
+          return;
+        } catch (_) {}
+      }
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -86,6 +109,7 @@ class _AuthGateState extends State<AuthGate> {
   Future<void> _save(AuthSession session) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, session.token);
+    await prefs.setString(_userCacheKey, jsonEncode(session.user.toJson()));
     if (mounted) setState(() => _session = session);
     if (!kIsWeb) unawaited(PushService.instance.registerForSession(session.token));
   }
@@ -98,6 +122,7 @@ class _AuthGateState extends State<AuthGate> {
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
+    await prefs.remove(_userCacheKey);
     if (mounted) setState(() => _session = null);
   }
 
