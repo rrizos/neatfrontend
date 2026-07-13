@@ -2,6 +2,7 @@ package com.example.neat
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -35,28 +36,45 @@ class MainActivity : FlutterActivity() {
             }
     }
 
-    private fun shareToInstagramDm(text: String) {
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, text)
-            setPackage("com.instagram.android")
+    // Meta renamed Instagram's Android package at some point from
+    // com.instagram.android to com.instagram.barcelona (confirmed via
+    // `adb shell pm list packages` on a real current-Instagram device) —
+    // the old package name doesn't exist any more on updated installs, so
+    // targeting it always threw ActivityNotFoundException and silently fell
+    // back to the generic chooser. Try both, in case some installs still use
+    // the old name.
+    private val instagramPackageCandidates = listOf("com.instagram.android", "com.instagram.barcelona")
+
+    private fun installedInstagramPackage(): String? {
+        for (pkg in instagramPackageCandidates) {
+            try {
+                packageManager.getPackageInfo(pkg, 0)
+                return pkg
+            } catch (_: PackageManager.NameNotFoundException) {}
         }
-        try {
-            // Don't gate this on resolveActivity(): on Android 11+ it uses
-            // MATCH_DEFAULT_ONLY, which returns a false negative for apps like
-            // Instagram whose share-target activity doesn't declare the
-            // DEFAULT category — even though startActivity() with the same
-            // explicit package works fine. Catching the failure is the
-            // reliable way to detect "not installed" here.
-            startActivity(intent)
-        } catch (_: ActivityNotFoundException) {
-            // Instagram not installed — fall back to generic share sheet
-            val fallback = Intent(Intent.ACTION_SEND).apply {
+        return null
+    }
+
+    private fun shareToInstagramDm(text: String) {
+        val igPackage = installedInstagramPackage()
+        if (igPackage != null) {
+            val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, text)
+                setPackage(igPackage)
             }
-            startActivity(Intent.createChooser(fallback, "Share via"))
+            try {
+                startActivity(intent)
+                return
+            } catch (_: ActivityNotFoundException) {
+                // Fall through to the generic chooser below.
+            }
         }
+        val fallback = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(fallback, "Share via"))
     }
 
     private fun nativeShare(text: String, imageBytes: ByteArray?) {
