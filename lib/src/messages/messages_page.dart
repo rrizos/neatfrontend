@@ -10,7 +10,7 @@ import 'package:giphy_flutter_sdk/dto/giphy_media.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_settings.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_theme.dart';
 import 'package:giphy_flutter_sdk/giphy_dialog.dart';
-import 'package:http/http.dart' as http;
+import '../core/http_client.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';

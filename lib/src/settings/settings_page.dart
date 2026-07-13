@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../core/http_client.dart' as http;
 
 import '../core/api.dart';
 import '../legal/legal_page.dart';

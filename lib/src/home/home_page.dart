@@ -13,7 +13,7 @@ import 'package:giphy_flutter_sdk/dto/giphy_content_type.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_media.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_settings.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_theme.dart';
-import 'package:http/http.dart' as http;
+import '../core/http_client.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
@@ -95,6 +95,9 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _isIOS26 = _detectIOS26();
     _setupNativeTabChannel();
+    // Paint last-known posts instantly instead of a blank spinner while the
+    // network round-trip for fresh ones is still in flight.
+    unawaited(_loadCachedPosts());
     _load();
     _loadNotifications(silent: true);
     PushService.instance.onDmTap = _openConversationById;
@@ -169,7 +172,14 @@ class _HomePageState extends State<HomePage> {
       if (raw == null || !mounted) return;
       final decoded = jsonDecode(raw) as List<dynamic>;
       final posts = decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList();
-      if (mounted) setState(() => _posts..clear()..addAll(posts));
+      if (mounted) {
+        setState(() {
+          _posts
+            ..clear()
+            ..addAll(posts);
+          _loading = false;
+        });
+      }
     } catch (_) {}
   }
 
@@ -465,7 +475,7 @@ class _HomePageState extends State<HomePage> {
       }
       request.fields['media'] = jsonEncode(mediaInfo);
 
-      final streamed = await request.send().timeout(const Duration(seconds: 180));
+      final streamed = await http.sharedHttpClient.send(request).timeout(const Duration(seconds: 180));
       final res = await http.Response.fromStream(streamed);
       if (!mounted) return;
       if (res.statusCode == 201) {

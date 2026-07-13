@@ -4,7 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../core/http_client.dart' as http;
 
 import '../core/api.dart';
 import '../core/models.dart';
