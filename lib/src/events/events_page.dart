@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
+import '../core/http_client.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -97,6 +97,7 @@ String _buildSharedAndroidMapHtml() {
   <meta name="viewport" content="initial-scale=1.0,width=device-width">
   <style>
     html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}
+    * { -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
   </style>
 </head>
 <body>
@@ -3525,6 +3526,7 @@ String _buildMapHtml(String address, {String? inlineJs}) {
   <meta name="viewport" content="initial-scale=1.0,width=device-width">
   <style>
     html,body,#map{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}
+    * { -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
   </style>
 </head>
 <body>

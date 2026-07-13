@@ -320,6 +320,12 @@ String _mapHtml(String citiesJson, {String? inlineJs, required bool isDark}) {
   <meta name="viewport" content="initial-scale=1.0,width=device-width">
   <style>
     html, body, #map { margin:0; padding:0; width:100%; height:100%; background:${isDark ? '#0a0a0a' : '#f2f2f7'}; overflow:hidden; }
+    /* Android's WebView shows a default tap-highlight overlay on touched
+       elements with no equivalent on native iOS MapKit — without this, a
+       tapped pin can visually look "stuck pressed" after the card closes,
+       since deselectAnnotation() only resets MapKit's own selection state,
+       not the WebView's tap-highlight rendering. */
+    * { -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
   </style>
 </head>
 <body>
