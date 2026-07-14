@@ -75,11 +75,11 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Instagram's Android package is com.instagram.android.
+             com.instagram.barcelona is Threads (a separate app) — it must
+             NOT be used as an Instagram fallback, or share-to-Instagram-DM
+             ends up opening Threads instead. -->
         <package android:name="com.instagram.android" />
-        <!-- Instagram's Android package was renamed at some point from
-             com.instagram.android to com.instagram.barcelona - keep both
-             visible so getPackageInfo() can find whichever is installed. -->
-        <package android:name="com.instagram.barcelona" />
         <!-- Without these, PackageManager hides all app-visibility queries on
              Android 11+, so url_launcher's canLaunchUrl silently returns false
              for every https link — this is what broke the WhatsApp/X/Telegram/

@@ -287,13 +287,37 @@ class _ShareSheetState extends State<_ShareSheet> {
     } catch (_) {}
   }
 
+  // Instagram's Android app only reliably accepts ACTION_SEND intents that
+  // carry an actual image (image/*) — it doesn't declare a handler for bare
+  // text/plain, so a link-only share falls through to the generic Android
+  // chooser instead of landing in Instagram. Attaching the post's image (when
+  // there is one) is what gets us into Instagram's own share picker, Direct
+  // included. iOS is unaffected — it uses Instagram's dedicated URL scheme,
+  // which does accept text on its own.
+  Future<Uint8List?> _postImageBytes() async {
+    final url = widget.post.imageUrl;
+    if (url.isEmpty) return null;
+    final fromDataUrl = _dataUrlBytes(url);
+    if (fromDataUrl != null) return fromDataUrl;
+    try {
+      final file = await imageCacheManager.getSingleFile(url);
+      return await file.readAsBytes();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _shareToInstagramDm() async {
     if (kIsWeb) {
       await _copyLink();
       return;
     }
     try {
-      await _shareChannel.invokeMethod<void>('shareToInstagramDm', {'text': _shareLink});
+      final imageBytes = await _postImageBytes();
+      await _shareChannel.invokeMethod<void>('shareToInstagramDm', {
+        'text': _shareLink,
+        'imageBytes': ?imageBytes,
+      });
     } catch (_) {
       await _nativeShare();
     }
@@ -451,7 +475,13 @@ class _ShareSheetState extends State<_ShareSheet> {
                       child: const _WhatsAppIcon(),
                     ),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'X (Twitter)', onTap: () => _launch('https://x.com/intent/tweet?text=${Uri.encodeComponent('$_shareText\n$_shareLink')}'), child: const _XIcon()),
+                    _ExtBtn(
+                      label: 'Threads',
+                      onTap: () => _launch(
+                        'https://www.threads.com/intent/post?text=${Uri.encodeComponent(_shareText)}&url=${Uri.encodeComponent(_shareLink)}',
+                      ),
+                      child: const _ThreadsIcon(),
+                    ),
                     const SizedBox(width: 16),
                     _ExtBtn(
                       label: 'Telegram',
@@ -647,12 +677,12 @@ class _WhatsAppIcon extends StatelessWidget {
   );
 }
 
-class _XIcon extends StatelessWidget {
-  const _XIcon();
+class _ThreadsIcon extends StatelessWidget {
+  const _ThreadsIcon();
   @override
   Widget build(BuildContext context) => _brandIcon(
-    asset: 'assets/x.svg',
-    size: 24,
+    asset: 'assets/threads.svg',
+    size: 26,
     decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(16)),
   );
 }
