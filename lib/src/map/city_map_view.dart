@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../core/media_cache.dart';
 import 'greece_cities.dart';
@@ -74,7 +75,7 @@ WebViewController _buildCityMapController({required String homeCity, required bo
         .map((c) => {'name': c.name, 'lat': c.latitude, 'lng': c.longitude})
         .toList(),
   );
-  return WebViewController()
+  final controller = WebViewController()
     ..setJavaScriptMode(JavaScriptMode.unrestricted)
     ..setBackgroundColor(isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7))
     ..setNavigationDelegate(NavigationDelegate(
@@ -82,11 +83,20 @@ WebViewController _buildCityMapController({required String homeCity, required bo
     ))
     ..addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
       _cityMapPinHandler?.call(msg.message);
-    })
-    ..loadHtmlString(
-      _mapHtml(citiesJson, inlineJs: _cachedMapkitJs, isDark: isDark),
-      baseUrl: 'https://netnest.net',
-    );
+    });
+  // The map never actually scrolls the WebView's own page (it's a fixed,
+  // overflow:hidden canvas fully driven by MapKit JS's own pan handling) —
+  // disabling the glow removes a stray Android-native scroll-edge effect
+  // that has no purpose here and can visually clash with a fast drag.
+  final androidController = controller.platform;
+  if (androidController is AndroidWebViewController) {
+    unawaited(androidController.setOverScrollMode(WebViewOverScrollMode.never));
+  }
+  controller.loadHtmlString(
+    _mapHtml(citiesJson, inlineJs: _cachedMapkitJs, isDark: isDark),
+    baseUrl: 'https://netnest.net',
+  );
+  return controller;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -317,9 +327,15 @@ String _mapHtml(String citiesJson, {String? inlineJs, required bool isDark}) {
 <html>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="initial-scale=1.0,width=device-width">
+  <meta name="viewport" content="initial-scale=1.0,maximum-scale=1.0,minimum-scale=1.0,width=device-width,user-scalable=no">
   <style>
     html, body, #map { margin:0; padding:0; width:100%; height:100%; background:${isDark ? '#0a0a0a' : '#f2f2f7'}; overflow:hidden; }
+    /* Without this, Android's WebView spends the first ~100-300ms of every
+       drag deciding whether the gesture is a native pinch-zoom/page-scroll
+       before handing it to MapKit JS's own pan handler — that's what made
+       panning feel laggy. touch-action:none skips that arbitration entirely
+       and gives MapKit JS raw pointer events immediately. */
+    html, body, #map { touch-action: none; }
     /* Android's WebView shows a default tap-highlight overlay on touched
        elements with no equivalent on native iOS MapKit — without this, a
        tapped pin can visually look "stuck pressed" after the card closes,
@@ -330,6 +346,25 @@ String _mapHtml(String citiesJson, {String? inlineJs, required bool isDark}) {
 </head>
 <body>
   <div id="map"></div>
+  <script>
+    // MapKit JS renders via WebGL when it's available, with a documented
+    // automatic fallback to plain image-tile rendering "for low-performance
+    // devices and other limiting situations". Android's WebView compositing
+    // of a WebGL canvas through its hardware texture layer can drop a frame
+    // mid-gesture and briefly show the canvas's uncleared backdrop instead of
+    // the map — that's the black flashes during fast pan/zoom. Rather than
+    // patch MapKit JS's internals (closed source), we make WebGL look
+    // unavailable to its own feature detection before it loads, so it takes
+    // the tile-rendering path Apple already built for exactly this situation.
+    (function() {
+      var proto = HTMLCanvasElement.prototype;
+      var origGetContext = proto.getContext;
+      proto.getContext = function(type) {
+        if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') return null;
+        return origGetContext.apply(this, arguments);
+      };
+    })();
+  </script>
   <script>
     var busy = false;
     var map, home, homeSpan, activePin = null;
