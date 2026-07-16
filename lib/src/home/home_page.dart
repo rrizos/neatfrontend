@@ -708,7 +708,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _pushProfileRoute(String username, {int? postId}) {
+  void _pushProfileRoute(String username, {int? postId, bool? followEnabled}) {
     // Profile pages always show the native bar. Save the current hide count
     // so we can restore it when the profile pops (e.g. back into messages).
     final savedCount = _navBarHideCount;
@@ -732,7 +732,7 @@ class _HomePageState extends State<HomePage> {
           onThemeModeChanged: widget.onThemeModeChanged,
           onHideNavBar: _hideNativeBar,
           onShowNavBar: _showNativeBar,
-          followEnabled: _activeCity == null,
+          followEnabled: followEnabled ?? _activeCity == null,
         ),
       ),
     ).then((_) {
@@ -1646,8 +1646,8 @@ class _HomePageState extends State<HomePage> {
           ),
         ).whenComplete(_showNativeBar);
       },
-      onProfileTap: () => _pushProfileRoute(post.author),
-      onOpenUserProfile: _pushProfileRoute,
+      onProfileTap: () => _pushProfileRoute(post.author, followEnabled: interactive),
+      onOpenUserProfile: (u) => _pushProfileRoute(u, followEnabled: interactive),
       onFollow: (interactive && post.author != widget.session.user.username) ? () => _follow(post.author) : null,
       onUnfollow: (interactive && post.author != widget.session.user.username) ? () => _unfollow(post.author) : null,
       isFollowing: _followingAuthors.contains(post.author),
@@ -2314,10 +2314,14 @@ class _ViralView extends StatefulWidget {
   State<_ViralView> createState() => _ViralViewState();
 }
 
+// 0 = Daily, 1 = Weekly, 2 = Monthly
+enum _ViralPeriod { daily, weekly, monthly }
+
 class _ViralViewState extends State<_ViralView> {
   String _city = '';
   List<FeedPost> _viralPosts = [];
   bool _loading = true;
+  _ViralPeriod _period = _ViralPeriod.weekly;
 
   @override
   void initState() {
@@ -2328,15 +2332,18 @@ class _ViralViewState extends State<_ViralView> {
 
   double _score(FeedPost p) => (p.likes * 0.45 + p.comments.length * 0.55) * 100;
 
-  // Minutes elapsed since the most recent Monday at 00:00 local time.
-  int _minutesSinceWeekStart() {
+  int _minutesSincePeriodStart() {
     final now = DateTime.now();
-    final weekStart = DateTime(
-      now.year, now.month,
-      now.day - (now.weekday - 1), // rewind to Monday
-      0, 0, 0,
-    );
-    return now.difference(weekStart).inMinutes;
+    final DateTime periodStart;
+    switch (_period) {
+      case _ViralPeriod.daily:
+        periodStart = DateTime(now.year, now.month, now.day, 0, 0, 0);
+      case _ViralPeriod.weekly:
+        periodStart = DateTime(now.year, now.month, now.day - (now.weekday - 1), 0, 0, 0);
+      case _ViralPeriod.monthly:
+        periodStart = DateTime(now.year, now.month, 1, 0, 0, 0);
+    }
+    return now.difference(periodStart).inMinutes;
   }
 
   Future<void> _load() async {
@@ -2352,11 +2359,11 @@ class _ViralViewState extends State<_ViralView> {
         return;
       }
       final decoded = jsonDecode(res.body) as List<dynamic>;
-      final weekMinutes = _minutesSinceWeekStart();
+      final cutoff = _minutesSincePeriodStart();
       final posts = decoded
           .whereType<Map<String, dynamic>>()
           .map(FeedPost.fromJson)
-          .where((p) => p.minutesAgo <= weekMinutes)
+          .where((p) => p.minutesAgo <= cutoff)
           .toList();
       posts.sort((a, b) {
         final diff = _score(b).compareTo(_score(a));
@@ -2467,7 +2474,38 @@ class _ViralViewState extends State<_ViralView> {
           ? const Color(0xffb8bec8)
           : const Color(0xffcd7f32);
 
-  String _emoji(int rank) => rank == 1 ? '🥇' : rank == 2 ? '🥈' : '🥉';
+  String _periodLabel(_ViralPeriod p) {
+    switch (p) {
+      case _ViralPeriod.daily:   return 'Ημερήσιο';
+      case _ViralPeriod.weekly:  return 'Εβδομαδιαίο';
+      case _ViralPeriod.monthly: return 'Μηνιαίο';
+    }
+  }
+
+  PopupMenuItem<_ViralPeriod> _periodMenuItem(String label, _ViralPeriod period, bool isLight) {
+    final sel = _period == period;
+    return PopupMenuItem<_ViralPeriod>(
+      value: period,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: sel
+                    ? const Color(0xff1d9bf0)
+                    : (isLight ? Colors.black : Colors.white),
+                fontWeight: sel ? FontWeight.w700 : FontWeight.w400,
+                fontSize: 15,
+              ),
+            ),
+          ),
+          if (sel)
+            const Icon(Icons.check_rounded, size: 18, color: Color(0xff1d9bf0)),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2486,87 +2524,132 @@ class _ViralViewState extends State<_ViralView> {
               ),
             ),
           ),
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Search icon → opens search page
-              Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(24),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(24),
-                  onTap: _openSearch,
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Icon(
-                      Icons.search_rounded,
-                      size: 24,
-                      color: isLight ? Colors.black : Colors.white,
+              Row(
+                children: [
+                  // Search icon
+                  Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(24),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(24),
+                      onTap: _openSearch,
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Icon(
+                          Icons.search_rounded,
+                          size: 24,
+                          color: isLight ? Colors.black : Colors.white,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  // Centered title + city selector
+                  Expanded(
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: () => _selectCity(context),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Viral στην',
+                              style: TextStyle(
+                                color: isLight ? Colors.black : Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: isLight ? const Color(0xffe0e3e8) : const Color(0xff3a3a3a),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _city,
+                                    style: TextStyle(
+                                      color: isLight ? Colors.black : Colors.white,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Icon(
+                                    Icons.expand_more_rounded,
+                                    size: 16,
+                                    color: isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 40),
+                ],
               ),
-              // Centered title + city selector
-              Expanded(
-                child: Center(
-                  child: GestureDetector(
-                    onTap: () => _selectCity(context),
+              const SizedBox(height: 10),
+              // Period selector
+              Center(
+                child: PopupMenuButton<_ViralPeriod>(
+                  onSelected: (p) {
+                    if (_period == p) return;
+                    setState(() => _period = p);
+                    _load();
+                  },
+                  offset: const Offset(0, 34),
+                  color: isLight ? Colors.white : const Color(0xff1e1e1e),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  itemBuilder: (_) => [
+                    _periodMenuItem('Ημερήσιο', _ViralPeriod.daily, isLight),
+                    _periodMenuItem('Εβδομαδιαίο', _ViralPeriod.weekly, isLight),
+                    _periodMenuItem('Μηνιαίο', _ViralPeriod.monthly, isLight),
+                  ],
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isLight ? const Color(0xffe0e3e8) : const Color(0xff3a3a3a),
+                      ),
+                    ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'Viral στην',
+                          _periodLabel(_period),
                           style: TextStyle(
-                            color: isLight ? Colors.black : Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
+                            color: isLight ? const Color(0xff536471) : const Color(0xff9ca3af),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: isLight
-                                ? const Color(0xfff0f2f5)
-                                : const Color(0xff1e1e1e),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: isLight
-                                  ? const Color(0xffe0e3e8)
-                                  : const Color(0xff3a3a3a),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _city,
-                                style: TextStyle(
-                                  color: isLight ? Colors.black : Colors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(width: 2),
-                              Icon(
-                                Icons.expand_more_rounded,
-                                size: 16,
-                                color: isLight
-                                    ? const Color(0xff6b7280)
-                                    : const Color(0xff9ca3af),
-                              ),
-                            ],
-                          ),
+                        const SizedBox(width: 2),
+                        Icon(
+                          Icons.expand_more_rounded,
+                          size: 13,
+                          color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
                         ),
                       ],
                     ),
                   ),
                 ),
               ),
-              // Spacer to balance the search icon
-              const SizedBox(width: 40),
             ],
           ),
         ),
@@ -2630,12 +2713,6 @@ class _ViralViewState extends State<_ViralView> {
                                   child: Row(
                                     children: [
                                       Text(
-                                        _emoji(rank),
-                                        style:
-                                            const TextStyle(fontSize: 22),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
                                         '#$rank',
                                         style: TextStyle(
                                           color: mc,
@@ -2645,22 +2722,21 @@ class _ViralViewState extends State<_ViralView> {
                                         ),
                                       ),
                                       const Spacer(),
-                                      Container(
-                                        padding:
-                                            const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: mc.withValues(alpha: 0.14),
-                                          borderRadius:
-                                              BorderRadius.circular(20),
-                                        ),
-                                        child: Text(
-                                          scoreStr,
-                                          style: TextStyle(
-                                            color: mc,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w700,
+                                      Opacity(
+                                        opacity: 0,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: mc.withValues(alpha: 0.14),
+                                            borderRadius: BorderRadius.circular(20),
+                                          ),
+                                          child: Text(
+                                            scoreStr,
+                                            style: TextStyle(
+                                              color: mc,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -2684,13 +2760,16 @@ class _ViralViewState extends State<_ViralView> {
                                         ),
                                       ),
                                       const Spacer(),
-                                      Text(
-                                        scoreStr,
-                                        style: TextStyle(
-                                          color: isLight
-                                              ? const Color(0xffb8c0cc)
-                                              : const Color(0xff4a5568),
-                                          fontSize: 12,
+                                      Opacity(
+                                        opacity: 0,
+                                        child: Text(
+                                          scoreStr,
+                                          style: TextStyle(
+                                            color: isLight
+                                                ? const Color(0xffb8c0cc)
+                                                : const Color(0xff4a5568),
+                                            fontSize: 12,
+                                          ),
                                         ),
                                       ),
                                     ],

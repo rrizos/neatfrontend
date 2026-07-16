@@ -1005,10 +1005,8 @@ class _LikedByText extends StatelessWidget {
       fontSize: 13,
       color: isLight ? const Color(0xff444444) : const Color(0xffb3b3b3),
     );
-
     final others = totalLikes - likedByFollowing.length;
     final spans = <InlineSpan>[TextSpan(text: 'Liked by ', style: normalStyle)];
-
     for (int i = 0; i < likedByFollowing.length; i++) {
       if (i > 0) {
         final isLast = i == likedByFollowing.length - 1 && others <= 0;
@@ -1016,7 +1014,6 @@ class _LikedByText extends StatelessWidget {
       }
       spans.add(TextSpan(text: likedByFollowing[i], style: boldStyle));
     }
-
     if (others > 0) {
       spans.add(TextSpan(text: ' and ', style: normalStyle));
       spans.add(TextSpan(
@@ -1024,7 +1021,6 @@ class _LikedByText extends StatelessWidget {
         style: boldStyle,
       ));
     }
-
     return RichText(text: TextSpan(children: spans));
   }
 }
@@ -1079,6 +1075,18 @@ class FeedPostCard extends StatefulWidget {
 
   @override
   State<FeedPostCard> createState() => _FeedPostCardState();
+}
+
+String _formatCount(int n) {
+  if (n >= 1000000) {
+    final v = n / 1000000;
+    return '${v == v.truncateToDouble() ? v.toInt() : v.toStringAsFixed(1)}M';
+  }
+  if (n >= 1000) {
+    final v = n / 1000;
+    return '${v == v.truncateToDouble() ? v.toInt() : v.toStringAsFixed(1)}K';
+  }
+  return '$n';
 }
 
 class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMixin {
@@ -1369,63 +1377,96 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
               child: Row(
                 children: [
-                  if (widget.likingEnabled)
-                    AnimatedBuilder(
-                      animation: _heartBounceCtrl,
-                      builder: (_, child) => Transform.scale(
-                        scale: _heartBounceAnim.value,
-                        child: child,
-                      ),
-                      child: IconButton(
-                        onPressed: _handleLike,
-                        icon: Icon(
-                          _liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                          color: _liked ? Colors.red : (isLight ? Colors.black : Colors.white),
-                          size: 28,
-                        ),
-                      ),
-                    )
-                  else
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: SizedBox(
-                        width: 28,
-                        height: 28,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Icon(
-                              Icons.favorite_border_rounded,
-                              color: isLight ? Colors.black : Colors.white,
-                              size: 28,
-                            ),
-                            CustomPaint(
-                              size: const Size(28, 28),
-                              painter: _SlashPainter(
-                                color: isLight ? Colors.black : Colors.white,
+                  // ── Like ──────────────────────────────────────────────
+                  GestureDetector(
+                    onTap: widget.likingEnabled ? _handleLike : null,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
+                      child: widget.likingEnabled
+                          ? AnimatedBuilder(
+                              animation: _heartBounceCtrl,
+                              builder: (_, child) => Transform.scale(
+                                scale: _heartBounceAnim.value,
+                                child: child,
                               ),
+                              child: Icon(
+                                _liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                                color: _liked ? Colors.red : (isLight ? Colors.black : Colors.white),
+                                size: 26,
+                              ),
+                            )
+                          : SizedBox(
+                              width: 26, height: 26,
+                              child: Stack(alignment: Alignment.center, children: [
+                                Icon(Icons.favorite_border_rounded,
+                                    color: isLight ? Colors.black : Colors.white, size: 26),
+                                CustomPaint(
+                                  size: const Size(26, 26),
+                                  painter: _SlashPainter(color: isLight ? Colors.black : Colors.white),
+                                ),
+                              ]),
                             ),
-                          ],
+                    ),
+                  ),
+                  if (_likes > 0) ...[
+                    const SizedBox(width: 5),
+                    GestureDetector(
+                      onTap: _openLikers,
+                      child: Text(
+                        _formatCount(_likes),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: _liked ? Colors.red : (isLight ? Colors.black : Colors.white),
                         ),
                       ),
                     ),
-                  IconButton(
-                    onPressed: widget.onComment,
-                    icon: CommentBubbleIcon(color: isLight ? Colors.black : Colors.white, size: 25),
+                  ],
+                  // ── Comment ───────────────────────────────────────────
+                  const SizedBox(width: 14),
+                  GestureDetector(
+                    onTap: widget.onComment,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: CommentBubbleIcon(color: isLight ? Colors.black : Colors.white, size: 25),
+                    ),
                   ),
-                  IconButton(
-                    onPressed: widget.onShare,
-                    icon: PostShareIcon(color: isLight ? Colors.black : Colors.white, size: 27),
+                  if (widget.post.comments.isNotEmpty) ...[
+                    const SizedBox(width: 5),
+                    GestureDetector(
+                      onTap: widget.onComment,
+                      child: Text(
+                        _formatCount(widget.post.comments.length),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: isLight ? Colors.black : Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                  // ── Share ─────────────────────────────────────────────
+                  const SizedBox(width: 14),
+                  GestureDetector(
+                    onTap: widget.onShare,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: PostShareIcon(color: isLight ? Colors.black : Colors.white, size: 27),
+                    ),
                   ),
                   const Spacer(),
-                  IconButton(
-                    onPressed: _handleSave,
-                    icon: Icon(
-                      _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-                      color: _saved
-                          ? const Color(0xffFFB800)
-                          : (isLight ? Colors.black : Colors.white),
-                      size: 28,
+                  // ── Save ──────────────────────────────────────────────
+                  GestureDetector(
+                    onTap: _handleSave,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
+                      child: Icon(
+                        _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                        color: _saved
+                            ? const Color(0xffFFB800)
+                            : (isLight ? Colors.black : Colors.white),
+                        size: 28,
+                      ),
                     ),
                   ),
                 ],
@@ -1433,7 +1474,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
             ),
             if (widget.post.likedByFollowing.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: GestureDetector(
                   onTap: _openLikers,
                   child: _LikedByText(
@@ -1443,33 +1484,6 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                   ),
                 ),
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: _openLikers,
-                    child: Text(
-                      '$_likes ${_likes == 1 ? "like" : "likes"}',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: isLight ? Colors.black : Colors.white,
-                      ),
-                    ),
-                  ),
-                  const Spacer(),
-                  InkWell(
-                    onTap: widget.onComment,
-                    child: Text(
-                      widget.post.comments.isEmpty
-                          ? (widget.likingEnabled ? 'Add a comment...' : 'No comments yet.')
-                          : 'View ${widget.post.comments.length} comments',
-                      style: const TextStyle(color: Color(0xffb3b3b3), fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),
