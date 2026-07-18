@@ -15,7 +15,7 @@ final String apiBaseUrl = kIsWeb ? '' : _kServerUrl;
 
 const String webBaseUrl = String.fromEnvironment(
   'NEAT_WEB_BASE_URL',
-  defaultValue: 'https://splendid-sunburst-899ead.netlify.app',
+  defaultValue: 'https://neatapp.gr',
 );
 
 Uri postDetailEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/');
