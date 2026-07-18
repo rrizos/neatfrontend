@@ -225,21 +225,19 @@ class _CityMapViewState extends State<CityMapView> {
   // Shared event handlers
   // ─────────────────────────────────────────────────────────────────────────
 
-  Future<void> _onCityPinTapped(String name) async {
+  // Must show the card IMMEDIATELY: from the moment a pin is tapped the map
+  // has pointer events disabled (so stray drags can't fight the zoom-in),
+  // and the card's X is the only way to unlock it. Waiting on a network
+  // image here (as this used to) left the map frozen with no card — the
+  // "pin resists and stays stuck" bug — whenever the city image was slow to
+  // download. The card's CachedNetworkImage shows a placeholder and loads
+  // the real image on its own.
+  void _onCityPinTapped(String name) {
     final city = greeceCities.firstWhere(
       (c) => c.name == name,
       orElse: () => greeceCities.first,
     );
     if (_activeCity?.name == city.name) return;
-    final imageUrl = city.imageUrl;
-    if (imageUrl != null && imageUrl.isNotEmpty) {
-      try {
-        await precacheImage(
-          CachedNetworkImageProvider(imageUrl, cacheManager: imageCacheManager),
-          context,
-        );
-      } catch (_) {}
-    }
     if (mounted) setState(() => _activeCity = city);
   }
 
@@ -347,25 +345,29 @@ String _mapHtml(String citiesJson, {String? inlineJs, required bool isDark}) {
 <body>
   <div id="map"></div>
   <script>
-    // MapKit JS renders via WebGL when it's available, with a documented
-    // automatic fallback to plain image-tile rendering "for low-performance
-    // devices and other limiting situations". Android's WebView compositing
-    // of a WebGL canvas through its hardware texture layer can drop a frame
-    // mid-gesture and briefly show the canvas's uncleared backdrop instead of
-    // the map — that's the black flashes during fast pan/zoom. Rather than
-    // patch MapKit JS's internals (closed source), we make WebGL look
-    // unavailable to its own feature detection before it loads, so it takes
-    // the tile-rendering path Apple already built for exactly this situation.
+    // NOT a WebGL kill-switch (a previous attempt disabled WebGL entirely,
+    // which dropped MapKit into its sluggish image-tile mode — never again).
+    // WebGL stays fully on; this only adjusts how its context is created:
+    //  * preserveDrawingBuffer:true — the canvas keeps the last rendered
+    //    frame after compositing. Flutter's texture-layer embedding samples
+    //    the canvas on its own schedule, and without this it can catch the
+    //    buffer in its post-swap empty state — those were the black flashes
+    //    during fast pan/zoom.
+    //  * alpha:false — an opaque backbuffer, so nothing composites as
+    //    black through transparency, and the compositor skips blending.
     (function() {
-      var proto = HTMLCanvasElement.prototype;
-      var origGetContext = proto.getContext;
-      proto.getContext = function(type) {
-        if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') return null;
-        return origGetContext.apply(this, arguments);
+      var orig = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+        if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
+          attrs = attrs || {};
+          attrs.preserveDrawingBuffer = true;
+          attrs.alpha = false;
+          return orig.call(this, type, attrs);
+        }
+        return orig.call(this, type, attrs);
       };
     })();
-  </script>
-  <script>
+
     var busy = false;
     var map, home, homeSpan, activePin = null;
 
@@ -522,7 +524,17 @@ class _MapLayer extends StatelessWidget {
       );
     }
 
-    // Android — null while mapkit.js is being pre-fetched
+    // Android — null while mapkit.js is being pre-fetched.
+    //
+    // Deliberately uses the DEFAULT Texture Layer embedding, not
+    // displayWithHybridComposition: full hybrid composition forces Flutter's
+    // UI and platform threads to merge, which slows the entire app to a
+    // crawl on many devices (flutter#167547) — it made the map feel worse,
+    // not better. The texture path's one real drawback here (occasional
+    // blank frames sampled from the WebGL canvas mid-gesture) is fixed at
+    // the source instead: the WebGL context is created with
+    // preserveDrawingBuffer so there is never an empty buffer to sample —
+    // see the getContext shim in _mapHtml.
     final ctrl = webCtrl;
     if (ctrl == null) return ColoredBox(color: isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7));
     return WebViewWidget(controller: ctrl);
