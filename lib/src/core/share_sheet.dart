@@ -305,37 +305,13 @@ class _ShareSheetState extends State<_ShareSheet> {
     } catch (_) {}
   }
 
-  // Instagram's Android app only reliably accepts ACTION_SEND intents that
-  // carry an actual image (image/*) — it doesn't declare a handler for bare
-  // text/plain, so a link-only share falls through to the generic Android
-  // chooser instead of landing in Instagram. Attaching the post's image (when
-  // there is one) is what gets us into Instagram's own share picker, Direct
-  // included. iOS is unaffected — it uses Instagram's dedicated URL scheme,
-  // which does accept text on its own.
-  Future<Uint8List?> _postImageBytes() async {
-    final url = widget.post.imageUrl;
-    if (url.isEmpty) return null;
-    final fromDataUrl = _dataUrlBytes(url);
-    if (fromDataUrl != null) return fromDataUrl;
-    try {
-      final file = await imageCacheManager.getSingleFile(url);
-      return await file.readAsBytes();
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _shareToInstagramDm() async {
     if (kIsWeb) {
       await _copyLink();
       return;
     }
     try {
-      final imageBytes = await _postImageBytes();
-      await _shareChannel.invokeMethod<void>('shareToInstagramDm', {
-        'text': _shareLink,
-        'imageBytes': ?imageBytes,
-      });
+      await _shareChannel.invokeMethod<void>('shareToInstagramDm', {'text': _shareLink});
       widget.onShared?.call();
     } catch (_) {
       await _nativeShare();

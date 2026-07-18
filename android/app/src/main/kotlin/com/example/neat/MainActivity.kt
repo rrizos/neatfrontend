@@ -1,8 +1,6 @@
 package com.example.neat
 
-import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -29,8 +27,7 @@ class MainActivity : FlutterActivity() {
                     }
                     "shareToInstagramDm" -> {
                         val text = call.argument<String>("text") ?: ""
-                        val imageBytes = call.argument<ByteArray>("imageBytes")
-                        shareToInstagramDm(text, imageBytes)
+                        shareToInstagramDm(text)
                         result.success(null)
                     }
                     else -> result.notImplemented()
@@ -45,120 +42,67 @@ class MainActivity : FlutterActivity() {
     // is exactly what sent Android users to Threads instead of Instagram DMs.
     private val instagramPackageName = "com.instagram.android"
 
-    private fun isInstagramInstalled(): Boolean {
-        return try {
-            packageManager.getPackageInfo(instagramPackageName, 0)
-            true
-        } catch (_: PackageManager.NameNotFoundException) {
-            false
-        }
-    }
+    // Ground truth, from dumping the real Instagram 438.0 AndroidManifest
+    // (not guesswork — the APK's manifest was pulled apart with aapt2):
+    //
+    //  * The ONLY text/plain ACTION_SEND handler in the entire app is
+    //    com.instagram.direct.share.handler.DirectShareHandlerActivity, and
+    //    it ships android:enabled=false — Meta flips it on per-device at
+    //    runtime via server config. While it's off, NO text share can
+    //    resolve, no matter what extras the intent carries. That's why every
+    //    previous attempt "always fell back".
+    //  * The feed/story/reel handlers are enabled but accept only image/*
+    //    and video/*, and they open the feed flow — not DMs.
+    //  * instagram://sharesheet IS registered on Android (same route the
+    //    working iOS implementation uses), dispatched through
+    //    com.instagram.url.UrlHandlerLauncherActivity — the same activity
+    //    every instagram:// deep link and instagram.com App Link goes
+    //    through, so it's runtime-enabled on any install that has opened
+    //    Instagram at least once.
+    //
+    // Hence the order below: sharesheet deep link first, the gated Direct
+    // handler second, an implicit text send third (future-proofing for
+    // versions where the gate is open), OS chooser last.
+    private fun shareToInstagramDm(text: String) {
+        val sharesheet = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("instagram://sharesheet?text=${Uri.encode(text)}"),
+        ).apply { setPackage(instagramPackageName) }
+        if (tryStart(sharesheet)) return
 
-    // Instagram doesn't publicly document a "share straight to Direct" intent,
-    // but com.instagram.direct.share.handler.DirectShareHandlerActivity is the
-    // internal activity apps like Spotify rely on to do exactly that — it
-    // accepts plain EXTRA_TEXT directly into Direct's compose screen, no
-    // attached image required. It's an undocumented, version-fragile internal
-    // class name (this is literally the kind of detail Meta has renamed
-    // before), so every call is wrapped and falls through to the next
-    // strategy rather than crashing if a future Instagram update removes it.
-    private fun tryInstagramDirectHandler(text: String, imageUri: Uri?): Boolean {
-        val intent = Intent(Intent.ACTION_SEND).apply {
+        val directHandler = Intent(Intent.ACTION_SEND).apply {
             setClassName(instagramPackageName, "com.instagram.direct.share.handler.DirectShareHandlerActivity")
-            if (imageUri != null) {
-                type = "image/*"
-                putExtra(Intent.EXTRA_STREAM, imageUri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } else {
-                type = "text/plain"
-            }
+            type = "text/plain"
             putExtra(Intent.EXTRA_TEXT, text)
         }
-        return try {
-            if (intent.resolveActivity(packageManager) == null) return false
-            startActivity(intent)
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
+        if (tryStart(directHandler)) return
 
-    private fun writeShareImageUri(imageBytes: ByteArray?): Uri? {
-        if (imageBytes == null || imageBytes.isEmpty()) return null
-        return try {
-            val file = File(cacheDir, "neat_share_ig.jpg")
-            FileOutputStream(file).use { it.write(imageBytes) }
-            FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    // Instagram's Android app doesn't declare a *public* handler for bare
-    // text/plain ACTION_SEND intents — it only reliably resolves ACTION_SEND
-    // with an attached image (image/*), which opens Instagram's own
-    // share-destination picker (Direct included). iOS doesn't have this
-    // limitation because it uses Instagram's own instagram://sharesheet URL
-    // scheme, which does accept text.
-    private fun shareToInstagramDm(text: String, imageBytes: ByteArray?) {
-        val imageUri = writeShareImageUri(imageBytes)
-
-        // 1) Internal Direct-compose activity — works with or without an
-        // image, and is the closest match to a real "share to Instagram DM".
-        if (tryInstagramDirectHandler(text, imageUri)) return
-
-        // 2) Public image share into Instagram's own picker (Direct is one of
-        // the destinations offered there) — reliable whenever there's an image.
-        if (imageUri != null) {
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "image/*"
-                putExtra(Intent.EXTRA_STREAM, imageUri)
-                putExtra(Intent.EXTRA_TEXT, text)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                setPackage(instagramPackageName)
-            }
-            if (intent.resolveActivity(packageManager) != null) {
-                try {
-                    startActivity(intent)
-                    return
-                } catch (_: ActivityNotFoundException) {
-                    // Fall through below.
-                }
-            }
-        }
-
-        // 3) No image (or nothing above resolved) — best-effort text-only
-        // attempts, most likely to end at the generic chooser since Instagram
-        // doesn't reliably accept plain text via public intents on Android.
-        val deepLink = Intent(Intent.ACTION_VIEW, Uri.parse("instagram://sharesheet?text=${Uri.encode(text)}")).apply {
+        val implicitSend = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
             setPackage(instagramPackageName)
         }
-        if (deepLink.resolveActivity(packageManager) != null) {
-            try {
-                startActivity(deepLink)
-                return
-            } catch (_: ActivityNotFoundException) {
-                // Fall through below.
-            }
-        }
-        if (isInstagramInstalled()) {
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, text)
-                setPackage(instagramPackageName)
-            }
-            try {
-                startActivity(intent)
-                return
-            } catch (_: ActivityNotFoundException) {
-                // Fall through to the generic chooser below.
-            }
-        }
+        if (tryStart(implicitSend)) return
+
         val fallback = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_TEXT, text)
         }
         startActivity(Intent.createChooser(fallback, "Share via"))
+    }
+
+    // resolveActivity respects the target component's *runtime* enabled
+    // state, so it correctly reports whether Meta's gated components are
+    // usable on this particular device right now. The catch covers the
+    // remaining races (e.g. Instagram updated between resolve and start).
+    private fun tryStart(intent: Intent): Boolean {
+        if (intent.resolveActivity(packageManager) == null) return false
+        return try {
+            startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun nativeShare(text: String, imageBytes: ByteArray?) {
