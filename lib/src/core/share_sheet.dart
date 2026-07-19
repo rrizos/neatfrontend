@@ -22,6 +22,7 @@ Future<void> showShareSheet({
 }) {
   return showModalBottomSheet<void>(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     showDragHandle: false,
     backgroundColor: Colors.transparent,
@@ -116,8 +117,9 @@ class _ShareSheetState extends State<_ShareSheet> {
             .whereType<Map<String, dynamic>>()
             .map(ConversationSummary.fromJson);
         for (final c in convs) {
+          if (c.otherUser == widget.currentUser.username) continue;
           seen.add(c.otherUser);
-          targets.add(_Target(username: c.otherUser, fullName: c.otherFullName, conversationId: c.id));
+          targets.add(_Target(username: c.otherUser, fullName: c.otherFullName, avatarUrl: c.otherAvatarUrl, conversationId: c.id));
         }
       }
 
@@ -127,6 +129,7 @@ class _ShareSheetState extends State<_ShareSheet> {
             .whereType<Map<String, dynamic>>()
             .map(UserProfile.fromJson);
         for (final u in users) {
+          if (u.username == widget.currentUser.username) continue;
           if (!seen.contains(u.username)) {
             targets.add(_Target(username: u.username, fullName: u.fullName, avatarUrl: u.avatarUrl));
           }
@@ -394,9 +397,20 @@ class _ShareSheetState extends State<_ShareSheet> {
                       cursorColor: textColor,
                       decoration: InputDecoration(
                         prefixIcon: Icon(Icons.search_rounded, color: muted, size: 18),
-                        suffix: _searching
-                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                            : null,
+                        suffixIcon: _searching
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                              )
+                            : _query.isNotEmpty
+                                ? GestureDetector(
+                                    onTap: () {
+                                      _search.clear();
+                                      _onSearchChanged('');
+                                    },
+                                    child: Icon(Icons.close_rounded, size: 16, color: muted),
+                                  )
+                                : null,
                         hintText: 'Search people in your city…',
                         hintStyle: TextStyle(color: muted, fontSize: 13.5),
                         filled: true,
@@ -438,7 +452,12 @@ class _ShareSheetState extends State<_ShareSheet> {
                             final t = filtered[i];
                             final isSent = _sent.contains(t.username);
                             final isSending = _sending.contains(t.username);
-                            final bytes = t.avatarUrl.isNotEmpty ? _dataUrlBytes(t.avatarUrl) : null;
+                            final bytes = t.avatarUrl.startsWith('data:') ? _dataUrlBytes(t.avatarUrl) : null;
+                            final ImageProvider? avatarImg = bytes != null
+                                ? MemoryImage(bytes)
+                                : (t.avatarUrl.startsWith('http')
+                                    ? CachedNetworkImageProvider(t.avatarUrl, cacheManager: imageCacheManager)
+                                    : null);
                             return Padding(
                               padding: const EdgeInsets.symmetric(vertical: 9),
                               child: Row(
@@ -446,8 +465,8 @@ class _ShareSheetState extends State<_ShareSheet> {
                                   CircleAvatar(
                                     radius: 22,
                                     backgroundColor: isLight ? const Color(0xffe5e7eb) : const Color(0xff2a2a2a),
-                                    foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-                                    child: bytes == null
+                                    foregroundImage: avatarImg,
+                                    child: avatarImg == null
                                         ? Text(initialFor(t.username), style: TextStyle(color: textColor, fontWeight: FontWeight.w700, fontSize: 14))
                                         : null,
                                   ),
@@ -511,7 +530,7 @@ class _ShareSheetState extends State<_ShareSheet> {
                     const SizedBox(width: 16),
                     _ExtBtn(label: 'Facebook', onTap: () async { await _launch('https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(_shareLink)}'); widget.onShared?.call(); }, child: const _FbIcon()),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'Copy link', onTap: _copyLink, child: _linkCopied ? _CheckIcon(isLight: isLight) : _LinkIcon(isLight: isLight)),
+                    _ExtBtn(label: 'Copy link', onTap: _linkCopied ? null : _copyLink, child: _linkCopied ? _CheckIcon(isLight: isLight) : _LinkIcon(isLight: isLight)),
                   ],
                 ),
               ),
@@ -624,9 +643,9 @@ class _SendBtn extends StatelessWidget {
 // ── external button ───────────────────────────────────────────────────────────
 
 class _ExtBtn extends StatelessWidget {
-  const _ExtBtn({required this.label, required this.onTap, required this.child});
+  const _ExtBtn({required this.label, required this.child, this.onTap});
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Widget child;
 
   @override

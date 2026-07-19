@@ -307,6 +307,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff141414),
       showDragHandle: true,
       builder: (_) => SafeArea(
@@ -449,11 +450,26 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
   }
 
+  Future<bool> _voteOnPoll(FeedPost post, int optionId) async {
+    try {
+      final res = await http.post(
+        postPollVoteEndpoint(post.id),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'option_id': optionId}),
+      );
+      if (res.statusCode == 401) { await widget.onLogout(); return false; }
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
+
   void _openMoreSheet(FeedPost post) {
     widget.onHideNavBar?.call();
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff141414),
       showDragHandle: true,
       builder: (_) => SafeArea(
@@ -474,11 +490,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               title: const Text('Report post'),
               onTap: () {
                 Navigator.of(context).pop();
+                widget.onHideNavBar?.call();
                 showReportPostSheet(
                   context,
                   postId: post.id,
                   token: widget.token,
-                );
+                ).whenComplete(() => widget.onShowNavBar?.call());
               },
             ),
           ],
@@ -510,6 +527,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         );
         return shared;
       },
+      onVote: (optionId) => _voteOnPoll(post, optionId),
       onMore: () => _openMoreSheet(post),
       onComment: () => widget.onPostTap(post),
       onProfileTap: () => widget.onOpenUserProfile(post.author),
@@ -639,6 +657,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     widget.onHideNavBar?.call();
     await showModalBottomSheet<void>(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       showDragHandle: false,
       backgroundColor: Colors.transparent,
@@ -924,7 +943,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                           padding: EdgeInsets.zero,
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                         ),
-                                        child: const Icon(Icons.send_outlined, size: 18),
+                                        child: PostShareIcon(color: isLight ? Colors.black : Colors.white, size: 18),
                                       ),
                                     ),
                                     ],

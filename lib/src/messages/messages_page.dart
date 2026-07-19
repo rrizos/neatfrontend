@@ -340,6 +340,7 @@ class _MessagesPageState extends State<MessagesPage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final username = await showModalBottomSheet<String>(
       context: context,
+      useRootNavigator: true,
       backgroundColor: isLight ? _kBgLgt : _kBgDark,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
@@ -982,6 +983,7 @@ class _ConversationPageState extends State<ConversationPage> {
   bool _isOffline = false;
   DateTime? _otherLastReadAt;
   final _messageKeys = <int, GlobalKey>{};
+  MessageItem? _editingMessage;
 
   Future<void> _react(int msgId, String emoji) async {
     final index = _messages.indexWhere((m) => m.id == msgId);
@@ -1032,6 +1034,7 @@ class _ConversationPageState extends State<ConversationPage> {
 
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       backgroundColor: bg,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -1075,6 +1078,7 @@ class _ConversationPageState extends State<ConversationPage> {
                       Navigator.of(sheetCtx).pop();
                       showModalBottomSheet(
                         context: context,
+                        useRootNavigator: true,
                         backgroundColor: const Color(0xff1c1c1e),
                         shape: const RoundedRectangleBorder(
                           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -1112,6 +1116,12 @@ class _ConversationPageState extends State<ConversationPage> {
               title: Text('Reply', style: TextStyle(color: fgClr)),
               onTap: () { Navigator.of(sheetCtx).pop(); _setReplyTo(msg); },
             ),
+            if (mine && _isPlainText(msg.text))
+              ListTile(
+                leading: Icon(Icons.edit_outlined, color: fgClr),
+                title: Text('Edit', style: TextStyle(color: fgClr)),
+                onTap: () { Navigator.of(sheetCtx).pop(); _startEdit(msg); },
+              ),
             if (mine)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
@@ -1322,11 +1332,11 @@ class _ConversationPageState extends State<ConversationPage> {
   void _scrollToBottom({bool jump = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
-      final max = _scroll.position.maxScrollExtent;
+      // reverse: true means pixels=0 is the visual bottom (newest messages).
       if (jump) {
-        _scroll.jumpTo(max);
+        _scroll.jumpTo(0);
       } else {
-        _scroll.animateTo(max, duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+        _scroll.animateTo(0, duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
       }
     });
   }
@@ -1423,6 +1433,12 @@ class _ConversationPageState extends State<ConversationPage> {
   }
 
   Future<void> _sendText() {
+    if (_editingMessage != null) {
+      _typingSignalDebounce?.cancel();
+      _iTyping = false;
+      _sendTypingSignal(false);
+      return _editMessageSave();
+    }
     final text = _composer.text.trim();
     if (text.isEmpty) return Future.value();
     _typingSignalDebounce?.cancel();
@@ -1448,6 +1464,60 @@ class _ConversationPageState extends State<ConversationPage> {
   void _setReplyTo(MessageItem msg) => setState(() => _replyTo = msg);
   void _clearReply() => setState(() => _replyTo = null);
 
+  bool _isPlainText(String text) =>
+      !text.startsWith(_kPostPrefix) &&
+      !text.startsWith(_kImagePrefix) &&
+      !text.startsWith(_kVoicePrefix) &&
+      !text.startsWith(_kReplyPrefix);
+
+  void _startEdit(MessageItem msg) {
+    if (_replyTo != null) setState(() => _replyTo = null);
+    setState(() => _editingMessage = msg);
+    _composer.text = msg.text;
+    _composer.selection = TextSelection.collapsed(offset: msg.text.length);
+  }
+
+  void _cancelEdit() {
+    setState(() => _editingMessage = null);
+    _composer.clear();
+  }
+
+  Future<void> _editMessageSave() async {
+    final msg = _editingMessage;
+    if (msg == null) return;
+    final newText = _composer.text.trim();
+    if (newText.isEmpty) return;
+    _composer.clear();
+    if (mounted) setState(() => _editingMessage = null);
+    if (newText == msg.text) return;
+    final idx = _messages.indexWhere((m) => m.id == msg.id);
+    if (idx == -1) return;
+    final previous = _messages[idx];
+    final updated = MessageItem(
+      id: msg.id, sender: msg.sender, text: newText,
+      created: msg.created, reactions: msg.reactions, edited: true,
+    );
+    setState(() => _messages[idx] = updated);
+    _saveCache(_messages);
+    try {
+      final res = await http.patch(
+        messageEditEndpoint(widget.conversationId, msg.id),
+        headers: authJsonHeaders(widget.token),
+        body: jsonEncode({'text': newText}),
+      );
+      if (res.statusCode == 401) { widget.onLogout(); return; }
+      if (res.statusCode != 200 && mounted) {
+        final i = _messages.indexWhere((m) => m.id == msg.id);
+        if (i != -1) setState(() => _messages[i] = previous);
+      }
+    } catch (_) {
+      if (mounted) {
+        final i = _messages.indexWhere((m) => m.id == msg.id);
+        if (i != -1) setState(() => _messages[i] = previous);
+      }
+    }
+  }
+
   int? _findReplyTarget({required String sender, required String preview, required int? id}) {
     if (id != null && _messageKeys.containsKey(id)) return id;
     for (final m in _messages.reversed) {
@@ -1462,9 +1532,11 @@ class _ConversationPageState extends State<ConversationPage> {
     if (idx == -1) return;
 
     // Step 1: animate to approx position so ListView builds the target item.
+    // With reverse: true, pixels=0 is the visual bottom (newest). Older messages
+    // (lower idx) are at higher pixel offsets, so invert the ratio.
     if (_scroll.hasClients) {
       final max = _scroll.position.maxScrollExtent;
-      final rough = (idx / _messages.length * max).clamp(0.0, max);
+      final rough = ((1 - idx / _messages.length) * max).clamp(0.0, max);
       await _scroll.animateTo(
         rough,
         duration: const Duration(milliseconds: 350),
@@ -1498,6 +1570,7 @@ class _ConversationPageState extends State<ConversationPage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     await showModalBottomSheet<void>(
       context: context,
+      useRootNavigator: true,
       backgroundColor: isLight ? _kBgLgt : _kBgDark,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
@@ -1670,12 +1743,14 @@ class _ConversationPageState extends State<ConversationPage> {
                       )
                     : ListView.builder(
                         controller: _scroll,
+                        reverse: true,
                         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                         padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
                         itemCount: _messages.length + (_otherTyping ? 1 : 0),
                         itemBuilder: (_, i) {
-                          if (i == _messages.length) {
-                            // Typing indicator bubble
+                          // With reverse:true, i=0 is the visual bottom (newest).
+                          // Typing indicator sits at the very bottom when active.
+                          if (_otherTyping && i == 0) {
                             return Padding(
                               padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
                               child: Row(
@@ -1693,15 +1768,19 @@ class _ConversationPageState extends State<ConversationPage> {
                               ),
                             );
                           }
-                          final msg    = _messages[i];
+                          // Shift index by 1 when typing indicator occupies slot 0.
+                          final msgI = _otherTyping ? i - 1 : i;
+                          // Map visual index to forward message index.
+                          final actualIdx = _messages.length - 1 - msgI;
+                          final msg    = _messages[actualIdx];
                           final mine   = msg.sender == widget.currentUsername;
-                          final isLast = _isLastInGroup(_messages, i);
+                          final isLast = _isLastInGroup(_messages, actualIdx);
                           // Show "Read" under the last message I sent that the other person has read.
                           bool showRead = false;
                           if (mine && _otherLastReadAt != null) {
                             final isRead = !msg.created.isAfter(_otherLastReadAt!);
                             if (isRead) {
-                              showRead = !_messages.skip(i + 1).any((m) =>
+                              showRead = !_messages.skip(actualIdx + 1).any((m) =>
                                   m.sender == widget.currentUsername &&
                                   !m.created.isAfter(_otherLastReadAt!));
                             }
@@ -1712,7 +1791,7 @@ class _ConversationPageState extends State<ConversationPage> {
                             key: msgKey,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (_showDivider(_messages, i))
+                              if (_showDivider(_messages, actualIdx))
                                 _TimeDivider(time: msg.created, isLight: isLight),
                               _MessageRow(
                                 message: msg,
@@ -1759,6 +1838,8 @@ class _ConversationPageState extends State<ConversationPage> {
               onSendVoice: _sendVoice,
               replyTo: _replyTo,
               onClearReply: _clearReply,
+              editingMessage: _editingMessage,
+              onCancelEdit: _cancelEdit,
             ),
         ],
       ),
@@ -1837,7 +1918,7 @@ class _MessageRow extends StatelessWidget {
       );
     }
 
-    return _Bubble(text: message.text, mine: mine, isLast: isLast, isLight: isLight);
+    return _Bubble(text: message.text, mine: mine, isLast: isLast, isLight: isLight, edited: message.edited);
   }
 
   Widget _wrapGesture(Widget child) => GestureDetector(
@@ -1936,20 +2017,34 @@ class _MessageRow extends StatelessWidget {
 // ─── Text bubble ──────────────────────────────────────────────────────────────
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.text, required this.mine, required this.isLast, required this.isLight});
+  const _Bubble({required this.text, required this.mine, required this.isLast, required this.isLight, this.edited = false});
   final String text;
   final bool mine;
   final bool isLast;
   final bool isLight;
+  final bool edited;
 
   @override
   Widget build(BuildContext context) {
     final bg        = mine ? _kBlue : (isLight ? _kOtherLgt : _kOtherDark);
     final textColor = mine ? Colors.white : (isLight ? Colors.black : Colors.white);
+    final editedColor = mine
+        ? Colors.white.withValues(alpha: 0.55)
+        : (isLight ? _kSubLgt : _kSubDark);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(color: bg, borderRadius: _bubbleRadius(mine, isLast)),
-      child: Text(text, style: TextStyle(color: textColor, fontSize: 15, height: 1.35)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(text, style: TextStyle(color: textColor, fontSize: 15, height: 1.35)),
+          if (edited) ...[
+            const SizedBox(height: 3),
+            Text('Edited', style: TextStyle(fontSize: 10, color: editedColor)),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -2274,6 +2369,8 @@ class _Composer extends StatefulWidget {
     required this.onSendVoice,
     this.replyTo,
     this.onClearReply,
+    this.editingMessage,
+    this.onCancelEdit,
   });
 
   final TextEditingController controller;
@@ -2284,6 +2381,8 @@ class _Composer extends StatefulWidget {
   final Future<void> Function(Uint8List, int) onSendVoice;
   final MessageItem? replyTo;
   final VoidCallback? onClearReply;
+  final MessageItem? editingMessage;
+  final VoidCallback? onCancelEdit;
 
   @override
   State<_Composer> createState() => _ComposerState();
@@ -2407,7 +2506,13 @@ class _ComposerState extends State<_Composer> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (widget.replyTo != null)
+          if (widget.editingMessage != null)
+            _EditPreviewBar(
+              editingMessage: widget.editingMessage!,
+              isLight: widget.isLight,
+              onClear: widget.onCancelEdit ?? () {},
+            )
+          else if (widget.replyTo != null)
             _ReplyPreviewBar(
               replyTo: widget.replyTo!,
               isLight: widget.isLight,
@@ -3028,6 +3133,62 @@ class _ReplyPreviewBar extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(preview,
                     style: TextStyle(color: subClr, fontSize: 12),
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.close_rounded, size: 20, color: subClr),
+            padding: const EdgeInsets.all(8),
+            onPressed: onClear,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EditPreviewBar extends StatelessWidget {
+  const _EditPreviewBar({required this.editingMessage, required this.isLight, required this.onClear});
+  final MessageItem editingMessage;
+  final bool isLight;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg     = isLight ? const Color(0xfff2f2f2) : const Color(0xff1a1a1a);
+    final subClr = isLight ? _kSubLgt : _kSubDark;
+    final divClr = isLight ? const Color(0xffe0e0e0) : const Color(0xff2a2a2a);
+    final text   = editingMessage.text;
+    final preview = text.length > 80 ? '${text.substring(0, 80)}…' : text;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: bg,
+        border: Border(top: BorderSide(color: divClr)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 3, height: 36,
+            decoration: BoxDecoration(
+              color: const Color(0xffffb800),
+              borderRadius: BorderRadius.circular(1.5),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Editing message',
+                  style: TextStyle(color: Color(0xffffb800), fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(preview, style: TextStyle(color: subClr, fontSize: 12),
                     maxLines: 1, overflow: TextOverflow.ellipsis),
               ],
             ),

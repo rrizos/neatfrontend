@@ -439,6 +439,7 @@ class _EventsPageState extends State<EventsPage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff111111),
@@ -2557,6 +2558,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
     final isAdmin = widget.isAdmin;
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       showDragHandle: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff141414),
       builder: (sheetCtx) => SafeArea(
@@ -2939,6 +2941,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                             onTap: () {
                               showModalBottomSheet(
                                 context: context,
+                                useRootNavigator: true,
                                 isScrollControlled: true,
                                 useSafeArea: true,
                                 backgroundColor: isLight ? Colors.white : const Color(0xff111111),
@@ -3274,12 +3277,19 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                             child: CircularProgressIndicator(strokeWidth: 2),
                                           ),
                                         )
-                                      : IconButton(
-                                          onPressed: _send,
-                                          icon: const Icon(
-                                            Icons.send_rounded,
-                                            color: Color(0xff4f8cff),
-                                            size: 20,
+                                      : GestureDetector(
+                                          onTap: _send,
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(8),
+                                            child: Container(
+                                              width: 34,
+                                              height: 34,
+                                              decoration: const BoxDecoration(
+                                                color: Color(0xff3897f0),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
+                                            ),
                                           ),
                                         )
                                   : null,

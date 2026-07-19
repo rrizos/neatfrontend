@@ -72,6 +72,7 @@ class _PostDeepLinkPageState extends State<PostDeepLinkPage> {
     if (post == null) return;
     showModalBottomSheet<void>(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _CommentsSheet(comments: post.comments),

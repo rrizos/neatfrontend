@@ -1050,6 +1050,7 @@ class FeedPostCard extends StatefulWidget {
     this.onHideNavBar,
     this.onShowNavBar,
     this.likingEnabled = true,
+    this.onVote,
   });
 
   final FeedPost post;
@@ -1072,6 +1073,7 @@ class FeedPostCard extends StatefulWidget {
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
   final bool likingEnabled;
+  final Future<bool> Function(int optionId)? onVote;
 
   @override
   State<FeedPostCard> createState() => _FeedPostCardState();
@@ -1146,6 +1148,27 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
     _heartBounceCtrl.dispose();
     _floatHeartCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleVote(int optionId) async {
+    final poll = widget.post.poll;
+    if (poll == null || poll.votedOptionId != null) return;
+    final prev = {for (final o in poll.options) o.id: o.votes};
+    setState(() {
+      poll.votedOptionId = optionId;
+      for (final o in poll.options) {
+        if (o.id == optionId) o.votes++;
+      }
+    });
+    final ok = await (widget.onVote?.call(optionId) ?? Future.value(false));
+    if (!ok && mounted) {
+      setState(() {
+        poll.votedOptionId = null;
+        for (final o in poll.options) {
+          o.votes = prev[o.id] ?? o.votes;
+        }
+      });
+    }
   }
 
   Future<void> _handleLike() async {
@@ -1342,6 +1365,15 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                   ),
                 ),
               ),
+            if (widget.post.poll != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: _PollWidget(
+                  poll: widget.post.poll!,
+                  isLight: isLight,
+                  onVote: _handleVote,
+                ),
+              ),
             if (widget.post.media.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -1481,7 +1513,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                   GestureDetector(
                     onTap: _handleSave,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
+                      padding: const EdgeInsets.fromLTRB(8, 8, 5.5, 8),
                       child: Icon(
                         _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
                         color: _saved
@@ -1529,4 +1561,149 @@ class _SlashPainter extends CustomPainter {
   }
   @override
   bool shouldRepaint(_SlashPainter old) => old.color != color;
+}
+
+// ── Poll widgets ──────────────────────────────────────────────────────────────
+
+class _PollWidget extends StatelessWidget {
+  const _PollWidget({required this.poll, required this.isLight, required this.onVote});
+  final Poll poll;
+  final bool isLight;
+  final void Function(int) onVote;
+
+  @override
+  Widget build(BuildContext context) {
+    final voted = poll.votedOptionId != null;
+    final total = poll.totalVotes;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final option in poll.options)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _PollOptionRow(
+              option: option,
+              totalVotes: total,
+              voted: voted,
+              chosen: voted && option.id == poll.votedOptionId,
+              isLight: isLight,
+              onTap: voted ? null : () => onVote(option.id),
+            ),
+          ),
+        Text(
+          total == 1 ? '1 vote' : '$total votes',
+          style: TextStyle(
+            fontSize: 13,
+            color: isLight ? const Color(0xff8a8a8a) : const Color(0xff9a9a9a),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PollOptionRow extends StatelessWidget {
+  const _PollOptionRow({
+    required this.option,
+    required this.totalVotes,
+    required this.voted,
+    required this.chosen,
+    required this.isLight,
+    this.onTap,
+  });
+  final PollOption option;
+  final int totalVotes;
+  final bool voted;
+  final bool chosen;
+  final bool isLight;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fraction = totalVotes > 0 ? option.votes / totalVotes : 0.0;
+    final pct = (fraction * 100).round();
+    final border = isLight ? const Color(0xffd9dee6) : const Color(0xff303030);
+    final fg = isLight ? Colors.black : Colors.white;
+
+    if (!voted) {
+      return GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            border: Border.all(color: border),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            option.text,
+            style: TextStyle(fontSize: 15, color: fg, fontWeight: FontWeight.w500),
+          ),
+        ),
+      );
+    }
+
+    final fillColor = chosen
+        ? const Color(0xff3897f0).withValues(alpha: 0.18)
+        : (isLight ? const Color(0xfff0f0f0) : const Color(0xff242424));
+    final borderColor = chosen ? const Color(0xff3897f0) : border;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: fraction),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOut,
+      builder: (_, value, _) {
+        return Container(
+          height: 42,
+          decoration: BoxDecoration(
+            border: Border.all(color: borderColor),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(9),
+            child: Stack(
+              children: [
+                FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: value,
+                  child: Container(color: fillColor),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          option.text,
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: fg,
+                            fontWeight: chosen ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (chosen) ...[
+                        const Icon(Icons.check_circle_rounded, size: 16, color: Color(0xff3897f0)),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        '$pct%',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isLight ? const Color(0xff616161) : const Color(0xff9a9a9a),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

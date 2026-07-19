@@ -184,6 +184,7 @@ Future<void> _showReportSheet(
   final isLight = Theme.of(context).brightness == Brightness.light;
   return showModalBottomSheet(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: isLight ? Colors.white : const Color(0xff141414),
     showDragHandle: true,

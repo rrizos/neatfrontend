@@ -75,6 +75,8 @@ class _HomePageState extends State<HomePage> {
   final _composeMedia = <_ComposeMedia>[];
   bool _composeMediaLoading = false;
   bool _posting = false;
+  bool _composePollActive = false;
+  final _composePollControllers = <TextEditingController>[];
   int _unreadMessages = 0;
   bool _hasOfficialEvents = false;
   bool _showInlineProfile = false;
@@ -149,6 +151,7 @@ class _HomePageState extends State<HomePage> {
       PushService.instance.onSoftTap = null;
     }
     _compose.dispose();
+    for (final c in _composePollControllers) { c.dispose(); }
     _cityScroll.dispose();
     _followingScroll.dispose();
     super.dispose();
@@ -475,12 +478,27 @@ class _HomePageState extends State<HomePage> {
       }
       request.fields['media'] = jsonEncode(mediaInfo);
 
+      if (_composePollActive && _composePollControllers.length >= 2) {
+        final options = _composePollControllers
+            .map((c) => c.text.trim())
+            .where((t) => t.isNotEmpty)
+            .toList();
+        if (options.length >= 2) {
+          request.fields['poll'] = jsonEncode({'options': options});
+        }
+      }
+
       final streamed = await http.sharedHttpClient.send(request).timeout(const Duration(seconds: 180));
       final res = await http.Response.fromStream(streamed);
       if (!mounted) return;
       if (res.statusCode == 201) {
         _compose.clear();
-        setState(() => _composeMedia.clear());
+        setState(() {
+          _composeMedia.clear();
+          _composePollActive = false;
+          for (final c in _composePollControllers) { c.dispose(); }
+          _composePollControllers.clear();
+        });
         popped = true;
         Navigator.of(context).pop();
         _load();
@@ -649,6 +667,20 @@ class _HomePageState extends State<HomePage> {
       );
       if (res.statusCode == 401) await widget.onLogout();
     } catch (_) {}
+  }
+
+  Future<bool> _voteOnPoll(FeedPost post, int optionId) async {
+    try {
+      final res = await http.post(
+        postPollVoteEndpoint(post.id),
+        headers: authJsonHeaders(widget.session.token),
+        body: jsonEncode({'option_id': optionId}),
+      );
+      if (res.statusCode == 401) await widget.onLogout();
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _follow(String username) async {
@@ -835,6 +867,7 @@ class _HomePageState extends State<HomePage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       showDragHandle: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff141414),
       isScrollControlled: true,
@@ -907,6 +940,7 @@ class _HomePageState extends State<HomePage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       showDragHandle: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff141414),
@@ -925,6 +959,9 @@ class _HomePageState extends State<HomePage> {
   void _openCreatePost() {
     _compose.clear();
     _composeMedia.clear();
+    _composePollActive = false;
+    for (final c in _composePollControllers) { c.dispose(); }
+    _composePollControllers.clear();
     if (_isIOS26) _kTabChannel.invokeMethod('syncTab', _nav);
     _hideNativeBar();
     Navigator.of(context).push(
@@ -1237,12 +1274,32 @@ class _HomePageState extends State<HomePage> {
                                                     constraints.maxWidth),
                                           ),
                                         ],
+                                        // ── poll editor ──────────────────
+                                        if (_composePollActive)
+                                          _ComposePollEditor(
+                                            controllers: _composePollControllers,
+                                            isLight: isLight,
+                                            onAddOption: () {
+                                              if (_composePollControllers.length < 4) {
+                                                setPageState(() => _composePollControllers.add(TextEditingController()));
+                                              }
+                                            },
+                                            onRemoveOption: (index) {
+                                              if (_composePollControllers.length > 2) {
+                                                setPageState(() {
+                                                  _composePollControllers[index].dispose();
+                                                  _composePollControllers.removeAt(index);
+                                                });
+                                              }
+                                            },
+                                          ),
                                         // ── action row ───────────────────
                                         const SizedBox(height: 14),
                                         Row(
                                           children: [
-                                            // Photos (max 4, disabled if video present)
-                                            if (!_composeMediaLoading &&
+                                            // Photos (max 4, disabled if video or poll present)
+                                            if (!_composePollActive &&
+                                                !_composeMediaLoading &&
                                                 !_composeMedia.any(
                                                 (m) => m.isVideo) &&
                                                 _composeMedia.length < 4)
@@ -1252,8 +1309,9 @@ class _HomePageState extends State<HomePage> {
                                                     _pickComposeImages(
                                                         setPageState),
                                               ),
-                                            // Camera (disabled if video present or 4 photos)
-                                            if (!_composeMediaLoading &&
+                                            // Camera (disabled if video or poll present or 4 photos)
+                                            if (!_composePollActive &&
+                                                !_composeMediaLoading &&
                                                 !_composeMedia.any(
                                                 (m) => m.isVideo) &&
                                                 _composeMedia.length < 4)
@@ -1263,8 +1321,9 @@ class _HomePageState extends State<HomePage> {
                                                     _pickComposeCamera(
                                                         setPageState),
                                               ),
-                                            // Video (disabled if any media present)
-                                            if (!_composeMediaLoading &&
+                                            // Video (disabled if any media or poll present)
+                                            if (!_composePollActive &&
+                                                !_composeMediaLoading &&
                                                 _composeMedia.isEmpty)
                                               _ComposeAction(
                                                 icon: Icons
@@ -1273,8 +1332,8 @@ class _HomePageState extends State<HomePage> {
                                                     _pickComposeVideo(
                                                         setPageState),
                                               ),
-                                            // GIF (disabled if any media present)
-                                            if (_composeMedia.isEmpty)
+                                            // GIF (disabled if any media or poll present)
+                                            if (!_composePollActive && _composeMedia.isEmpty)
                                               _ComposeAction(
                                                 icon: Icons
                                                     .gif,
@@ -1354,6 +1413,26 @@ class _HomePageState extends State<HomePage> {
                                                     });
                                                     setPageState(() {});
                                                   }
+                                                },
+                                              ),
+                                            // Poll toggle (hidden if media present)
+                                            if (_composeMedia.isEmpty && !_composeMediaLoading)
+                                              _ComposeAction(
+                                                icon: Icons.poll_outlined,
+                                                active: _composePollActive,
+                                                onTap: () {
+                                                  setPageState(() {
+                                                    _composePollActive = !_composePollActive;
+                                                    if (_composePollActive) {
+                                                      for (final c in _composePollControllers) { c.dispose(); }
+                                                      _composePollControllers.clear();
+                                                      _composePollControllers.add(TextEditingController());
+                                                      _composePollControllers.add(TextEditingController());
+                                                    } else {
+                                                      for (final c in _composePollControllers) { c.dispose(); }
+                                                      _composePollControllers.clear();
+                                                    }
+                                                  });
                                                 },
                                               ),
                                             const Spacer(),
@@ -1450,6 +1529,7 @@ class _HomePageState extends State<HomePage> {
     _hideNativeBar();
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       showDragHandle: true,
       backgroundColor: Theme.of(context).brightness == Brightness.light ? Colors.white : const Color(0xff141414),
       isScrollControlled: true,
@@ -1592,6 +1672,7 @@ class _HomePageState extends State<HomePage> {
                   followerAuthors: _followerAuthors,
                   onHideNavBar: _hideNativeBar,
                   onShowNavBar: _showNativeBar,
+                  onVote: (optionId) => _voteOnPoll(post, optionId),
                 );
               },
             ),
@@ -1659,6 +1740,7 @@ class _HomePageState extends State<HomePage> {
         final isLight = Theme.of(context).brightness == Brightness.light;
         showModalBottomSheet(
           context: context,
+          useRootNavigator: true,
           isScrollControlled: true,
           showDragHandle: true,
           backgroundColor: isLight ? Colors.white : const Color(0xff141414),
@@ -1680,6 +1762,7 @@ class _HomePageState extends State<HomePage> {
       isFollowing: _followingAuthors.contains(post.author),
       onHideNavBar: _hideNativeBar,
       onShowNavBar: _showNativeBar,
+      onVote: interactive ? (optionId) => _voteOnPoll(post, optionId) : null,
     );
   }
 
@@ -1773,6 +1856,8 @@ class _HomePageState extends State<HomePage> {
                                 followerAuthors: _followerAuthors,
                                 buildPostCard: _buildViralPostCard,
                                 onOpenUserProfile: _pushProfileRoute,
+                                onHideNavBar: _hideNativeBar,
+                                onShowNavBar: _showNativeBar,
                               )
                             : const SizedBox.shrink(),
                         // 2: Create (intercepted by bottom nav, never shown)
@@ -2328,6 +2413,8 @@ class _ViralView extends StatefulWidget {
     required this.followerAuthors,
     required this.buildPostCard,
     required this.onOpenUserProfile,
+    required this.onHideNavBar,
+    required this.onShowNavBar,
   });
 
   final String token;
@@ -2336,25 +2423,64 @@ class _ViralView extends StatefulWidget {
   final Set<String> followerAuthors;
   final Widget Function(FeedPost, {required bool interactive}) buildPostCard;
   final ValueChanged<String> onOpenUserProfile;
+  final VoidCallback onHideNavBar;
+  final VoidCallback onShowNavBar;
 
   @override
   State<_ViralView> createState() => _ViralViewState();
 }
 
-// 0 = Daily, 1 = Weekly, 2 = Monthly
 enum _ViralPeriod { daily, weekly, monthly }
 
 class _ViralViewState extends State<_ViralView> {
+  // ── Viral ──────────────────────────────────────────────────────────────────
   String _city = '';
   List<FeedPost> _viralPosts = [];
-  bool _loading = true;
+  bool _loadingViral = true;
   _ViralPeriod _period = _ViralPeriod.weekly;
+
+  // ── Search ─────────────────────────────────────────────────────────────────
+  bool _searchActive = false;
+  final _searchCtrl = TextEditingController();
+  final _searchFocus = FocusNode();
+  Timer? _debounce;
+  String _query = '';
+  bool _didSearch = false;
+  bool _searchLoading = false;
+  int _section = 0;
+
+  // ── Search data ─────────────────────────────────────────────────────────────
+  List<UserProfile> _suggestedUsers = [];
+  List<UserProfile> _users = [];
+  List<UserProfile> _topUsers = [];
+  List<FeedPost> _cityPosts = [];
+  final List<String> _recentQueries = [];
+  final Set<String> _followingAuthors = {};
+  final Map<String, UserProfile> _historyUsers = {};
+  bool _loadingSuggestions = true;
+  bool _loadingTop = true;
+  int _historyShown = 5;
+
+  static const _historyPrefsKey = 'search_history_queries';
 
   @override
   void initState() {
     super.initState();
     _city = widget.currentUser.city;
-    _load();
+    _loadViral();
+    _loadSuggestions();
+    _loadTopUsers();
+    _loadCityPosts();
+    _loadRecentQueries();
+    _loadFollowingAuthors();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    _debounce?.cancel();
+    super.dispose();
   }
 
   double _score(FeedPost p) => (p.likes * 0.45 + p.comments.length * 0.55) * 100;
@@ -2373,8 +2499,8 @@ class _ViralViewState extends State<_ViralView> {
     return now.difference(periodStart).inMinutes;
   }
 
-  Future<void> _load() async {
-    if (mounted) setState(() => _loading = true);
+  Future<void> _loadViral() async {
+    if (mounted) setState(() => _loadingViral = true);
     try {
       final res = await http.get(
         postsEndpoint(city: _city),
@@ -2382,7 +2508,7 @@ class _ViralViewState extends State<_ViralView> {
       );
       if (!mounted) return;
       if (res.statusCode != 200) {
-        setState(() => _loading = false);
+        setState(() => _loadingViral = false);
         return;
       }
       final decoded = jsonDecode(res.body) as List<dynamic>;
@@ -2399,19 +2525,24 @@ class _ViralViewState extends State<_ViralView> {
       });
       setState(() {
         _viralPosts = posts.take(10).toList();
-        _loading = false;
+        _loadingViral = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _loadingViral = false);
     }
   }
 
-  void refresh() => _load();
+  void refresh() {
+    if (_searchActive) _cancelSearch();
+    _loadViral();
+  }
 
   Future<void> _selectCity(BuildContext context) async {
     final isLight = Theme.of(context).brightness == Brightness.light;
+    widget.onHideNavBar();
     await showModalBottomSheet<void>(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff141414),
       shape: const RoundedRectangleBorder(
@@ -2470,7 +2601,7 @@ class _ViralViewState extends State<_ViralView> {
                       Navigator.of(ctx).pop();
                       if (city.name != _city) {
                         setState(() => _city = city.name);
-                        _load();
+                        _loadViral();
                       }
                     },
                   );
@@ -2482,17 +2613,34 @@ class _ViralViewState extends State<_ViralView> {
         ),
       ),
     );
+    widget.onShowNavBar();
   }
 
-  void _openSearch() {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => _ViralSearchPage(
-        token: widget.token,
-        currentUser: widget.currentUser,
-        followerAuthors: widget.followerAuthors,
-        onOpenUserProfile: widget.onOpenUserProfile,
-      ),
-    ));
+  // ── Search activation ─────────────────────────────────────────────────────
+
+  void _activateSearch() {
+    setState(() => _searchActive = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _searchFocus.requestFocus());
+  }
+
+  void _cancelSearch() {
+    _debounce?.cancel();
+    _searchCtrl.clear();
+    _searchFocus.unfocus();
+    setState(() {
+      _searchActive = false;
+      _query = '';
+      _didSearch = false;
+      _users = [];
+      _section = 0;
+      _historyShown = 5;
+    });
+  }
+
+  void _clearSearch() {
+    _searchCtrl.clear();
+    setState(() { _query = ''; _users = []; _didSearch = false; });
+    _searchFocus.requestFocus();
   }
 
   Color _mc(int rank) => rank == 1
@@ -2537,366 +2685,304 @@ class _ViralViewState extends State<_ViralView> {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
+    final bg = isLight ? Colors.white : const Color(0xff121212);
+    final dividerColor = isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a);
+    final muted = isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // ── Header ──────────────────────────────────────────────────────────
+        // ── Header ────────────────────────────────────────────────────────────
         Container(
-          decoration: BoxDecoration(
-            color: isLight ? Colors.white : const Color(0xff121212),
-            border: Border(
-              bottom: BorderSide(
-                color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
-                width: 0.5,
-              ),
-            ),
-          ),
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+          color: bg,
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Search bar + Cancel button
               Row(
                 children: [
-                  // Search icon
-                  Material(
-                    color: Colors.transparent,
-                    borderRadius: BorderRadius.circular(24),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(24),
-                      onTap: _openSearch,
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Icon(
-                          Icons.search_rounded,
-                          size: 24,
-                          color: isLight ? Colors.black : Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Centered title + city selector
-                  Expanded(
-                    child: Center(
-                      child: GestureDetector(
-                        onTap: () => _selectCity(context),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Viral στην',
-                              style: TextStyle(
-                                color: isLight ? Colors.black : Colors.white,
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.3,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: isLight ? const Color(0xffe0e3e8) : const Color(0xff3a3a3a),
+                  Expanded(child: _buildSearchBar(isLight, muted)),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                    child: _searchActive
+                        ? Padding(
+                            padding: const EdgeInsets.only(left: 10),
+                            child: GestureDetector(
+                              onTap: _cancelSearch,
+                              child: const Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  color: Color(0xff1d9bf0),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    _city,
-                                    style: TextStyle(
-                                      color: isLight ? Colors.black : Colors.white,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 2),
-                                  Icon(
-                                    Icons.expand_more_rounded,
-                                    size: 16,
-                                    color: isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af),
-                                  ),
-                                ],
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+              // Viral subtitle row — city pill + period picker (hides while searching)
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                child: _searchActive
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Row(
+                          children: [
+                            GestureDetector(
+                              onTap: () => _selectCity(context),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: isLight ? const Color(0xffe0e3e8) : const Color(0xff3a3a3a)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.local_fire_department_rounded, size: 13, color: Color(0xffff6b35)),
+                                    const SizedBox(width: 4),
+                                    Text(_city, style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                                    const SizedBox(width: 3),
+                                    Icon(Icons.expand_more_rounded, size: 15, color: muted),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const Spacer(),
+                            PopupMenuButton<_ViralPeriod>(
+                              onSelected: (p) {
+                                if (_period == p) return;
+                                setState(() => _period = p);
+                                _loadViral();
+                              },
+                              offset: const Offset(0, 32),
+                              color: isLight ? Colors.white : const Color(0xff1e1e1e),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              itemBuilder: (_) => [
+                                _periodMenuItem('Ημερήσιο', _ViralPeriod.daily, isLight),
+                                _periodMenuItem('Εβδομαδιαίο', _ViralPeriod.weekly, isLight),
+                                _periodMenuItem('Μηνιαίο', _ViralPeriod.monthly, isLight),
+                              ],
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: isLight ? const Color(0xffe0e3e8) : const Color(0xff3a3a3a)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(_periodLabel(_period), style: TextStyle(color: muted, fontSize: 13, fontWeight: FontWeight.w600)),
+                                    const SizedBox(width: 3),
+                                    Icon(Icons.expand_more_rounded, size: 15, color: muted),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 40),
-                ],
-              ),
-              const SizedBox(height: 10),
-              // Period selector
-              Center(
-                child: PopupMenuButton<_ViralPeriod>(
-                  onSelected: (p) {
-                    if (_period == p) return;
-                    setState(() => _period = p);
-                    _load();
-                  },
-                  offset: const Offset(0, 34),
-                  color: isLight ? Colors.white : const Color(0xff1e1e1e),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  itemBuilder: (_) => [
-                    _periodMenuItem('Ημερήσιο', _ViralPeriod.daily, isLight),
-                    _periodMenuItem('Εβδομαδιαίο', _ViralPeriod.weekly, isLight),
-                    _periodMenuItem('Μηνιαίο', _ViralPeriod.monthly, isLight),
-                  ],
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: isLight ? const Color(0xffe0e3e8) : const Color(0xff3a3a3a),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _periodLabel(_period),
-                          style: TextStyle(
-                            color: isLight ? const Color(0xff536471) : const Color(0xff9ca3af),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(width: 2),
-                        Icon(
-                          Icons.expand_more_rounded,
-                          size: 13,
-                          color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
               ),
             ],
           ),
         ),
-        // ── Post list ────────────────────────────────────────────────────────
+        Divider(height: 1, color: dividerColor),
+        // ── Body ──────────────────────────────────────────────────────────────
         Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _viralPosts.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.local_fire_department_rounded,
-                            size: 48,
-                            color: isLight
-                                ? const Color(0xffb8c0cc)
-                                : const Color(0xff4a5568),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'No posts in $_city yet',
-                            style: TextStyle(
-                              color: isLight
-                                  ? const Color(0xff9ca3af)
-                                  : const Color(0xff6b7280),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: ListView.builder(
-                        padding: const EdgeInsets.only(bottom: 40),
-                        itemCount: _viralPosts.length,
-                        itemBuilder: (_, i) {
-                          final post = _viralPosts[i];
-                          final rank = i + 1;
-                          final score = _score(post);
-                          final isTop3 = rank <= 3;
-                          final mc = isTop3 ? _mc(rank) : null;
-                          final scoreStr = '${score.toInt()} neat pts';
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              // ── Rank header strip ─────────────────────────
-                              if (isTop3)
-                                Container(
-                                  padding: const EdgeInsets.fromLTRB(
-                                      16, 12, 16, 10),
-                                  decoration: BoxDecoration(
-                                    color: mc!.withValues(alpha: 0.07),
-                                    border: Border(
-                                      left: BorderSide(
-                                          color: mc, width: 3.5),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Text(
-                                        '#$rank',
-                                        style: TextStyle(
-                                          color: mc,
-                                          fontSize: 19,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: -0.5,
-                                        ),
-                                      ),
-                                      const Spacer(),
-                                      Opacity(
-                                        opacity: 0,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                          decoration: BoxDecoration(
-                                            color: mc.withValues(alpha: 0.14),
-                                            borderRadius: BorderRadius.circular(20),
-                                          ),
-                                          child: Text(
-                                            scoreStr,
-                                            style: TextStyle(
-                                              color: mc,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                              else
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                      16, 10, 16, 2),
-                                  child: Row(
-                                    children: [
-                                      Text(
-                                        '#$rank',
-                                        style: TextStyle(
-                                          color: isLight
-                                              ? const Color(0xffb8c0cc)
-                                              : const Color(0xff4a5568),
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                      const Spacer(),
-                                      Opacity(
-                                        opacity: 0,
-                                        child: Text(
-                                          scoreStr,
-                                          style: TextStyle(
-                                            color: isLight
-                                                ? const Color(0xffb8c0cc)
-                                                : const Color(0xff4a5568),
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              // ── Post card ─────────────────────────────────
-                              if (isTop3)
-                                DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: mc!.withValues(alpha: 0.03),
-                                    border: Border(
-                                      left: BorderSide(
-                                        color: mc.withValues(alpha: 0.25),
-                                        width: 3.5,
-                                      ),
-                                    ),
-                                  ),
-                                  child: widget.buildPostCard(post, interactive: _city == widget.currentUser.city),
-                                )
-                              else
-                                widget.buildPostCard(post, interactive: _city == widget.currentUser.city),
-                              Divider(
-                                height: 1,
-                                color: isLight
-                                    ? const Color(0xffe8eaed)
-                                    : const Color(0xff1f1f1f),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
+          child: _searchActive ? _buildSearchBody(isLight) : _buildViralBody(isLight),
         ),
       ],
     );
   }
-}
 
-// ── Search page (pushed route from viral view) ────────────────────────────────
-
-class _ViralSearchPage extends StatefulWidget {
-  const _ViralSearchPage({
-    required this.token,
-    required this.currentUser,
-    required this.followerAuthors,
-    required this.onOpenUserProfile,
-  });
-
-  final String token;
-  final UserProfile currentUser;
-  final Set<String> followerAuthors;
-  final ValueChanged<String> onOpenUserProfile;
-
-  @override
-  State<_ViralSearchPage> createState() => _ViralSearchPageState();
-}
-
-class _ViralSearchPageState extends State<_ViralSearchPage> {
-  final _controller = TextEditingController();
-  Timer? _debounce;
-  final List<String> _recentQueries = [];
-  List<UserProfile> _suggestedUsers = [];
-  List<UserProfile> _users = [];
-  List<UserProfile> _topUsers = [];
-  List<FeedPost> _cityPosts = [];
-  final Set<String> _followingAuthors = {};
-  final Map<String, UserProfile> _historyUsers = {};
-  bool _loadingSuggestions = true;
-  bool _loadingTop = true;
-  bool _loading = false;
-  bool _didSearch = false;
-  int _historyShown = 5;
-  int _section = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSuggestions();
-    _loadRecentQueries();
-    _loadFollowingAuthors();
-    _loadTopUsers();
-    _loadCityPosts();
+  Widget _buildSearchBar(bool isLight, Color muted) {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: isLight ? const Color(0xfff4f6f8) : const Color(0xff1a1a1a),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a)),
+      ),
+      child: _searchActive
+          ? TextField(
+              controller: _searchCtrl,
+              focusNode: _searchFocus,
+              onChanged: _onChanged,
+              onSubmitted: (_) => _submitSearch(),
+              onTapOutside: (_) => FocusScope.of(context).unfocus(),
+              style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 15),
+              cursorColor: const Color(0xff1d9bf0),
+              decoration: InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded, color: muted, size: 19),
+                suffixIcon: _query.isNotEmpty
+                    ? GestureDetector(
+                        onTap: _clearSearch,
+                        child: Icon(Icons.close_rounded, size: 17, color: muted),
+                      )
+                    : null,
+                hintText: 'Search people and posts',
+                hintStyle: TextStyle(color: muted, fontSize: 15),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+              ),
+            )
+          : GestureDetector(
+              onTap: _activateSearch,
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  Icon(Icons.search_rounded, color: muted, size: 18),
+                  const SizedBox(width: 8),
+                  Text('Search people and posts', style: TextStyle(color: muted, fontSize: 15)),
+                ],
+              ),
+            ),
+    );
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    _debounce?.cancel();
-    super.dispose();
+  // ── Viral body ─────────────────────────────────────────────────────────────
+
+  Widget _buildViralBody(bool isLight) {
+    if (_loadingViral) return const Center(child: CircularProgressIndicator());
+    if (_viralPosts.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.local_fire_department_rounded, size: 48, color: isLight ? const Color(0xffb8c0cc) : const Color(0xff4a5568)),
+            const SizedBox(height: 12),
+            Text('No posts in $_city yet', style: TextStyle(color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280), fontSize: 16, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _loadViral,
+      child: ListView.builder(
+        padding: const EdgeInsets.only(bottom: 40),
+        itemCount: _viralPosts.length,
+        itemBuilder: (_, i) {
+          final post = _viralPosts[i];
+          final rank = i + 1;
+          final score = _score(post);
+          final isTop3 = rank <= 3;
+          final mc = isTop3 ? _mc(rank) : null;
+          final scoreStr = '${score.toInt()} neat pts';
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (isTop3)
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                  decoration: BoxDecoration(
+                    color: mc!.withValues(alpha: 0.07),
+                    border: Border(left: BorderSide(color: mc, width: 3.5)),
+                  ),
+                  child: Row(
+                    children: [
+                      Text('#$rank', style: TextStyle(color: mc, fontSize: 19, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                      const Spacer(),
+                      Opacity(opacity: 0, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: mc.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)), child: Text(scoreStr, style: TextStyle(color: mc, fontSize: 12, fontWeight: FontWeight.w700)))),
+                    ],
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+                  child: Row(
+                    children: [
+                      Text('#$rank', style: TextStyle(color: isLight ? const Color(0xffb8c0cc) : const Color(0xff4a5568), fontSize: 13, fontWeight: FontWeight.w800)),
+                      const Spacer(),
+                      Opacity(opacity: 0, child: Text(scoreStr, style: TextStyle(color: isLight ? const Color(0xffb8c0cc) : const Color(0xff4a5568), fontSize: 12))),
+                    ],
+                  ),
+                ),
+              if (isTop3)
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: mc!.withValues(alpha: 0.03),
+                    border: Border(left: BorderSide(color: mc.withValues(alpha: 0.25), width: 3.5)),
+                  ),
+                  child: widget.buildPostCard(post, interactive: _city == widget.currentUser.city),
+                )
+              else
+                widget.buildPostCard(post, interactive: _city == widget.currentUser.city),
+              Divider(height: 1, color: isLight ? const Color(0xffe8eaed) : const Color(0xff1f1f1f)),
+            ],
+          );
+        },
+      ),
+    );
   }
+
+  // ── Search body ─────────────────────────────────────────────────────────────
 
   void _onChanged(String value) {
+    final trimmed = value.trim();
+    setState(() => _query = trimmed);
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () {
-      if (value.trim().isEmpty) {
+      if (trimmed.isEmpty) {
         if (mounted) setState(() { _users = []; _didSearch = false; });
       } else {
-        _doSearch(value.trim());
+        _doSearch(trimmed);
       }
     });
+  }
+
+  Future<void> _submitSearch() async {
+    final query = _searchCtrl.text.trim();
+    if (query.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    _debounce?.cancel();
+    await _addToHistory(query);
+    await _doSearch(query);
+  }
+
+  Future<void> _doSearch(String query) async {
+    if (query.isEmpty) return;
+    if (mounted) setState(() { _searchLoading = true; _didSearch = true; });
+    try {
+      final res = await http.get(searchUsersEndpoint(query), headers: authGetHeaders(widget.token));
+      if (!mounted) return;
+      if (res.statusCode != 200) { setState(() => _searchLoading = false); return; }
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final users = (decoded['users'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>().map(UserProfile.fromJson).toList();
+      setState(() { _users = users; _searchLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _searchLoading = false);
+    }
+  }
+
+  List<FeedPost> _searchPosts(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return _cityPosts;
+    return _cityPosts.where((p) => p.text.toLowerCase().contains(q) || p.author.toLowerCase().contains(q) || p.city.toLowerCase().contains(q)).toList();
+  }
+
+  void _openProfile(UserProfile user) {
+    _historyUsers[user.username] = user;
+    unawaited(_addToHistory(user.username));
+    widget.onOpenUserProfile(user.username);
+  }
+
+  Future<void> _toggleFollow(UserProfile user) async {
+    final was = _followingAuthors.contains(user.username);
+    setState(() { if (was) { _followingAuthors.remove(user.username); } else { _followingAuthors.add(user.username); } });
+    try {
+      final res = await http.post(followEndpoint(user.username), headers: authJsonHeaders(widget.token), body: jsonEncode({'follow': !was}));
+      if (res.statusCode >= 400 && mounted) setState(() { if (was) { _followingAuthors.add(user.username); } else { _followingAuthors.remove(user.username); } });
+    } catch (_) {
+      if (mounted) setState(() { if (was) { _followingAuthors.add(user.username); } else { _followingAuthors.remove(user.username); } });
+    }
   }
 
   Future<void> _loadSuggestions() async {
@@ -2906,10 +2992,7 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
       if (!mounted) return;
       if (res.statusCode != 200) { setState(() => _loadingSuggestions = false); return; }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final users = (decoded['users'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(UserProfile.fromJson)
-          .toList();
+      final users = (decoded['users'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>().map(UserProfile.fromJson).toList();
       setState(() { _suggestedUsers = users; _loadingSuggestions = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingSuggestions = false);
@@ -2922,10 +3005,7 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
       if (!mounted) return;
       if (res.statusCode != 200) { setState(() => _loadingTop = false); return; }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final users = (decoded['users'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(UserProfile.fromJson)
-          .toList();
+      final users = (decoded['users'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>().map(UserProfile.fromJson).toList();
       setState(() { _topUsers = users; _loadingTop = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingTop = false);
@@ -2934,21 +3014,12 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
 
   Future<void> _loadCityPosts() async {
     try {
-      final res = await http.get(
-        postsEndpoint(city: widget.currentUser.city),
-        headers: authGetHeaders(widget.token),
-      );
+      final res = await http.get(postsEndpoint(city: widget.currentUser.city), headers: authGetHeaders(widget.token));
       if (!mounted || res.statusCode != 200) return;
       final decoded = jsonDecode(res.body) as List<dynamic>;
-      final posts = decoded
-          .whereType<Map<String, dynamic>>()
-          .map(FeedPost.fromJson)
-          .toList();
-      if (mounted) setState(() => _cityPosts = posts);
+      if (mounted) setState(() => _cityPosts = decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList());
     } catch (_) {}
   }
-
-  static const _historyPrefsKey = 'search_history_queries';
 
   Future<void> _loadRecentQueries() async {
     final prefs = await SharedPreferences.getInstance();
@@ -2957,7 +3028,6 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
       if (mounted) setState(() { _recentQueries..clear()..addAll(local); });
       return;
     }
-    // No local cache yet — seed from server (first install / fresh device)
     try {
       final res = await http.get(searchHistoryEndpoint(), headers: authGetHeaders(widget.token));
       if (!mounted || res.statusCode != 200) return;
@@ -2970,17 +3040,10 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
 
   Future<void> _loadFollowingAuthors() async {
     try {
-      final res = await http.get(
-        followingEndpoint(widget.currentUser.username),
-        headers: authGetHeaders(widget.token),
-      );
+      final res = await http.get(followingEndpoint(widget.currentUser.username), headers: authGetHeaders(widget.token));
       if (!mounted || res.statusCode != 200) return;
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final usernames = (decoded['users'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map((u) => u['username']?.toString() ?? '')
-          .where((u) => u.isNotEmpty)
-          .toSet();
+      final usernames = (decoded['users'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>().map((u) => u['username']?.toString() ?? '').where((u) => u.isNotEmpty).toSet();
       setState(() => _followingAuthors..clear()..addAll(usernames));
     } catch (_) {}
   }
@@ -2994,13 +3057,7 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
     });
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_historyPrefsKey, _recentQueries.toList());
-    try {
-      await http.post(
-        searchHistoryEndpoint(),
-        headers: authJsonHeaders(widget.token),
-        body: jsonEncode({'query': query}),
-      );
-    } catch (_) {}
+    try { await http.post(searchHistoryEndpoint(), headers: authJsonHeaders(widget.token), body: jsonEncode({'query': query})); } catch (_) {}
   }
 
   Future<void> _deleteHistoryItem(String q) async {
@@ -3017,186 +3074,8 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
     try { await http.delete(searchHistoryEndpoint(), headers: authGetHeaders(widget.token)); } catch (_) {}
   }
 
-  Future<void> _doSearch(String query) async {
-    if (query.isEmpty) return;
-    setState(() { _loading = true; _didSearch = true; });
-    try {
-      final res = await http.get(searchUsersEndpoint(query), headers: authGetHeaders(widget.token));
-      if (!mounted) return;
-      if (res.statusCode != 200) { setState(() => _loading = false); return; }
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final users = (decoded['users'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(UserProfile.fromJson)
-          .toList();
-      setState(() { _users = users; _loading = false; });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _search() async {
-    final query = _controller.text.trim();
-    if (query.isEmpty) return;
-    FocusScope.of(context).unfocus();
-    _debounce?.cancel();
-    await _addToHistory(query);
-    await _doSearch(query);
-  }
-
-  List<FeedPost> _searchPosts(String query) {
-    final q = query.trim().toLowerCase();
-    if (q.isEmpty) return _cityPosts;
-    return _cityPosts.where((p) =>
-      p.text.toLowerCase().contains(q) ||
-      p.author.toLowerCase().contains(q) ||
-      p.city.toLowerCase().contains(q)
-    ).toList();
-  }
-
-  void _openProfile(UserProfile user) {
-    _historyUsers[user.username] = user;
-    unawaited(_addToHistory(user.username));
-    widget.onOpenUserProfile(user.username);
-  }
-
-  Future<void> _toggleFollow(UserProfile user) async {
-    final was = _followingAuthors.contains(user.username);
-    setState(() {
-      if (was) { _followingAuthors.remove(user.username); } else { _followingAuthors.add(user.username); }
-    });
-    try {
-      final res = await http.post(
-        followEndpoint(user.username),
-        headers: authJsonHeaders(widget.token),
-        body: jsonEncode({'follow': !was}),
-      );
-      if (res.statusCode >= 400 && mounted) {
-        setState(() {
-          if (was) { _followingAuthors.add(user.username); } else { _followingAuthors.remove(user.username); }
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          if (was) { _followingAuthors.add(user.username); } else { _followingAuthors.remove(user.username); }
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    return Scaffold(
-      backgroundColor: isLight ? Colors.white : const Color(0xff121212),
-      body: SafeArea(
-        child: ValueListenableBuilder<TextEditingValue>(
-          valueListenable: _controller,
-          builder: (context, tv, _) {
-            final query = tv.text.trim();
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // ── Top bar ──────────────────────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 6, 16, 6),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_rounded),
-                        onPressed: () => Navigator.of(context).pop(),
-                        color: isLight ? Colors.black : Colors.white,
-                      ),
-                      Expanded(
-                        child: Container(
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: isLight ? const Color(0xfff4f6f8) : const Color(0xff1a1a1a),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a),
-                            ),
-                          ),
-                          child: TextField(
-                            controller: _controller,
-                            autofocus: true,
-                            onChanged: _onChanged,
-                            onSubmitted: (_) => _search(),
-                            onTapOutside: (_) => FocusScope.of(context).unfocus(),
-                            style: TextStyle(
-                                color: isLight ? Colors.black : Colors.white,
-                                fontSize: 15),
-                            cursorColor: const Color(0xff1d9bf0),
-                            decoration: InputDecoration(
-                              prefixIcon: Icon(
-                                Icons.search_rounded,
-                                color: isLight
-                                    ? const Color(0xff9ca3af)
-                                    : const Color(0xff6b7280),
-                                size: 19,
-                              ),
-                              suffixIcon: query.isNotEmpty
-                                  ? GestureDetector(
-                                      onTap: () {
-                                        _controller.clear();
-                                        _onChanged('');
-                                      },
-                                      child: Icon(
-                                        Icons.close_rounded,
-                                        size: 17,
-                                        color: isLight
-                                            ? const Color(0xff9ca3af)
-                                            : const Color(0xff6b7280),
-                                      ),
-                                    )
-                                  : null,
-                              hintText: 'Search',
-                              hintStyle: TextStyle(
-                                color: isLight
-                                    ? const Color(0xff9ca3af)
-                                    : const Color(0xff6b7280),
-                                fontSize: 15,
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 4, vertical: 12),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      GestureDetector(
-                        onTap: _search,
-                        child: const Text(
-                          'Search',
-                          style: TextStyle(
-                            color: Color(0xff1d9bf0),
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Divider(
-                    height: 1,
-                    color: isLight
-                        ? const Color(0xffe8eaed)
-                        : const Color(0xff2a2a2a)),
-                // ── Body ─────────────────────────────────────────────────
-                Expanded(
-                  child: _didSearch
-                      ? _buildResults(isLight, query)
-                      : _buildDefault(isLight),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
+  Widget _buildSearchBody(bool isLight) {
+    return _didSearch ? _buildResults(isLight, _query) : _buildDefault(isLight);
   }
 
   Widget _buildDefault(bool isLight) {
@@ -3368,9 +3247,9 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
     // ── Text search entry ────────────────────────────────────────────────
     return InkWell(
       onTap: () {
-        _controller.text = q;
-        _controller.selection = TextSelection.collapsed(offset: q.length);
-        _search();
+        _searchCtrl.text = q;
+        _searchCtrl.selection = TextSelection.collapsed(offset: q.length);
+        _submitSearch();
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -3413,68 +3292,51 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
   Widget _buildResults(bool isLight, String query) {
     const tabs = ['People', 'Posts'];
     final divider = isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336);
+    final textColor = isLight ? Colors.black : Colors.white;
+    final muted = isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280);
     return Column(
       children: [
-        // ── Tab bar with sliding underline ────────────────────────────────
+        // ── Tab bar ──────────────────────────────────────────────────────
         Container(
-          color: isLight ? Colors.white : const Color(0xff000000),
-          child: Stack(
+          decoration: BoxDecoration(
+            color: isLight ? Colors.white : const Color(0xff121212),
+            border: Border(bottom: BorderSide(color: divider)),
+          ),
+          child: Row(
             children: [
-              Row(
-                children: List.generate(tabs.length, (i) {
-                  final sel = _section == i;
-                  return Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => setState(() => _section = i),
-                      child: AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 200),
-                        style: TextStyle(
-                          color: sel
-                              ? (isLight ? Colors.black : Colors.white)
-                              : (isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
-                          fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                          fontSize: 15,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          child: Center(child: Text(tabs[i])),
+              const SizedBox(width: 6),
+              ...List.generate(tabs.length, (i) {
+                final sel = _section == i;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _section = i),
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(14, 13, 14, 10),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: sel ? const Color(0xff1d9bf0) : Colors.transparent,
+                          width: 3,
                         ),
                       ),
                     ),
-                  );
-                }),
-              ),
-              // Sliding indicator
-              Positioned(
-                left: 0, right: 0, bottom: 0,
-                child: LayoutBuilder(builder: (_, c) {
-                  final w = c.maxWidth / tabs.length;
-                  return Stack(children: [
-                    Divider(height: 1, color: divider),
-                    AnimatedPositioned(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeInOut,
-                      left: _section * w + w * 0.2,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        width: w * 0.6,
-                        height: 3,
-                        decoration: BoxDecoration(
-                          color: const Color(0xff1d9bf0),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
+                    child: Text(
+                      tabs[i],
+                      style: TextStyle(
+                        color: sel ? textColor : muted,
+                        fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                        fontSize: 15,
                       ),
                     ),
-                  ]);
-                }),
-              ),
+                  ),
+                );
+              }),
             ],
           ),
         ),
-        // ── Results with fade transition ───────────────────────────────────
+        // ── Results ───────────────────────────────────────────────────────
         Expanded(
-          child: _loading
+          child: _searchLoading
               ? const Center(child: CircularProgressIndicator())
               : AnimatedSwitcher(
                   duration: const Duration(milliseconds: 200),
@@ -3548,9 +3410,8 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
   }
 
   Widget _buildPostRow(FeedPost post, bool isLight) {
-    final text = post.text;
-    final snippet = text.length > 80 ? '${text.substring(0, 80)}…' : text;
     final bytes = decodeAvatarUrl(post.avatarUrl);
+    final muted = isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280);
     return InkWell(
       onTap: () => widget.onOpenUserProfile(post.author),
       child: Padding(
@@ -3559,7 +3420,7 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CircleAvatar(
-              radius: 18,
+              radius: 20,
               backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
               foregroundImage: bytes != null ? MemoryImage(bytes) : null,
               child: bytes == null
@@ -3567,7 +3428,7 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
                       initialFor(post.author),
                       style: TextStyle(
                         color: isLight ? Colors.black : Colors.white,
-                        fontSize: 12,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
                     )
@@ -3583,52 +3444,30 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
                       Text(
                         '@${post.author}',
                         style: TextStyle(
-                          color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                          color: isLight ? Colors.black : Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       if (post.city.isNotEmpty) ...[
+                        const SizedBox(width: 6),
                         Text(
-                          ' · ${post.city}',
-                          style: TextStyle(
-                            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
-                            fontSize: 12,
-                          ),
+                          '· ${post.city}',
+                          style: TextStyle(color: muted, fontSize: 13),
                         ),
                       ],
                     ],
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
-                    snippet,
+                    post.text,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: isLight ? Colors.black : Colors.white,
+                      color: isLight ? const Color(0xff1c1c1e) : const Color(0xffe5e5ea),
                       fontSize: 14,
-                      height: 1.35,
+                      height: 1.4,
                     ),
-                  ),
-                  const SizedBox(height: 5),
-                  Row(
-                    children: [
-                      Icon(Icons.favorite_border_rounded, size: 13,
-                          color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
-                      const SizedBox(width: 3),
-                      Text('${post.likes}',
-                          style: TextStyle(
-                            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
-                            fontSize: 12,
-                          )),
-                      const SizedBox(width: 12),
-                      Icon(Icons.mode_comment_outlined, size: 13,
-                          color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280)),
-                      const SizedBox(width: 3),
-                      Text('${post.comments.length}',
-                          style: TextStyle(
-                            color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280),
-                            fontSize: 12,
-                          )),
-                    ],
                   ),
                 ],
               ),
@@ -3808,12 +3647,12 @@ class _ViralSearchPageState extends State<_ViralSearchPage> {
   }
 }
 
-
 class _ComposeAction extends StatelessWidget {
-  const _ComposeAction({required this.icon, required this.onTap, this.iconSize = 19});
+  const _ComposeAction({required this.icon, required this.onTap, this.iconSize = 19, this.active = false});
   final IconData icon;
   final VoidCallback onTap;
   final double iconSize;
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
@@ -3828,10 +3667,91 @@ class _ComposeAction extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           child: Padding(
             padding: EdgeInsets.all((41.0 - iconSize) / 2),
-            child: Icon(icon, color: isLight ? Colors.black : Colors.white, size: iconSize),
+            child: Icon(
+              icon,
+              color: active ? const Color(0xff3897f0) : (isLight ? Colors.black : Colors.white),
+              size: iconSize,
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Compose poll editor ──────────────────────────────────────────────────────
+
+class _ComposePollEditor extends StatelessWidget {
+  const _ComposePollEditor({
+    required this.controllers,
+    required this.isLight,
+    required this.onAddOption,
+    required this.onRemoveOption,
+  });
+  final List<TextEditingController> controllers;
+  final bool isLight;
+  final VoidCallback onAddOption;
+  final void Function(int) onRemoveOption;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = isLight ? const Color(0xffd9dee6) : const Color(0xff2c2c2c);
+    final hint = isLight ? const Color(0xff616161) : const Color(0xff8f8f8f);
+    final fg = isLight ? Colors.black : Colors.white;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        for (int i = 0; i < controllers.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: border),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: TextField(
+                      controller: controllers[i],
+                      style: TextStyle(color: fg, fontSize: 15),
+                      decoration: InputDecoration(
+                        hintText: 'Option ${i + 1}',
+                        hintStyle: TextStyle(color: hint),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                  ),
+                ),
+                if (controllers.length > 2)
+                  GestureDetector(
+                    onTap: () => onRemoveOption(i),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: Icon(Icons.close_rounded, size: 18, color: hint),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        if (controllers.length < 4)
+          GestureDetector(
+            onTap: onAddOption,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 4),
+              child: Text(
+                '+ Add option',
+                style: TextStyle(
+                  color: const Color(0xff3897f0),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -4527,6 +4447,7 @@ class _CommentSheetState extends State<_CommentSheet> {
     final isPostOwner = widget.post.author == currentUsername;
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       showDragHandle: true,
       backgroundColor: isLight ? Colors.white : const Color(0xff141414),
       builder: (sheetCtx) => SafeArea(
@@ -5086,12 +5007,19 @@ class _CommentSheetState extends State<_CommentSheet> {
                                                 strokeWidth: 2),
                                           ),
                                         )
-                                      : IconButton(
-                                          onPressed: _send,
-                                          icon: const Icon(
-                                            Icons.send_rounded,
-                                            color: Color(0xff4f8cff),
-                                            size: 20,
+                                      : GestureDetector(
+                                          onTap: _send,
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(8),
+                                            child: Container(
+                                              width: 34,
+                                              height: 34,
+                                              decoration: const BoxDecoration(
+                                                color: Color(0xff3897f0),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
+                                            ),
                                           ),
                                         )
                                   : null,

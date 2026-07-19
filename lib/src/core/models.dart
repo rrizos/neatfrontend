@@ -180,6 +180,43 @@ class UserProfile {
   };
 }
 
+class PollOption {
+  PollOption({required this.id, required this.text, this.votes = 0});
+  final int id;
+  final String text;
+  int votes;
+
+  factory PollOption.fromJson(Map<String, dynamic> json) {
+    int p(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
+    return PollOption(
+      id: p(json['id']),
+      text: json['text']?.toString() ?? '',
+      votes: p(json['votes']),
+    );
+  }
+}
+
+class Poll {
+  Poll({required this.id, required this.options, this.votedOptionId});
+  final int id;
+  final List<PollOption> options;
+  int? votedOptionId;
+
+  int get totalVotes => options.fold(0, (s, o) => s + o.votes);
+
+  factory Poll.fromJson(Map<String, dynamic> json) {
+    int p(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
+    return Poll(
+      id: p(json['id']),
+      options: (json['options'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(PollOption.fromJson)
+          .toList(),
+      votedOptionId: json['voted_option_id'] != null ? p(json['voted_option_id']) : null,
+    );
+  }
+}
+
 class FeedPost {
   FeedPost({
     required this.id,
@@ -214,6 +251,7 @@ class FeedPost {
   int shares;
   bool liked = false;
   bool saved = false;
+  Poll? poll;
 
   factory FeedPost.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -263,6 +301,7 @@ class FeedPost {
     );
     post.liked = json['liked'] == true;
     post.saved = json['saved'] == true;
+    if (json['poll'] != null) post.poll = Poll.fromJson(json['poll'] as Map<String, dynamic>);
     return post;
   }
 }
@@ -424,6 +463,7 @@ class MessageItem {
     required this.text,
     required this.created,
     this.reactions = const {},
+    this.edited = false,
   });
 
   final int id;
@@ -431,6 +471,7 @@ class MessageItem {
   final String text;
   final DateTime created;
   final Map<String, List<String>> reactions;
+  final bool edited;
 
   String? reactionFor(String username) {
     for (final entry in reactions.entries) {
@@ -457,6 +498,7 @@ class MessageItem {
           DateTime.tryParse(json['created']?.toString() ?? '') ??
           DateTime.now(),
       reactions: reactions,
+      edited: json['edited'] == true,
     );
   }
 }

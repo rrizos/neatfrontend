@@ -39,6 +39,7 @@ Uri postCommentsEndpoint(int id) =>
     Uri.parse('$apiBaseUrl/api/posts/$id/comments/');
 Uri postDeleteEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/delete/');
 Uri postReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/report/');
+Uri postPollVoteEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/poll/vote/');
 
 // Admin endpoints
 Uri get adminReportsEndpoint => Uri.parse('$apiBaseUrl/api/auth/admin/reports/');
@@ -136,6 +137,8 @@ Uri messageReactEndpoint(int conversationId, int messageId) =>
     Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/react/');
 Uri messageDeleteEndpoint(int conversationId, int messageId) =>
     Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/delete/');
+Uri messageEditEndpoint(int conversationId, int messageId) =>
+    Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/edit/');
 Uri messageReportEndpoint(int conversationId, int messageId) =>
     Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/report/');
 
