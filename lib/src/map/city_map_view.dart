@@ -22,81 +22,126 @@ const _kMapKitToken =
 const _kMapKitCdnUrl = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Android: prewarm the map WebView ahead of time
+// Android: Apple Maps via MapKit JS
 //
-// The ~807 KB mapkit.js inline parse is a real, visible stall the first time
-// a WebViewController evaluates it. The home map tab is already kept alive
-// once visited (IndexedStack), so that stall only happens once — but it used
-// to happen exactly when the user tapped the Map tab. The signup city-picker
-// is a brand-new screen/route every time, so it always pays the cost fresh.
-// `prewarmCityMap` lets callers (home_page.dart, auth_screen.dart) kick off
-// the WebView creation + JS parse in the background, before the map is
-// actually shown, so the cost lands on idle time instead of a tap or a
-// network round-trip that's already in flight.
-String? _cachedMapkitJs;
-WebViewController? _prewarmedCityMapCtrl;
-String? _prewarmedCityMapKey;
-Future<void>? _prewarmingCityMap;
-String? _prewarmingCityMapKey;
-ValueChanged<String>? _cityMapPinHandler;
+// Apple doesn't ship native MapKit for Android, so the map is MapKit JS in a
+// WebView. The design keeps every stateful decision in exactly one place:
+//
+//  * Input — while the Flutter city card is open, the card's opaque barrier
+//    swallows all touches before they can reach the WebView, so the page
+//    holds no lock/unlock state of its own and nothing can ever be left
+//    "stuck". A tapped pin is deselected right away; selection is a tap
+//    signal, not state.
+//  * Bounds — panning and zoom are fenced by the camera itself
+//    (cameraBoundary + cameraZoomRange), so gestures stop at a smooth wall
+//    instead of triggering corrective snap-back animations.
+//  * Bridge — one JSON channel out (ready / pin / error) and one call in
+//    (NeatMap.reset()). The widget only attaches the WebView after 'ready',
+//    so a half-initialized page is never on screen.
+//
+// mapkit.js is inlined from the asset bundle so first paint never waits on a
+// CDN, and prewarm() builds the whole page off-screen (the native WebView
+// exists and runs JS before it is ever attached to the widget tree), so
+// opening the map tab shows an already-rendered map.
+class _AndroidMap {
+  _AndroidMap._();
 
-String _cityMapCacheKey(String homeCity, bool isDark) => '${homeCity.trim().toLowerCase()}|$isDark';
+  final ValueNotifier<bool> ready = ValueNotifier(false);
+  late final WebViewController controller;
+  void Function(String city)? onPinTap;
+
+  void reset() {
+    controller.runJavaScript('NeatMap.reset()').catchError((Object e) {
+      debugPrint('[map] reset: $e');
+    });
+  }
+
+  static String? _mapkitJs;
+  static Future<_AndroidMap>? _warmed;
+  static String? _warmedKey;
+
+  static String _cacheKey(String homeCity, bool isDark) =>
+      '${homeCity.trim().toLowerCase()}|$isDark';
+
+  static Future<void> prewarm({required String homeCity, required bool isDark}) {
+    final key = _cacheKey(homeCity, isDark);
+    if (_warmed == null || _warmedKey != key) {
+      _warmedKey = key;
+      _warmed = _build(homeCity: homeCity, isDark: isDark);
+    }
+    return _warmed!.then((_) {});
+  }
+
+  /// Claims the prewarmed instance when it matches, else builds fresh. The
+  /// cache slot is cleared either way — a non-matching leftover would just
+  /// hold a dead WebView in memory.
+  static Future<_AndroidMap> obtain({required String homeCity, required bool isDark}) {
+    final warmed = _warmed;
+    final matches = warmed != null && _warmedKey == _cacheKey(homeCity, isDark);
+    _warmed = null;
+    _warmedKey = null;
+    if (matches) return warmed;
+    return _build(homeCity: homeCity, isDark: isDark);
+  }
+
+  static Future<_AndroidMap> _build({required String homeCity, required bool isDark}) async {
+    if (_mapkitJs == null) {
+      try {
+        _mapkitJs = await rootBundle.loadString('assets/mapkit.js');
+      } catch (e) {
+        debugPrint('[map] mapkit.js asset unavailable, falling back to CDN: $e');
+      }
+    }
+    final map = _AndroidMap._();
+    final controller = WebViewController();
+    map.controller = controller;
+    controller
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7))
+      ..setNavigationDelegate(NavigationDelegate(
+        onWebResourceError: (e) => debugPrint('[map] resource: ${e.description}'),
+      ))
+      ..addJavaScriptChannel('NeatBridge', onMessageReceived: map._onBridgeMessage);
+    if (kDebugMode) {
+      unawaited(controller.setOnConsoleMessage((m) => debugPrint('[map js] ${m.message}')));
+    }
+    final platform = controller.platform;
+    if (platform is AndroidWebViewController) {
+      // The page never scrolls (fixed, overflow:hidden canvas) — the native
+      // edge-glow would only ever appear by mistake during a fast drag.
+      unawaited(platform.setOverScrollMode(WebViewOverScrollMode.never));
+    }
+    unawaited(controller.loadHtmlString(
+      _androidMapPage(homeCity: homeCity, isDark: isDark, inlineMapkitJs: _mapkitJs),
+      // Must match the origin the MapKit JWT was issued for.
+      baseUrl: 'https://netnest.net',
+    ));
+    return map;
+  }
+
+  void _onBridgeMessage(JavaScriptMessage message) {
+    Object? decoded;
+    try {
+      decoded = jsonDecode(message.message);
+    } catch (_) {
+      return;
+    }
+    if (decoded is! Map<String, dynamic>) return;
+    switch (decoded['event']) {
+      case 'ready':
+        ready.value = true;
+      case 'pin':
+        final city = decoded['city'];
+        if (city is String && city.isNotEmpty) onPinTap?.call(city);
+      case 'error':
+        debugPrint('[map] js: ${decoded['message']}');
+    }
+  }
+}
 
 Future<void> prewarmCityMap({required String homeCity, required bool isDark}) {
   if (kIsWeb || !Platform.isAndroid) return Future.value();
-  final key = _cityMapCacheKey(homeCity, isDark);
-  if (_prewarmedCityMapKey == key && _prewarmedCityMapCtrl != null) return Future.value();
-  if (_prewarmingCityMap != null && _prewarmingCityMapKey == key) return _prewarmingCityMap!;
-  final done = Completer<void>();
-  _prewarmingCityMap = done.future;
-  _prewarmingCityMapKey = key;
-  () async {
-    if (_cachedMapkitJs == null) {
-      try {
-        _cachedMapkitJs = await rootBundle.loadString('assets/mapkit.js');
-      } catch (e) {
-        debugPrint('[map] MapKit JS asset load: $e');
-      }
-    }
-    _prewarmedCityMapCtrl = _buildCityMapController(homeCity: homeCity, isDark: isDark);
-    _prewarmedCityMapKey = key;
-    _prewarmingCityMap = null;
-    _prewarmingCityMapKey = null;
-    done.complete();
-  }();
-  return done.future;
-}
-
-WebViewController _buildCityMapController({required String homeCity, required bool isDark}) {
-  final home = homeCity.trim().toLowerCase();
-  final citiesJson = jsonEncode(
-    greeceCities
-        .where((c) => c.name.trim().toLowerCase() != home)
-        .map((c) => {'name': c.name, 'lat': c.latitude, 'lng': c.longitude})
-        .toList(),
-  );
-  final controller = WebViewController()
-    ..setJavaScriptMode(JavaScriptMode.unrestricted)
-    ..setBackgroundColor(isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7))
-    ..setNavigationDelegate(NavigationDelegate(
-      onWebResourceError: (e) => debugPrint('[map] ${e.description}'),
-    ))
-    ..addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
-      _cityMapPinHandler?.call(msg.message);
-    });
-  // The map never actually scrolls the WebView's own page (it's a fixed,
-  // overflow:hidden canvas fully driven by MapKit JS's own pan handling) —
-  // disabling the glow removes a stray Android-native scroll-edge effect
-  // that has no purpose here and can visually clash with a fast drag.
-  final androidController = controller.platform;
-  if (androidController is AndroidWebViewController) {
-    unawaited(androidController.setOverScrollMode(WebViewOverScrollMode.never));
-  }
-  controller.loadHtmlString(
-    _mapHtml(citiesJson, inlineJs: _cachedMapkitJs, isDark: isDark),
-    baseUrl: 'https://netnest.net',
-  );
-  return controller;
+  return _AndroidMap.prewarm(homeCity: homeCity, isDark: isDark);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -127,7 +172,10 @@ class _CityMapViewState extends State<CityMapView> {
   // ── iOS channel ──────────────────────────────────────────────────────────
   static const _iosChannel = MethodChannel('neat/native_city_map_channel');
 
-  WebViewController? _webCtrl;
+  _AndroidMap? _androidMap;
+  // Guards against an in-flight obtain() from a superseded theme/config
+  // finishing late and overwriting the newer map.
+  int _mapEpoch = 0;
 
   // ── UI state ──────────────────────────────────────────────────────────────
   GreeceCity? _activeCity;
@@ -152,12 +200,11 @@ class _CityMapViewState extends State<CityMapView> {
     _brightness = newBrightness;
     if (kIsWeb) return;
     if (Platform.isAndroid) {
-      if (!_androidInitDone) {
+      // First build, or the theme flipped — either way the page must be
+      // (re)built for the right color scheme.
+      if (!_androidInitDone || changed) {
         _androidInitDone = true;
         _initAndroid();
-      } else if (changed && _webCtrl != null) {
-        _buildWebView();
-        setState(() {});
       }
     } else if (Platform.isIOS && changed) {
       _iosChannel.invokeMethod('updateColorScheme', _brightness == Brightness.dark);
@@ -167,7 +214,7 @@ class _CityMapViewState extends State<CityMapView> {
   @override
   void dispose() {
     _iosChannel.setMethodCallHandler(null);
-    if (identical(_cityMapPinHandler, _onCityPinTapped)) _cityMapPinHandler = null;
+    _androidMap?.onPinTap = null;
     super.dispose();
   }
 
@@ -187,51 +234,23 @@ class _CityMapViewState extends State<CityMapView> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _initAndroid() async {
-    final isDark = _brightness == Brightness.dark;
-    final key = _cityMapCacheKey(widget.homeCity, isDark);
-    // A matching prewarm may still be running (e.g. kicked off alongside the
-    // signup network call) — wait for it rather than starting a redundant
-    // second WebView build.
-    if (_prewarmingCityMapKey == key && _prewarmingCityMap != null) {
-      await _prewarmingCityMap;
-      if (!mounted) return;
-    }
-    // Reuse a controller warmed ahead of time (see prewarmCityMap) instead of
-    // paying the mapkit.js parse cost right when the map becomes visible.
-    if (_prewarmedCityMapKey == key && _prewarmedCityMapCtrl != null) {
-      _webCtrl = _prewarmedCityMapCtrl;
-      _prewarmedCityMapCtrl = null;
-      _prewarmedCityMapKey = null;
-    } else {
-      if (_cachedMapkitJs == null) {
-        try {
-          _cachedMapkitJs = await rootBundle.loadString('assets/mapkit.js');
-        } catch (e) {
-          debugPrint('[map] MapKit JS asset load: $e');
-        }
-      }
-      if (!mounted) return;
-      _buildWebView();
-    }
-    _cityMapPinHandler = _onCityPinTapped;
-    if (mounted) setState(() {});
-  }
-
-  void _buildWebView() {
-    _webCtrl = _buildCityMapController(homeCity: widget.homeCity, isDark: _brightness == Brightness.dark);
+    final epoch = ++_mapEpoch;
+    final map = await _AndroidMap.obtain(
+      homeCity: widget.homeCity,
+      isDark: _brightness == Brightness.dark,
+    );
+    if (!mounted || epoch != _mapEpoch) return;
+    map.onPinTap = _onCityPinTapped;
+    setState(() => _androidMap = map);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Shared event handlers
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Must show the card IMMEDIATELY: from the moment a pin is tapped the map
-  // has pointer events disabled (so stray drags can't fight the zoom-in),
-  // and the card's X is the only way to unlock it. Waiting on a network
-  // image here (as this used to) left the map frozen with no card — the
-  // "pin resists and stays stuck" bug — whenever the city image was slow to
-  // download. The card's CachedNetworkImage shows a placeholder and loads
-  // the real image on its own.
+  // Shows the card immediately — no awaits on the way. The card's
+  // CachedNetworkImage paints a placeholder and loads the real image on its
+  // own; while the card is up, its opaque barrier is what blocks map input.
   void _onCityPinTapped(String name) {
     final city = greeceCities.firstWhere(
       (c) => c.name == name,
@@ -255,14 +274,12 @@ class _CityMapViewState extends State<CityMapView> {
     widget.onCitySelected(city.name);
   }
 
-  // Must be called on every card-close path — dismiss AND join — so native
-  // map interaction is never permanently locked.
+  // Called on every card-close path — dismiss AND join — to zoom the map
+  // back out to the overview.
   void _resetNativeMap() {
     if (kIsWeb) return;
     if (Platform.isAndroid) {
-      _webCtrl?.runJavaScript('resetMap()').catchError(
-        (e) => debugPrint('[map] resetMap: $e'),
-      );
+      _androidMap?.reset();
     } else if (Platform.isIOS) {
       _iosChannel.invokeMethod('zoomOut');
     }
@@ -277,7 +294,7 @@ class _CityMapViewState extends State<CityMapView> {
     final city = _activeCity;
     return Stack(
       children: [
-        Positioned.fill(child: _MapLayer(webCtrl: _webCtrl, homeCity: widget.homeCity, isDark: _brightness == Brightness.dark)),
+        Positioned.fill(child: _MapLayer(androidMap: _androidMap, homeCity: widget.homeCity, isDark: _brightness == Brightness.dark)),
 
         if (city != null)
           Positioned.fill(
@@ -307,178 +324,199 @@ class _CityMapViewState extends State<CityMapView> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Android: Apple MapKit JS
+// Android map page
 //
-// mapkit.js is loaded from the Flutter asset bundle (assets/mapkit.js) and
-// injected inline so the WebView never makes a network request for the library.
-// This works on all devices including emulators where DNS may be unreliable.
-// The CDN URL (cdn.apple-mapkit.com) is only hit if the asset load fails.
+// A self-contained HTML document. The page exposes exactly one JS object
+// (NeatMap) and talks back over exactly one channel (NeatBridge, JSON).
+// mapkit.js is inlined from the asset bundle when available so the page
+// boots without any network; the CDN is only a fallback.
 // ─────────────────────────────────────────────────────────────────────────────
 
-String _mapHtml(String citiesJson, {String? inlineJs, required bool isDark}) {
-  // Use StringBuffer so the (potentially large) mapkit.js content is appended
-  // without being inside a Dart string literal — avoids any ''' termination
-  // risk in minified JS and keeps the Dart source clean.
-  final buf = StringBuffer();
+String _androidMapPage({required String homeCity, required bool isDark, String? inlineMapkitJs}) {
+  final home = homeCity.trim().toLowerCase();
+  final config = jsonEncode({
+    'token': _kMapKitToken,
+    'dark': isDark,
+    'cities': [
+      for (final c in greeceCities)
+        if (c.name.trim().toLowerCase() != home)
+          {'name': c.name, 'lat': c.latitude, 'lng': c.longitude},
+    ],
+  });
+  final bg = isDark ? '#0a0a0a' : '#f2f2f7';
 
-  buf.write('''<!DOCTYPE html>
+  // StringBuffer so the ~800 KB of minified mapkit.js is appended verbatim,
+  // never embedded inside a Dart string literal.
+  final page = StringBuffer();
+
+  page.write('''<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="initial-scale=1.0,maximum-scale=1.0,minimum-scale=1.0,width=device-width,user-scalable=no">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
   <style>
-    html, body, #map { margin:0; padding:0; width:100%; height:100%; background:${isDark ? '#0a0a0a' : '#f2f2f7'}; overflow:hidden; }
-    /* Without this, Android's WebView spends the first ~100-300ms of every
-       drag deciding whether the gesture is a native pinch-zoom/page-scroll
-       before handing it to MapKit JS's own pan handler — that's what made
-       panning feel laggy. touch-action:none skips that arbitration entirely
-       and gives MapKit JS raw pointer events immediately. */
-    html, body, #map { touch-action: none; }
-    /* Android's WebView shows a default tap-highlight overlay on touched
-       elements with no equivalent on native iOS MapKit — without this, a
-       tapped pin can visually look "stuck pressed" after the card closes,
-       since deselectAnnotation() only resets MapKit's own selection state,
-       not the WebView's tap-highlight rendering. */
-    * { -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:$bg; }
+    /* touch-action:none hands every pointer straight to MapKit. Without it
+       the WebView first arbitrates each drag as a possible page scroll or
+       pinch-zoom, and the map only hears about the gesture ~100-300ms in. */
+    #map { position:fixed; inset:0; background:$bg; touch-action:none; }
+    /* No tap-highlight flashes on pin taps — this page is a map, not a
+       document. */
+    * { -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <script>
-    // NOT a WebGL kill-switch (a previous attempt disabled WebGL entirely,
-    // which dropped MapKit into its sluggish image-tile mode — never again).
-    // WebGL stays fully on; this only adjusts how its context is created:
-    //  * preserveDrawingBuffer:true — the canvas keeps the last rendered
-    //    frame after compositing. Flutter's texture-layer embedding samples
-    //    the canvas on its own schedule, and without this it can catch the
-    //    buffer in its post-swap empty state — those were the black flashes
-    //    during fast pan/zoom.
-    //  * alpha:false — an opaque backbuffer, so nothing composites as
-    //    black through transparency, and the compositor skips blending.
-    (function() {
-      var orig = HTMLCanvasElement.prototype.getContext;
-      HTMLCanvasElement.prototype.getContext = function(type, attrs) {
-        if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
-          attrs = attrs || {};
-          attrs.preserveDrawingBuffer = true;
-          attrs.alpha = false;
-          return orig.call(this, type, attrs);
+    'use strict';
+    var NeatMap = (function () {
+      var map = null;
+      var userTouched = false;
+      var settleTimer = null;
+
+      function post(payload) {
+        try { NeatBridge.postMessage(JSON.stringify(payload)); } catch (e) {}
+      }
+
+      function overview() {
+        return new mapkit.CoordinateRegion(
+          new mapkit.Coordinate(39.0, 22.9),
+          new mapkit.CoordinateSpan(7.5, 7.5)
+        );
+      }
+
+      // Same fence as the native iOS map: the camera center may not leave a
+      // padded Greece box (center 38,24, span 12x16) and zoom-out is capped
+      // at 2,500,000 m. NOTE: in MapKit JS cameraBoundary takes a
+      // CoordinateRegion — assigning a BoundingRegion (the obvious guess,
+      // and what an earlier version did) is silently rejected, which is why
+      // the fence never held.
+      function applyHome() {
+        try {
+          map.cameraBoundary = new mapkit.CoordinateRegion(
+            new mapkit.Coordinate(38.0, 24.0),
+            new mapkit.CoordinateSpan(12.0, 16.0)
+          );
+        } catch (e) {}
+        try { map.cameraZoomRange = new mapkit.CameraZoomRange(1000, 2500000); } catch (e) {}
+        map.region = overview();
+      }
+
+      // The page usually boots PREWARMED, in a WebView not yet attached to
+      // the widget tree — the viewport is 0x0 or a placeholder size, and it
+      // grows to the real screen size in steps. Anything MapKit is told at a
+      // wrong size produces a wrong result once the final size arrives (US
+      // default view, or Greece framed absurdly far out for a tiny
+      // viewport). There is no single reliable "final size is in" moment,
+      // so: every resize re-applies the home framing, debounced so only the
+      // last size of a layout burst wins — and all of it stops permanently
+      // the first time the user actually touches the map, so a late settle
+      // can never yank the view away from them.
+      function scheduleHome() {
+        if (userTouched || !map) return;
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = setTimeout(function () {
+          settleTimer = null;
+          if (!userTouched && map) applyHome();
+        }, 120);
+      }
+
+      document.addEventListener('touchstart', function () {
+        userTouched = true;
+        if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      }, { capture: true, passive: true, once: true });
+      window.addEventListener('resize', scheduleHome);
+
+      function start(config) {
+        try {
+          mapkit.init({
+            authorizationCallback: function (done) { done(config.token); }
+          });
+
+          map = new mapkit.Map('map', {
+            colorScheme: config.dark ? mapkit.Map.ColorSchemes.Dark
+                                     : mapkit.Map.ColorSchemes.Light,
+            isRotationEnabled: false,
+            showsCompass: mapkit.FeatureVisibility.Hidden,
+            showsScale: mapkit.FeatureVisibility.Hidden,
+            showsMapTypeControl: false,
+            showsZoomControl: false,
+            showsUserLocationControl: false
+          });
+          try { map.isPitchEnabled = false; } catch (e) {}
+          try { map.pointOfInterestFilter = mapkit.PointOfInterestFilter.excludingAllCategories; } catch (e) {}
+
+          applyHome();
+          // Capped retries cover the cases where attach never changes the
+          // viewport size (so no resize fires) or an event is missed; each
+          // one is a no-op after the user's first touch.
+          [250, 750, 1500, 3000].forEach(function (ms) {
+            setTimeout(scheduleHome, ms);
+          });
+
+          config.cities.forEach(function (c) {
+            var pin = new mapkit.MarkerAnnotation(
+              new mapkit.Coordinate(c.lat, c.lng),
+              { title: c.name, color: '#34C759', calloutEnabled: false }
+            );
+            pin.addEventListener('select', function () {
+              // Mirror iOS: the pin stays selected (raised) while its card is
+              // open; reset() deselects it when the card closes. While the
+              // card is up the Flutter overlay swallows all map input, so no
+              // lock is needed here.
+              map.setRegionAnimated(new mapkit.CoordinateRegion(
+                new mapkit.Coordinate(c.lat, c.lng),
+                new mapkit.CoordinateSpan(0.63, 0.81)
+              ));
+              post({ event: 'pin', city: c.name });
+            });
+            map.addAnnotation(pin);
+          });
+
+          post({ event: 'ready' });
+        } catch (e) {
+          post({ event: 'error', message: String(e) });
         }
-        return orig.call(this, type, attrs);
-      };
+      }
+
+      function reset() {
+        if (!map) return;
+        // Deselect FIRST — this is what visually lowers the pin the moment
+        // the card closes (same order as iOS zoomOut()). In MapKit JS the
+        // documented way is assigning null to the selectedAnnotation
+        // property (deselectAnnotation/selectedAnnotations are iOS-only).
+        try { map.selectedAnnotation = null; } catch (e) {}
+        try { map.setRegionAnimated(overview()); }
+        catch (e) { try { map.region = overview(); } catch (e2) {} }
+      }
+
+      return { start: start, reset: reset };
     })();
-
-    var busy = false;
-    var map, home, homeSpan, activePin = null;
-
-    function initMap() {
-      mapkit.init({
-        authorizationCallback: function(done) { done('$_kMapKitToken'); }
-      });
-
-      home     = new mapkit.Coordinate(39.0, 22.9);
-      homeSpan = new mapkit.CoordinateSpan(7.5, 7.5);
-
-      map = new mapkit.Map('map', {
-        colorScheme:              mapkit.Map.ColorSchemes.${isDark ? 'Dark' : 'Light'},
-        showsCompass:             mapkit.FeatureVisibility.Hidden,
-        showsScale:               mapkit.FeatureVisibility.Hidden,
-        showsMapTypeControl:      false,
-        showsZoomControl:         false,
-        showsUserLocationControl: false,
-      });
-
-      map.isRotationEnabled = false;
-      map.isPitchEnabled    = false;
-
-      // Mirror iOS: map.pointOfInterestFilter = .excludingAll
-      try { map.pointOfInterestFilter = mapkit.PointOfInterestFilter.excludingAllCategories; } catch(_) {}
-
-      map.region = new mapkit.CoordinateRegion(home, homeSpan);
-
-      // Constrain centre to a padded Greece bounding box (N, E, S, W).
-      try { map.cameraBoundary = new mapkit.BoundingRegion(44, 32, 32, 16); } catch(_) {}
-
-      // Cap zoom-out: refuse spans wider than ~12° lat (≈ 2× Greece height).
-      map.addEventListener('region-change-end', function() {
-        if (busy) return;
-        var r = map.region;
-        if (r.span.latitudeDelta > 13) {
-          map.region = new mapkit.CoordinateRegion(
-            r.center, new mapkit.CoordinateSpan(13, 13)
-          );
-        }
-      });
-
-      var cities = $citiesJson;
-      cities.forEach(function(c) {
-        var coord = new mapkit.Coordinate(c.lat, c.lng);
-        var pin   = new mapkit.MarkerAnnotation(coord, {
-          title:          c.name,
-          color:          '#34C759',   // iOS systemGreen exact hex
-          calloutEnabled: false,
-        });
-        pin.addEventListener('select', function() {
-          // Mirror iOS didSelect: lock immediately, zoom in, notify Flutter
-          if (busy) { map.deselectAnnotation(pin); return; }
-          busy      = true;
-          activePin = pin;
-          document.getElementById('map').style.pointerEvents = 'none';
-          // 70 000 m radius ≈ 0.63° lat × 0.81° lng at 39°N — matches iOS
-          map.setRegionAnimated(
-            new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.63, 0.81))
-          );
-          FlutterBridge.postMessage(c.name);
-        });
-        map.addAnnotation(pin);
-      });
-    }
-
-    // Mirror iOS zoomOut(): unlock FIRST (unconditional), deselect, then zoom out.
-    function resetMap() {
-      busy = false;
-      document.getElementById('map').style.pointerEvents = '';
-      if (!map) return;
-      if (activePin) {
-        try { map.deselectAnnotation(activePin); } catch(_) {}
-        activePin = null;
-      }
-      var overview = new mapkit.CoordinateRegion(
-        new mapkit.Coordinate(39.0, 22.9),
-        new mapkit.CoordinateSpan(7.5, 7.5)
-      );
-      try {
-        map.setRegionAnimated(overview);
-      } catch(e) {
-        console.error('[map] setRegionAnimated: ' + e);
-        try { map.region = overview; } catch(_) {}
-      }
-    }
   </script>
 ''');
 
-  if (inlineJs != null) {
-    // Injected inline — no CDN request needed inside the WebView.
-    buf.write('<script>');
-    buf.write(inlineJs);
-    buf.write('</script>\n<script>initMap();</script>\n');
+  if (inlineMapkitJs != null) {
+    page
+      ..write('<script>')
+      ..write(inlineMapkitJs)
+      ..write('</script>\n<script>NeatMap.start($config);</script>\n');
   } else {
-    // Dart pre-fetch failed; let the WebView try the CDN directly.
-    // Works on real devices; may fail on emulators with broken DNS.
-    buf.write('''  <script>
-(function() {
-  var s    = document.createElement('script');
-  s.src    = '$_kMapKitCdnUrl';
-  s.onload = initMap;
-  s.onerror = function() { console.error('[map] MapKit JS CDN unavailable'); };
+    page.write('''<script>
+(function () {
+  var s = document.createElement('script');
+  s.src = '$_kMapKitCdnUrl';
+  s.onload = function () { NeatMap.start($config); };
+  s.onerror = function () {
+    try { NeatBridge.postMessage(JSON.stringify({ event: 'error', message: 'mapkit cdn unreachable' })); } catch (e) {}
+  };
   document.head.appendChild(s);
 })();
-  </script>
+</script>
 ''');
   }
 
-  buf.write('</body>\n</html>');
-  return buf.toString();
+  page.write('</body>\n</html>');
+  return page.toString();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -486,8 +524,8 @@ String _mapHtml(String citiesJson, {String? inlineJs, required bool isDark}) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MapLayer extends StatelessWidget {
-  const _MapLayer({this.webCtrl, required this.homeCity, required this.isDark});
-  final WebViewController? webCtrl;
+  const _MapLayer({this.androidMap, required this.homeCity, required this.isDark});
+  final _AndroidMap? androidMap;
   final String homeCity;
   final bool isDark;
 
@@ -524,20 +562,25 @@ class _MapLayer extends StatelessWidget {
       );
     }
 
-    // Android — null while mapkit.js is being pre-fetched.
+    // Android.
     //
-    // Deliberately uses the DEFAULT Texture Layer embedding, not
-    // displayWithHybridComposition: full hybrid composition forces Flutter's
-    // UI and platform threads to merge, which slows the entire app to a
-    // crawl on many devices (flutter#167547) — it made the map feel worse,
-    // not better. The texture path's one real drawback here (occasional
-    // blank frames sampled from the WebGL canvas mid-gesture) is fixed at
-    // the source instead: the WebGL context is created with
-    // preserveDrawingBuffer so there is never an empty buffer to sample —
-    // see the getContext shim in _mapHtml.
-    final ctrl = webCtrl;
-    if (ctrl == null) return ColoredBox(color: isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7));
-    return WebViewWidget(controller: ctrl);
+    // Uses the default Texture Layer embedding on purpose — full hybrid
+    // composition (displayWithHybridComposition) merges Flutter's UI and
+    // platform threads and slows the whole app down (flutter#167547).
+    //
+    // The WebView is only attached once the page reports 'ready', so what
+    // slides in is an already-rendered map — never a white page or a
+    // half-initialized one. Until then (and while a rebuild for a theme
+    // change is in flight) a map-colored surface shows instead.
+    final map = androidMap;
+    final placeholderColor = isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7);
+    if (map == null) return ColoredBox(color: placeholderColor);
+    return ValueListenableBuilder<bool>(
+      valueListenable: map.ready,
+      builder: (context, ready, child) =>
+          ready ? child! : ColoredBox(color: placeholderColor),
+      child: WebViewWidget(controller: map.controller),
+    );
   }
 }
 
@@ -674,33 +717,19 @@ class _CityCard extends StatelessWidget {
   Widget _placeholder() {
     return Container(
       color: const Color(0xff1e1f21),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.add_photo_alternate_outlined,
-              size: 40, color: Colors.white.withValues(alpha: 0.25)),
-          const SizedBox(height: 10),
-          Text(
-            city.name,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.35),
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-            ),
+      child: Center(
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.5,
+            color: Colors.white.withValues(alpha: 0.35),
           ),
-          const SizedBox(height: 4),
-          Text(
-            '// TODO: add imageUrl in greece_cities.dart',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.18),
-              fontSize: 10,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
+
 }
 
 // Keep this top-level so home_page.dart can still call it if needed.
