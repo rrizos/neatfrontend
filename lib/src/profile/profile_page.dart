@@ -498,13 +498,18 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       onUnfollowUser: _unfollowUser,
       onLike: () => _likePost(post),
       onSave: () => _savePost(post),
-      onShare: () => showShareSheet(
-        context: context,
-        post: post,
-        token: widget.token,
-        currentUser: widget.currentUser,
-        onLogout: widget.onLogout,
-      ),
+      onShare: () async {
+        bool shared = false;
+        await showShareSheet(
+          context: context,
+          post: post,
+          token: widget.token,
+          currentUser: widget.currentUser,
+          onLogout: widget.onLogout,
+          onShared: () { shared = true; },
+        );
+        return shared;
+      },
       onMore: () => _openMoreSheet(post),
       onComment: () => widget.onPostTap(post),
       onProfileTap: () => widget.onOpenUserProfile(post.author),

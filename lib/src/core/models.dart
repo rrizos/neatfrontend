@@ -195,6 +195,7 @@ class FeedPost {
     required this.following,
     required this.likedByFollowing,
     this.authorVerified = false,
+    this.shares = 0,
   });
 
   final int id;
@@ -210,6 +211,7 @@ class FeedPost {
   final bool following;
   final List<String> likedByFollowing;
   final bool authorVerified;
+  int shares;
   bool liked = false;
   bool saved = false;
 
@@ -257,6 +259,7 @@ class FeedPost {
       following: json['following'] != false,
       likedByFollowing: likedByFollowing,
       authorVerified: json['authorVerified'] == true,
+      shares: parseInt(json['shares'] ?? json['share_count']),
     );
     post.liked = json['liked'] == true;
     post.saved = json['saved'] == true;

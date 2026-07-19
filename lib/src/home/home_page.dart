@@ -641,6 +641,16 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _recordShare(FeedPost post) async {
+    try {
+      final res = await http.post(
+        postShareEndpoint(post.id),
+        headers: authJsonHeaders(widget.session.token),
+      );
+      if (res.statusCode == 401) await widget.onLogout();
+    } catch (_) {}
+  }
+
   Future<void> _follow(String username) async {
     setState(() => _followingAuthors.add(username));
     final res = await http.post(
@@ -906,6 +916,8 @@ class _HomePageState extends State<HomePage> {
         onRefresh: () {},
         onOpenUserProfile: _pushProfileRoute,
         likingEnabled: _activeCity == null,
+        onHideNavBar: _hideNativeBar,
+        onShowNavBar: _showNativeBar,
       ),
     ).whenComplete(_showNativeBar);
   }
@@ -1518,15 +1530,20 @@ class _HomePageState extends State<HomePage> {
                   likingEnabled: _activeCity == null,
                   onLike: () => _likePost(post),
                   onSave: () => _savePost(post),
-                  onShare: () {
+                  onShare: () async {
+                    bool shared = false;
                     _hideNativeBar();
-                    showShareSheet(
+                    await showShareSheet(
                       context: context,
                       post: post,
                       token: widget.session.token,
                       currentUser: widget.session.user,
                       onLogout: widget.onLogout,
-                    ).whenComplete(_showNativeBar);
+                      onShared: () { shared = true; },
+                    );
+                    _showNativeBar();
+                    if (shared) unawaited(_recordShare(post));
+                    return shared;
                   },
                   onMore: () => _openSheet(
                     title: post.author,
@@ -1551,11 +1568,12 @@ class _HomePageState extends State<HomePage> {
                           title: const Text('Report post'),
                           onTap: () {
                             Navigator.of(context).pop();
+                            _hideNativeBar();
                             showReportPostSheet(
                               context,
                               postId: post.id,
                               token: widget.session.token,
-                            );
+                            ).whenComplete(_showNativeBar);
                           },
                         ),
                       ],
@@ -1593,15 +1611,20 @@ class _HomePageState extends State<HomePage> {
       likingEnabled: interactive,
       onLike: interactive ? () => _likePost(post) : () async => false,
       onSave: interactive ? () => _savePost(post) : () async => false,
-      onShare: () {
+      onShare: () async {
+        bool shared = false;
         _hideNativeBar();
-        showShareSheet(
+        await showShareSheet(
           context: context,
           post: post,
           token: widget.session.token,
           currentUser: widget.session.user,
           onLogout: widget.onLogout,
-        ).whenComplete(_showNativeBar);
+          onShared: () { shared = true; },
+        );
+        _showNativeBar();
+        if (shared) unawaited(_recordShare(post));
+        return shared;
       },
       onMore: () => _openSheet(
         title: post.author,
@@ -1623,7 +1646,9 @@ class _HomePageState extends State<HomePage> {
               title: const Text('Report post'),
               onTap: () {
                 Navigator.of(context).pop();
-                showReportPostSheet(context, postId: post.id, token: widget.session.token);
+                _hideNativeBar();
+                showReportPostSheet(context, postId: post.id, token: widget.session.token)
+                    .whenComplete(_showNativeBar);
               },
             ),
           ],
@@ -1643,6 +1668,8 @@ class _HomePageState extends State<HomePage> {
             onRefresh: () {},
             onOpenUserProfile: _pushProfileRoute,
             likingEnabled: interactive,
+            onHideNavBar: _hideNativeBar,
+            onShowNavBar: _showNativeBar,
           ),
         ).whenComplete(_showNativeBar);
       },
@@ -4315,12 +4342,16 @@ class _CommentSheet extends StatefulWidget {
     required this.onRefresh,
     required this.onOpenUserProfile,
     this.likingEnabled = true,
+    this.onHideNavBar,
+    this.onShowNavBar,
   });
   final FeedPost post;
   final AuthSession session;
   final VoidCallback onRefresh;
   final ValueChanged<String> onOpenUserProfile;
   final bool likingEnabled;
+  final VoidCallback? onHideNavBar;
+  final VoidCallback? onShowNavBar;
 
   @override
   State<_CommentSheet> createState() => _CommentSheetState();
@@ -4526,11 +4557,12 @@ class _CommentSheetState extends State<_CommentSheet> {
                 title: const Text('Report comment'),
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
+                  widget.onHideNavBar?.call();
                   showReportCommentSheet(
                     context,
                     endpoint: commentReportEndpoint(c.id),
                     token: widget.session.token,
-                  );
+                  ).whenComplete(() => widget.onShowNavBar?.call());
                 },
               ),
           ],

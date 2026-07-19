@@ -32,6 +32,7 @@ Uri postsEndpoint({bool fresh = false, String? city}) {
 }
 
 Uri postLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/like/');
+Uri postShareEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/share/');
 Uri postLikersEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/likers/');
 Uri postSaveEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/save/');
 Uri postCommentsEndpoint(int id) =>

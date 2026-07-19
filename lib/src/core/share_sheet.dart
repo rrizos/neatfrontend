@@ -18,6 +18,7 @@ Future<void> showShareSheet({
   required String token,
   required UserProfile currentUser,
   required Future<void> Function() onLogout,
+  VoidCallback? onShared,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -29,6 +30,7 @@ Future<void> showShareSheet({
       token: token,
       currentUser: currentUser,
       onLogout: onLogout,
+      onShared: onShared,
     ),
   );
 }
@@ -56,11 +58,13 @@ class _ShareSheet extends StatefulWidget {
     required this.token,
     required this.currentUser,
     required this.onLogout,
+    this.onShared,
   });
   final FeedPost post;
   final String token;
   final UserProfile currentUser;
   final Future<void> Function() onLogout;
+  final VoidCallback? onShared;
 
   @override
   State<_ShareSheet> createState() => _ShareSheetState();
@@ -76,6 +80,8 @@ class _ShareSheetState extends State<_ShareSheet> {
   final Set<String> _sent = {};
   final Set<String> _sending = {};
   Timer? _debounce;
+  Timer? _linkCopiedTimer;
+  bool _linkCopied = false;
 
   @override
   void initState() {
@@ -87,6 +93,7 @@ class _ShareSheetState extends State<_ShareSheet> {
   void dispose() {
     _search.dispose();
     _debounce?.cancel();
+    _linkCopiedTimer?.cancel();
     super.dispose();
   }
 
@@ -231,10 +238,12 @@ class _ShareSheetState extends State<_ShareSheet> {
       );
       if (!mounted) return;
       if (r.statusCode == 401) { await widget.onLogout(); return; }
+      final success = r.statusCode == 201;
       setState(() {
         _sending.remove(key);
-        if (r.statusCode == 201) _sent.add(key);
+        if (success) _sent.add(key);
       });
+      if (success) widget.onShared?.call();
     } catch (_) {
       if (mounted) setState(() => _sending.remove(key));
     }
@@ -262,17 +271,22 @@ class _ShareSheetState extends State<_ShareSheet> {
     final native = Uri.parse(nativeUrl);
     if (await canLaunchUrl(native)) {
       await launchUrl(native, mode: LaunchMode.externalApplication);
+      widget.onShared?.call();
       return;
     }
     await _launch(fallbackUrl);
+    widget.onShared?.call();
   }
 
   Future<void> _copyLink() async {
     await Clipboard.setData(ClipboardData(text: _shareLink));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Link copied'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
-    );
+    widget.onShared?.call();
+    setState(() => _linkCopied = true);
+    _linkCopiedTimer?.cancel();
+    _linkCopiedTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _linkCopied = false);
+    });
   }
 
   static const _shareChannel = MethodChannel('com.neat/share');
@@ -284,6 +298,7 @@ class _ShareSheetState extends State<_ShareSheet> {
     }
     try {
       await _shareChannel.invokeMethod<void>('share', {'text': _shareLink});
+      widget.onShared?.call();
     } catch (_) {}
   }
 
@@ -318,6 +333,7 @@ class _ShareSheetState extends State<_ShareSheet> {
         'text': _shareLink,
         'imageBytes': ?imageBytes,
       });
+      widget.onShared?.call();
     } catch (_) {
       await _nativeShare();
     }
@@ -477,9 +493,10 @@ class _ShareSheetState extends State<_ShareSheet> {
                     const SizedBox(width: 16),
                     _ExtBtn(
                       label: 'Threads',
-                      onTap: () => _launch(
-                        'https://www.threads.com/intent/post?text=${Uri.encodeComponent(_shareText)}&url=${Uri.encodeComponent(_shareLink)}',
-                      ),
+                      onTap: () async {
+                        await _launch('https://www.threads.com/intent/post?text=${Uri.encodeComponent(_shareText)}&url=${Uri.encodeComponent(_shareLink)}');
+                        widget.onShared?.call();
+                      },
                       child: const _ThreadsIcon(),
                     ),
                     const SizedBox(width: 16),
@@ -492,9 +509,9 @@ class _ShareSheetState extends State<_ShareSheet> {
                       child: const _TelegramIcon(),
                     ),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'Facebook', onTap: () => _launch('https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(_shareLink)}'), child: const _FbIcon()),
+                    _ExtBtn(label: 'Facebook', onTap: () async { await _launch('https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(_shareLink)}'); widget.onShared?.call(); }, child: const _FbIcon()),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'Copy link', onTap: _copyLink, child: _LinkIcon(isLight: isLight)),
+                    _ExtBtn(label: 'Copy link', onTap: _copyLink, child: _linkCopied ? _CheckIcon(isLight: isLight) : _LinkIcon(isLight: isLight)),
                   ],
                 ),
               ),
@@ -725,6 +742,22 @@ class _LinkIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Icon(Icons.link_rounded, color: isLight ? Colors.black : Colors.white, size: 28),
+    );
+  }
+}
+
+class _CheckIcon extends StatelessWidget {
+  const _CheckIcon({required this.isLight});
+  final bool isLight;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 56, height: 56,
+      decoration: BoxDecoration(
+        color: isLight ? const Color(0xffe5e7eb) : const Color(0xff2a2a2a),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Icon(Icons.check_rounded, color: isLight ? Colors.black : Colors.white, size: 28),
     );
   }
 }

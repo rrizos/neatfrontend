@@ -178,10 +178,6 @@ String _buildSharedAndroidMapHtml() {
   return (lat: double.tryParse(coords[0]), lon: double.tryParse(coords[1]));
 }
 
-// Persists attending state for the app session, scoped per username.
-// Survives EventsPage being popped and re-pushed; isolated per account.
-final _kSessionAttending = <String, Map<int, bool>>{};
-
 String _timeAgo(DateTime dt) {
   final d = DateTime.now().difference(dt);
   if (d.inMinutes < 1) return 'just now';
@@ -221,8 +217,6 @@ class _EventsPageState extends State<EventsPage> {
   String _selectedCategory = 'All';
 
   String get _cacheKey => 'neat_events_cache_${widget.city}';
-  Map<int, bool> get _myAttending =>
-      _kSessionAttending.putIfAbsent(widget.currentUser.username, () => {});
 
   @override
   void initState() {
@@ -321,9 +315,6 @@ class _EventsPageState extends State<EventsPage> {
       if (mounted) {
         final isOfficial = (result['eventType'] as String?) == 'official';
         setState(() => _tab = isOfficial ? 0 : 1);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Event published!'), duration: Duration(seconds: 3)),
-        );
       }
     } else if (mounted) {
       final body = res.body.trim();
@@ -337,28 +328,10 @@ class _EventsPageState extends State<EventsPage> {
     }
   }
 
-  // Returns a copy of [e] with the session-attending override applied.
-  // The session map survives EventsPage being popped/re-pushed (like FeedPost.liked).
-  EventItem _effective(EventItem e) {
-    final ia = _myAttending[e.id];
-    if (ia == null) return e;
-    return EventItem(
-      id: e.id, city: e.city, eventType: e.eventType,
-      category: e.category, title: e.title, description: e.description,
-      location: e.location, imageUrl: e.imageUrl, creator: e.creator,
-      organizer: e.organizer, hasTickets: e.hasTickets,
-      ticketsUrl: e.ticketsUrl,
-      attendees: e.attendees,
-      isAttending: ia,
-      date: e.date,
-    );
-  }
-
   Future<void> _attend(EventItem event) async {
-    final cur = _myAttending[event.id] ?? event.isAttending;
+    final cur = event.isAttending;
     final next = !cur;
     setState(() {
-      _myAttending[event.id] = next;
       _events = _events.map((e) {
         if (e.id != event.id) return e;
         return EventItem(
@@ -376,7 +349,6 @@ class _EventsPageState extends State<EventsPage> {
     final res = await http.post(eventAttendEndpoint(event.id), headers: authGetHeaders(widget.token));
     if (res.statusCode < 200 || res.statusCode >= 300) {
       setState(() {
-        _myAttending[event.id] = cur;
         _events = _events.map((e) {
           if (e.id != event.id) return e;
           return EventItem(
@@ -537,7 +509,6 @@ class _EventsPageState extends State<EventsPage> {
             itemCount: events.length,
             itemBuilder: (context, index) {
               final event = events[index];
-              final eff = _effective(event);
               return Padding(
                 padding: const EdgeInsets.only(right: 14),
                 child: SizedBox(
@@ -545,13 +516,13 @@ class _EventsPageState extends State<EventsPage> {
                   child: Align(
                     alignment: Alignment.topCenter,
                     child: _EventCard(
-                      event: eff,
+                      event: event,
                       currentUsername: widget.currentUser.username,
                       onAttend: () => _attend(event),
                       onDelete: () => _deleteEvent(event),
                       onReport: () => _reportEvent(event),
                       onEdit: () => _editEvent(event),
-                      onTap: () => _showEventDetail(eff),
+                      onTap: () => _showEventDetail(event),
                       attendEnabled: widget.attendEnabled,
                       isAdmin: widget.currentUser.isAdmin,
                     ),
@@ -701,11 +672,11 @@ class _EventsPageState extends State<EventsPage> {
                     }).toList();
                     final attended = visible.where((e) {
                       final d = _dateOnly(e);
-                      return d != null && d.isBefore(today) && !d.isBefore(cutoff) && _effective(e).isAttending;
+                      return d != null && d.isBefore(today) && !d.isBefore(cutoff) && e.isAttending;
                     }).toList();
                     final completed = visible.where((e) {
                       final d = _dateOnly(e);
-                      return d != null && d.isBefore(today) && !d.isBefore(cutoff) && !_effective(e).isAttending;
+                      return d != null && d.isBefore(today) && !d.isBefore(cutoff) && !e.isAttending;
                     }).toList();
 
                     if (liveToday.isEmpty && upcoming.isEmpty && other.isEmpty &&
@@ -852,22 +823,30 @@ class EventItem {
 
   factory EventItem.fromJson(Map<String, dynamic> json) {
     int p(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
+    String? s(List<String> keys) {
+      for (final k in keys) {
+        final v = json[k];
+        if (v != null) return v.toString();
+      }
+      return null;
+    }
+    bool b(List<String> keys) => keys.any((k) => json[k] == true);
     return EventItem(
       id: p(json['id']),
       city: json['city']?.toString() ?? '',
-      eventType: json['eventType']?.toString() ?? 'community',
-      category: json['category']?.toString() ?? json['eventCategory']?.toString() ?? json['event_category']?.toString() ?? '',
+      eventType: s(['eventType', 'event_type']) ?? 'community',
+      category: s(['category', 'eventCategory', 'event_category']) ?? '',
       title: json['title']?.toString() ?? '',
       description: json['description']?.toString() ?? '',
       location: json['location']?.toString() ?? '',
-      imageUrl: json['imageUrl']?.toString() ?? '',
+      imageUrl: s(['imageUrl', 'image_url']) ?? '',
       creator: json['creator']?.toString() ?? '',
       organizer: json['organizer']?.toString() ?? '',
-      hasTickets: json['hasTickets'] == true,
-      ticketsUrl: json['ticketsUrl']?.toString() ?? '',
-      attendees: p(json['attendees']),
-      isAttending: json['isAttending'] == true,
-      date: json['date']?.toString() ?? json['eventDate']?.toString() ?? json['event_date']?.toString() ?? json['scheduledAt']?.toString() ?? '',
+      hasTickets: b(['hasTickets', 'has_tickets']),
+      ticketsUrl: s(['ticketsUrl', 'tickets_url']) ?? '',
+      attendees: p(json['attendees'] ?? json['attendee_count']),
+      isAttending: b(['isAttending', 'is_attending']),
+      date: s(['date', 'eventDate', 'event_date', 'scheduledAt', 'scheduled_at']) ?? '',
     );
   }
 }

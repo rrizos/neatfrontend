@@ -1057,7 +1057,7 @@ class FeedPostCard extends StatefulWidget {
   final UserProfile currentUser;
   final Future<bool> Function() onLike;
   final Future<bool> Function() onSave;
-  final VoidCallback onShare;
+  final Future<bool> Function() onShare;
   final VoidCallback onMore;
   final VoidCallback onComment;
   final VoidCallback onProfileTap;
@@ -1093,6 +1093,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
   late bool _liked;
   late bool _saved;
   late int _likes;
+  late int _shares;
 
   late final AnimationController _heartBounceCtrl;
   late final Animation<double> _heartBounceAnim;
@@ -1107,6 +1108,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
     _liked = widget.post.liked;
     _saved = widget.post.saved;
     _likes = widget.post.likes;
+    _shares = widget.post.shares;
 
     _heartBounceCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
     _heartBounceAnim = TweenSequence<double>([
@@ -1135,6 +1137,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
       _liked = widget.post.liked;
       _saved = widget.post.saved;
       _likes = widget.post.likes;
+      _shares = widget.post.shares;
     }
   }
 
@@ -1448,12 +1451,31 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                   // ── Share ─────────────────────────────────────────────
                   const SizedBox(width: 14),
                   GestureDetector(
-                    onTap: widget.onShare,
+                    onTap: () async {
+                      final shared = await widget.onShare();
+                      if (shared && mounted) {
+                        setState(() {
+                          _shares++;
+                          widget.post.shares = _shares;
+                        });
+                      }
+                    },
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: PostShareIcon(color: isLight ? Colors.black : Colors.white, size: 27),
+                      child: PostShareIcon(color: isLight ? Colors.black : Colors.white, size: 26),
                     ),
                   ),
+                  if (_shares > 0) ...[
+                    const SizedBox(width: 5),
+                    Text(
+                      _formatCount(_shares),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: isLight ? Colors.black : Colors.white,
+                      ),
+                    ),
+                  ],
                   const Spacer(),
                   // ── Save ──────────────────────────────────────────────
                   GestureDetector(

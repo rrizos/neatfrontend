@@ -72,6 +72,14 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _restore() async {
     final prefs = await SharedPreferences.getInstance();
+    // iOS Keychain survives app deletion/reinstall; SharedPreferences don't.
+    // On a fresh install, clear any stale Keychain entries so the user sees
+    // the landing page instead of being silently auto-logged in.
+    const installedKey = 'neat_installed';
+    if (prefs.getBool(installedKey) != true) {
+      await _secureStorage.deleteAll();
+      await prefs.setBool(installedKey, true);
+    }
     final token = await _readSecure(prefs, _tokenKey);
     if (token == null || token.isEmpty) {
       if (mounted) setState(() => _loading = false);
