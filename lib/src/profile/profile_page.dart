@@ -597,6 +597,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       onComment: () => widget.onPostTap(post),
       onProfileTap: () => widget.onOpenUserProfile(post.author),
       onOpenUserProfile: widget.onOpenUserProfile,
+      onHideNavBar: widget.onHideNavBar,
+      onShowNavBar: widget.onShowNavBar,
     );
   }
 
@@ -719,34 +721,24 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     widget.onShowNavBar?.call();
   }
 
-  Future<void> _openUserList({
-    required String title,
-    required Uri endpoint,
-    bool markFollowsYou = false,
-  }) async {
-    final res = await http.get(endpoint, headers: authGetHeaders(widget.token));
-    if (res.statusCode != 200) return;
-    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-    final rawUsers = (decoded['users'] as List<dynamic>? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .map(UserProfile.fromJson)
-        .toList();
-    final users = markFollowsYou
-        ? rawUsers.map((u) => u.copyWith(followsYou: true)).toList()
-        : rawUsers;
-    if (!mounted) return;
+  Future<void> _openUserList({int initialTab = 0}) async {
+    final profile = _profile;
+    if (profile == null || !mounted) return;
     widget.onHideNavBar?.call();
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => _UserListPage(
-          title: title,
-          users: users,
+          profileUsername: profile.username,
+          followerCount: profile.followers,
+          followingCount: profile.following,
           currentUser: widget.currentUser,
           token: widget.token,
           themeMode: widget.themeMode,
           onSessionUpdated: widget.onSessionUpdated,
           onProfileRefresh: _load,
           onOpenProfile: widget.onOpenUserProfile,
+          isOwn: profile.username == widget.currentUser.username,
+          initialTab: initialTab,
         ),
       ),
     );
@@ -880,19 +872,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                 _Metric(
                                   label: 'followers',
                                   value: '${profile.followers}',
-                                  onTap: () => _openUserList(
-                                    title: 'Followers',
-                                    endpoint: followersEndpoint(profile.username),
-                                    markFollowsYou: profile.username == widget.currentUser.username,
-                                  ),
+                                  onTap: () => _openUserList(initialTab: 0),
                                 ),
                                 _Metric(
                                   label: 'following',
                                   value: '${profile.following}',
-                                  onTap: () => _openUserList(
-                                    title: 'Following',
-                                    endpoint: followingEndpoint(profile.username),
-                                  ),
+                                  onTap: () => _openUserList(initialTab: 1),
                                 ),
                               ],
                             ),
@@ -1954,261 +1939,481 @@ class _SavedPostsPageState extends State<_SavedPostsPage> {
 
 class _UserListPage extends StatefulWidget {
   const _UserListPage({
-    required this.title,
-    required this.users,
+    required this.profileUsername,
+    required this.followerCount,
+    required this.followingCount,
     required this.currentUser,
     required this.token,
     required this.themeMode,
     required this.onSessionUpdated,
     required this.onProfileRefresh,
     required this.onOpenProfile,
+    required this.isOwn,
+    this.initialTab = 0,
   });
 
-  final String title;
-  final List<UserProfile> users;
+  final String profileUsername;
+  final int followerCount;
+  final int followingCount;
   final UserProfile currentUser;
   final String token;
   final ThemeMode themeMode;
   final ValueChanged<AuthSession> onSessionUpdated;
   final Future<void> Function() onProfileRefresh;
   final ValueChanged<String> onOpenProfile;
+  final bool isOwn;
+  final int initialTab;
 
   @override
   State<_UserListPage> createState() => _UserListPageState();
 }
 
-class _UserListPageState extends State<_UserListPage> {
-  late final List<UserProfile> _users;
-  final _search = TextEditingController();
-  String _query = '';
+enum _SortMode { defaultOrder, newestFirst, oldestFirst }
+
+class _UserListPageState extends State<_UserListPage>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+  final _followersSearch = TextEditingController();
+  final _followingSearch = TextEditingController();
+  String _followersQuery = '';
+  String _followingQuery = '';
+  _SortMode _sortMode = _SortMode.defaultOrder;
+
+  List<UserProfile> _followers = [];
+  List<UserProfile> _following = [];
+  bool _followersLoading = true;
+  bool _followingLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _users = List.of(widget.users);
+    _tabController = TabController(
+        length: 2, vsync: this, initialIndex: widget.initialTab);
+    _loadFollowers();
+    _loadFollowing();
   }
 
   @override
   void dispose() {
-    _search.dispose();
+    _tabController.dispose();
+    _followersSearch.dispose();
+    _followingSearch.dispose();
     super.dispose();
   }
 
-  List<UserProfile> get _filtered {
-    if (_query.isEmpty) return _users;
-    final q = _query.toLowerCase();
-    return _users
-        .where((u) =>
-            u.username.toLowerCase().contains(q) ||
-            u.fullName.toLowerCase().contains(q))
+  Future<void> _loadFollowers() async {
+    final res = await http.get(
+      followersEndpoint(widget.profileUsername),
+      headers: authGetHeaders(widget.token),
+    );
+    if (!mounted || res.statusCode != 200) {
+      if (mounted) setState(() => _followersLoading = false);
+      return;
+    }
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    final users = (decoded['users'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(UserProfile.fromJson)
         .toList();
+    setState(() {
+      _followers = widget.isOwn
+          ? users.map((u) => u.copyWith(followsYou: true)).toList()
+          : users;
+      _followersLoading = false;
+    });
   }
 
-  Future<void> _toggleFollow(int index, UserProfile user) async {
+  Future<void> _loadFollowing() async {
+    final res = await http.get(
+      followingEndpoint(widget.profileUsername),
+      headers: authGetHeaders(widget.token),
+    );
+    if (!mounted || res.statusCode != 200) {
+      if (mounted) setState(() => _followingLoading = false);
+      return;
+    }
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    setState(() {
+      _following = (decoded['users'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(UserProfile.fromJson)
+          .toList();
+      _followingLoading = false;
+    });
+  }
+
+  Future<void> _toggleFollow(UserProfile user) async {
     final res = await http.post(
       followEndpoint(user.username),
       headers: authJsonHeaders(widget.token),
       body: jsonEncode({'follow': !user.isFollowing}),
     );
-    if (res.statusCode != 200) return;
-    if (!mounted) return;
+    if (res.statusCode != 200 || !mounted) return;
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    final updated =
+        UserProfile.fromJson(decoded['user'] as Map<String, dynamic>);
     setState(() {
-      _users[index] = UserProfile.fromJson(
-        decoded['user'] as Map<String, dynamic>,
-      );
+      final fi = _followers.indexWhere((u) => u.username == user.username);
+      if (fi != -1) _followers[fi] = updated;
+      final wi = _following.indexWhere((u) => u.username == user.username);
+      if (wi != -1) _following[wi] = updated;
     });
-    widget.onSessionUpdated(
-      AuthSession(
-        token: widget.token,
-        user: UserProfile.fromJson(
-          decoded['viewer'] as Map<String, dynamic>,
+    widget.onSessionUpdated(AuthSession(
+      token: widget.token,
+      user: UserProfile.fromJson(decoded['viewer'] as Map<String, dynamic>),
+    ));
+    await widget.onProfileRefresh();
+  }
+
+  List<UserProfile> _filterAndSort(List<UserProfile> list, String q) {
+    var result = q.isEmpty
+        ? List<UserProfile>.of(list)
+        : list
+            .where((u) =>
+                u.username.toLowerCase().contains(q.toLowerCase()) ||
+                u.fullName.toLowerCase().contains(q.toLowerCase()))
+            .toList();
+    switch (_sortMode) {
+      case _SortMode.newestFirst:
+        return result.reversed.toList();
+      case _SortMode.oldestFirst:
+        return result; // original API order = oldest first
+      case _SortMode.defaultOrder:
+        return result;
+    }
+  }
+
+  void _showSortSheet(BuildContext context, bool isLight) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: isLight ? Colors.white : const Color(0xff1e1e1e),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: isLight
+                    ? const Color(0xffd0d0d0)
+                    : const Color(0xff4a4a4a),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            for (final mode in _SortMode.values)
+              ListTile(
+                title: Text(
+                  _sortLabel(mode),
+                  style: TextStyle(
+                    color: isLight ? Colors.black : Colors.white,
+                    fontWeight: _sortMode == mode
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                    fontSize: 15,
+                  ),
+                ),
+                trailing: _sortMode == mode
+                    ? Icon(Icons.check,
+                        color: isLight ? Colors.black : Colors.white, size: 20)
+                    : null,
+                onTap: () {
+                  setState(() => _sortMode = mode);
+                  Navigator.of(context).pop();
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
-    await widget.onProfileRefresh();
   }
+
+  String _sortLabel(_SortMode mode) => switch (mode) {
+        _SortMode.defaultOrder => 'Default',
+        _SortMode.newestFirst => 'Newest first',
+        _SortMode.oldestFirst => 'Oldest first',
+      };
 
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final filtered = _filtered;
+    final bg = isLight ? Colors.white : const Color(0xff121212);
     return Scaffold(
-      backgroundColor:
-          isLight ? Colors.white : const Color(0xff121212),
+      backgroundColor: bg,
       appBar: AppBar(
-        backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+        backgroundColor: bg,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
         iconTheme: IconThemeData(color: isLight ? Colors.black : Colors.white),
         title: Text(
-          widget.title,
+          widget.profileUsername,
           style: TextStyle(
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
             color: isLight ? Colors.black : Colors.white,
           ),
         ),
+        centerTitle: true,
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-            child: TextField(
-              controller: _search,
-              onChanged: (v) => setState(() => _query = v.trim()),
-              style:
-                  TextStyle(color: isLight ? Colors.black : Colors.white),
-              cursorColor: isLight ? Colors.black : Colors.white,
-              decoration: InputDecoration(
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: isLight
-                      ? const Color(0xff8b95a3)
-                      : const Color(0xffa6a6a6),
-                ),
-                hintText: 'Search',
-                hintStyle: TextStyle(
-                  color: isLight
-                      ? const Color(0xff8b95a3)
-                      : const Color(0xff8f8f8f),
-                ),
-                filled: true,
-                fillColor:
-                    isLight ? Colors.white : const Color(0xff1a1a1b),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(
-                    color: isLight
-                        ? const Color(0xffd9dee6)
-                        : const Color(0xff2a2a2a),
-                  ),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(
-                    color: isLight
-                        ? const Color(0xffd9dee6)
-                        : const Color(0xff2a2a2a),
-                  ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide:
-                      BorderSide(color: isLight ? Colors.black : Colors.white),
-                ),
+          TabBar(
+            controller: _tabController,
+            labelColor: isLight ? Colors.black : Colors.white,
+            unselectedLabelColor:
+                isLight ? const Color(0xff8b95a3) : const Color(0xff666666),
+            labelStyle:
+                const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            unselectedLabelStyle:
+                const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+            indicator: UnderlineTabIndicator(
+              borderSide: BorderSide(
+                width: 2.0,
+                color: isLight ? Colors.black : Colors.white,
               ),
+              insets: EdgeInsets.zero,
             ),
+            indicatorSize: TabBarIndicatorSize.tab,
+            dividerColor: Colors.transparent,
+            tabs: [
+              Tab(text: '${widget.followerCount} Followers'),
+              Tab(text: '${widget.followingCount} Following'),
+            ],
           ),
           Expanded(
-            child: filtered.isEmpty
-                ? Center(
-                    child: Text(
-                      _query.isEmpty ? 'No users yet.' : 'No results.',
-                      style: TextStyle(
-                        color: isLight
-                            ? const Color(0xff616161)
-                            : const Color(0xffb7b7b7),
-                      ),
-                    ),
-                  )
-                : ListView.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, _) => Divider(
-                      height: 1,
-                      color: isLight
-                          ? const Color(0xffd9dee6)
-                          : const Color(0xff262626),
-                    ),
-                    itemBuilder: (context, index) {
-                      final user = filtered[index];
-                      final globalIndex = _users.indexOf(user);
-                      final canToggle =
-                          user.username != widget.currentUser.username;
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 4),
-                        leading: CircleAvatar(
-                          backgroundColor: isLight
-                              ? const Color(0xffe6e9ef)
-                              : const Color(0xff2a2a2a),
-                          foregroundImage: user.avatarUrl.isNotEmpty
-                              ? (_dataUrlBytes(user.avatarUrl) != null
-                                  ? MemoryImage(_dataUrlBytes(user.avatarUrl)!)
-                                  : CachedNetworkImageProvider(user.avatarUrl, cacheManager: imageCacheManager)
-                                      as ImageProvider)
-                              : null,
-                          child: Text(
-                            initialFor(user.username),
-                            style: TextStyle(
-                                color:
-                                    isLight ? Colors.black : Colors.white),
-                          ),
-                        ),
-                        title: Text(
-                          user.username,
-                          style: TextStyle(
-                            color: isLight ? Colors.black : Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        subtitle: user.fullName.isNotEmpty
-                            ? Text(
-                                user.fullName,
-                                style: TextStyle(
-                                  color: isLight
-                                      ? const Color(0xff616161)
-                                      : const Color(0xffb7b7b7),
-                                ),
-                              )
-                            : null,
-                        trailing: canToggle
-                            ? (user.isFollowing
-                                ? OutlinedButton(
-                                    onPressed: () =>
-                                        _toggleFollow(globalIndex, user),
-                                    style: OutlinedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 16),
-                                      side: BorderSide(
-                                        color: isLight
-                                            ? Colors.black
-                                            : Colors.white,
-                                      ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      foregroundColor:
-                                          isLight ? Colors.black : Colors.white,
-                                    ),
-                                    child: const Text(
-                                      'Following',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  )
-                                : FilledButton(
-                                    onPressed: () =>
-                                        _toggleFollow(globalIndex, user),
-                                    style: FilledButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 16),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      textStyle: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    child: Text(user.followsYou ? 'Follow Back' : 'Follow'),
-                                  ))
-                            : null,
-                        onTap: () => widget.onOpenProfile(user.username),
-                      );
-                    },
-                  ),
+            child: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildTab(
+            loading: _followersLoading,
+            users: _filterAndSort(_followers, _followersQuery),
+            searchCtrl: _followersSearch,
+            onSearch: (v) => setState(() => _followersQuery = v.trim()),
+            query: _followersQuery,
+            isLight: isLight,
+          ),
+          _buildTab(
+            loading: _followingLoading,
+            users: _filterAndSort(_following, _followingQuery),
+            searchCtrl: _followingSearch,
+            onSearch: (v) => setState(() => _followingQuery = v.trim()),
+            query: _followingQuery,
+            isLight: isLight,
           ),
         ],
+            ),
+          ), // Expanded
+        ], // Column children
+      ), // Column / body
+    ); // Scaffold
+  }
+
+  Widget _buildTab({
+    required bool loading,
+    required List<UserProfile> users,
+    required TextEditingController searchCtrl,
+    required ValueChanged<String> onSearch,
+    required String query,
+    required bool isLight,
+  }) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+          child: TextField(
+            controller: searchCtrl,
+            onChanged: onSearch,
+            style: TextStyle(
+                color: isLight ? Colors.black : Colors.white, fontSize: 15),
+            cursorColor: const Color(0xff3897f0),
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: isLight
+                  ? const Color(0xffefefef)
+                  : const Color(0xff1c1c1e),
+              hintText: 'Search',
+              hintStyle: TextStyle(
+                  color: isLight
+                      ? const Color(0xff737373)
+                      : const Color(0xff8e8e8e),
+                  fontSize: 15),
+              prefixIcon: Icon(Icons.search_rounded,
+                  color: isLight
+                      ? const Color(0xff737373)
+                      : const Color(0xff8e8e8e),
+                  size: 20),
+              contentPadding: const EdgeInsets.symmetric(vertical: 9),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none),
+            ),
+          ),
+        ),
+        // Sort row — Instagram style
+        InkWell(
+          onTap: () => _showSortSheet(context, isLight),
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+            child: Row(
+              children: [
+                Text(
+                  'Sort by ',
+                  style: TextStyle(
+                    color: isLight ? Colors.black : Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+                Text(
+                  _sortLabel(_sortMode),
+                  style: TextStyle(
+                    color: isLight ? Colors.black : Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Icon(Icons.swap_vert_rounded,
+                    size: 18,
+                    color: isLight ? Colors.black : Colors.white),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: loading
+              ? const Center(child: CircularProgressIndicator())
+              : users.isEmpty
+                  ? Center(
+                      child: Text(
+                        query.isEmpty ? 'No users yet.' : 'No results.',
+                        style: TextStyle(
+                            color: isLight
+                                ? const Color(0xff8b95a3)
+                                : const Color(0xff8f8f8f)),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(top: 4),
+                      itemCount: users.length,
+                      itemBuilder: (_, i) => _buildRow(users[i], isLight),
+                    ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRow(UserProfile user, bool isLight) {
+    final bytes = _dataUrlBytes(user.avatarUrl);
+    final canToggle = user.username != widget.currentUser.username;
+    final isFollowing = user.isFollowing;
+
+    return GestureDetector(
+      onTap: () => widget.onOpenProfile(user.username),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 26,
+              backgroundColor: isLight
+                  ? const Color(0xffe6e9ef)
+                  : const Color(0xff2a2a2a),
+              foregroundImage: user.avatarUrl.isNotEmpty
+                  ? (bytes != null
+                      ? MemoryImage(bytes) as ImageProvider
+                      : CachedNetworkImageProvider(user.avatarUrl,
+                          cacheManager: imageCacheManager))
+                  : null,
+              child: Text(initialFor(user.username),
+                  style: TextStyle(
+                      color: isLight ? Colors.black : Colors.white,
+                      fontSize: 15)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    user.username,
+                    style: TextStyle(
+                      color: isLight ? Colors.black : Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  if (user.fullName.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      user.fullName,
+                      style: TextStyle(
+                        color: isLight
+                            ? const Color(0xff8b95a3)
+                            : const Color(0xff8f8f8f),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                  if (user.followsYou && !widget.isOwn) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Follows you',
+                      style: TextStyle(
+                        color: isLight
+                            ? const Color(0xff8b95a3)
+                            : const Color(0xff8f8f8f),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (canToggle) ...[
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _toggleFollow(user),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isFollowing
+                        ? (isLight
+                            ? const Color(0xffefefef)
+                            : const Color(0xff2a2a2a))
+                        : (isLight ? Colors.black : Colors.white),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    isFollowing
+                        ? 'Following'
+                        : (user.followsYou ? 'Follow Back' : 'Follow'),
+                    style: TextStyle(
+                      color: isFollowing
+                          ? (isLight ? Colors.black : Colors.white)
+                          : (isLight ? Colors.white : Colors.black),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

@@ -741,7 +741,7 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
 
   @override
   Widget build(BuildContext context) {
-    final bg = Theme.of(context).scaffoldBackgroundColor;
+    final bg = widget.isLight ? _kBgLgt : _kBgDark;
     return GestureDetector(
       onHorizontalDragUpdate: _onDragUpdate,
       onHorizontalDragEnd: _onDragEnd,

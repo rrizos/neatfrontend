@@ -899,7 +899,6 @@ class _HomePageState extends State<HomePage> {
           onUnfollow: _unfollow,
           onOpenUserProfile: _pushProfileRoute,
           onTapItem: (item, eventType) async {
-            Navigator.of(sheetCtx).pop();
             await _markNotificationsRead([item]);
             if (!mounted) return;
             await _openNotificationTarget(item, eventType: eventType);
