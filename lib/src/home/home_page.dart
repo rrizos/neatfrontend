@@ -519,9 +519,9 @@ class _HomePageState extends State<HomePage> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     } finally {
-      if (!popped && mounted) {
+      if (mounted) {
         setState(() => _posting = false);
-        setPageState(() {});
+        if (!popped) setPageState(() {});
       }
     }
   }
