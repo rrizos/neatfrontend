@@ -480,6 +480,12 @@ class MessageItem {
     return null;
   }
 
+  /// Every distinct emoji currently on this message, regardless of which
+  /// participant added it — used to render the reaction badge to BOTH sides
+  /// of the conversation, not just to whoever reacted.
+  List<String> get activeEmojis =>
+      reactions.entries.where((e) => e.value.isNotEmpty).map((e) => e.key).toList();
+
   factory MessageItem.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
     final rawReactions = json['reactions'];

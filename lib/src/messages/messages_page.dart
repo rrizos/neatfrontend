@@ -1131,6 +1131,11 @@ class _ConversationPageState extends State<ConversationPage> {
   DateTime? _otherLastReadAt;
   final _messageKeys = <int, GlobalKey>{};
   MessageItem? _editingMessage;
+  // Stamped on every optimistic local edit (react/edit/delete) so an in-flight
+  // _poll() that started before the mutation can tell its response is stale
+  // and skip clobbering the fresher local state — without this, a poll that
+  // raced a reaction/edit/delete could revert it until the next cycle.
+  DateTime? _lastLocalMutationAt;
 
   Future<void> _react(int msgId, String emoji) async {
     final index = _messages.indexWhere((m) => m.id == msgId);
@@ -1144,6 +1149,7 @@ class _ConversationPageState extends State<ConversationPage> {
     if (!wasSet) {
       optimisticReactions.putIfAbsent(emoji, () => []).add(widget.currentUsername);
     }
+    _lastLocalMutationAt = DateTime.now();
     setState(() {
       _messages[index] = MessageItem(
         id: previous.id, sender: previous.sender, text: previous.text,
@@ -1316,6 +1322,7 @@ class _ConversationPageState extends State<ConversationPage> {
     if (confirmed != true || !mounted) return;
 
     final previous = _messages;
+    _lastLocalMutationAt = DateTime.now();
     setState(() => _messages = _messages.where((m) => m.id != msg.id).toList());
     try {
       final res = await http.delete(
@@ -1373,7 +1380,11 @@ class _ConversationPageState extends State<ConversationPage> {
     _load(initial: true);
     _pingPresence();
     _presenceTimer   = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
-    _typingPollTimer = Timer.periodic(const Duration(seconds: 3),  (_) => _poll());
+    // Polls messages/reactions/typing/read-receipts while this conversation is
+    // open. There's no push channel for DMs yet, so this interval is the whole
+    // "how fast does the other person's reaction/edit/delete show up" budget —
+    // kept short (not 3s) so reactions feel closer to instant on both sides.
+    _typingPollTimer = Timer.periodic(const Duration(seconds: 2),  (_) => _poll());
     _composer.addListener(_onComposerChanged);
   }
 
@@ -1417,8 +1428,12 @@ class _ConversationPageState extends State<ConversationPage> {
     } catch (_) {}
   }
 
-  // Fetches new messages + typing state every 3 seconds.
+  // Fetches new messages + typing state every 2 seconds.
   Future<void> _poll() async {
+    // Snapshot before dispatching — if a react/edit/delete lands locally while
+    // this request is in flight, its response reflects a moment before that
+    // mutation and must not be allowed to clobber it.
+    final requestStartedAt = DateTime.now();
     // Run both requests in parallel.
     final results = await Future.wait([
       http.get(messageConversationEndpoint(widget.conversationId),
@@ -1427,10 +1442,12 @@ class _ConversationPageState extends State<ConversationPage> {
           headers: authGetHeaders(widget.token)).catchError((_) => http.Response('', 0)),
     ]);
     if (!mounted) return;
+    final staleAgainstLocalEdit = _lastLocalMutationAt != null &&
+        _lastLocalMutationAt!.isAfter(requestStartedAt);
 
     // ── messages ──────────────────────────────────────────────────────
     final convRes = results[0];
-    if (convRes.statusCode == 200) {
+    if (convRes.statusCode == 200 && !staleAgainstLocalEdit) {
       final body = jsonDecode(convRes.body) as Map<String, dynamic>;
       final conv = body['conversation'] as Map<String, dynamic>?;
       final msgs = (body['messages'] as List? ?? [])
@@ -1653,6 +1670,7 @@ class _ConversationPageState extends State<ConversationPage> {
       id: msg.id, sender: msg.sender, text: newText,
       created: msg.created, reactions: msg.reactions, edited: true,
     );
+    _lastLocalMutationAt = DateTime.now();
     setState(() => _messages[idx] = updated);
     _saveCache(_messages);
     try {
@@ -1961,7 +1979,7 @@ class _ConversationPageState extends State<ConversationPage> {
                                 onOpenUserProfile: widget.onOpenUserProfile != null
                                     ? () => widget.onOpenUserProfile!(widget.otherUsername)
                                     : null,
-                                reaction: msg.reactionFor(widget.currentUsername),
+                                reactions: msg.activeEmojis,
                                 onReply: () => _setReplyTo(msg),
                                 onDoubleTap: () => _react(msg.id, '❤️'),
                                 onLongPress: msg.id >= 0 ? () => _showLongPressSheet(msg) : null,
@@ -2016,7 +2034,7 @@ class _MessageRow extends StatelessWidget {
     required this.onOpenPost,
     this.onOpenUserProfile,
     this.onReply,
-    this.reaction,
+    this.reactions = const [],
     this.onDoubleTap,
     this.onLongPress,
     this.showRead = false,
@@ -2033,7 +2051,7 @@ class _MessageRow extends StatelessWidget {
   final void Function(String, int)? onOpenPost;
   final VoidCallback? onOpenUserProfile;
   final VoidCallback? onReply;
-  final String? reaction;
+  final List<String> reactions;
   final VoidCallback? onDoubleTap;
   final VoidCallback? onLongPress;
   final VoidCallback? onTapQuote;
@@ -2096,13 +2114,22 @@ class _MessageRow extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: const Color(0xff1a1a1a), width: 1.5),
         ),
-        child: Text(reaction!, style: const TextStyle(fontSize: 14)),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final emoji in reactions)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 1),
+                child: Text(emoji, style: const TextStyle(fontSize: 14)),
+              ),
+          ],
+        ),
       );
 
   @override
   Widget build(BuildContext context) {
     final maxW      = MediaQuery.sizeOf(context).width * 0.70;
-    final bottomPad = reaction != null ? 2.0 : (isLast ? 6.0 : 2.0);
+    final bottomPad = reactions.isNotEmpty ? 2.0 : (isLast ? 6.0 : 2.0);
     final readColor = isLight ? const Color(0xff8e8e93) : const Color(0xff636366);
 
     if (mine) {
@@ -2124,8 +2151,8 @@ class _MessageRow extends StatelessWidget {
                 ),
               ],
             ),
-            if (reaction != null) _reactionBadge(),
-            if (reaction != null) SizedBox(height: isLast ? 4 : 2),
+            if (reactions.isNotEmpty) _reactionBadge(),
+            if (reactions.isNotEmpty) SizedBox(height: isLast ? 4 : 2),
             if (showRead)
               Padding(
                 padding: const EdgeInsets.only(right: 6, top: 2),
@@ -2162,8 +2189,8 @@ class _MessageRow extends StatelessWidget {
               ),
             ],
           ),
-          if (reaction != null) _reactionBadge(),
-          if (reaction != null) SizedBox(height: isLast ? 4 : 2),
+          if (reactions.isNotEmpty) _reactionBadge(),
+          if (reactions.isNotEmpty) SizedBox(height: isLast ? 4 : 2),
         ],
       ),
     );
