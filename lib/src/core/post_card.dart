@@ -1152,20 +1152,23 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
 
   Future<void> _handleVote(int optionId) async {
     final poll = widget.post.poll;
-    if (poll == null || poll.votedOptionId != null) return;
-    final prev = {for (final o in poll.options) o.id: o.votes};
+    if (poll == null) return;
+    final prevVoted = poll.votedOptionId;
+    final prevVotes = {for (final o in poll.options) o.id: o.votes};
+    final unvoting = prevVoted == optionId;
     setState(() {
-      poll.votedOptionId = optionId;
+      poll.votedOptionId = unvoting ? null : optionId;
       for (final o in poll.options) {
-        if (o.id == optionId) o.votes++;
+        if (o.id == optionId && !unvoting) o.votes++;
+        if (o.id == prevVoted) o.votes--;
       }
     });
     final ok = await (widget.onVote?.call(optionId) ?? Future.value(false));
     if (!ok && mounted) {
       setState(() {
-        poll.votedOptionId = null;
+        poll.votedOptionId = prevVoted;
         for (final o in poll.options) {
-          o.votes = prev[o.id] ?? o.votes;
+          o.votes = prevVotes[o.id] ?? o.votes;
         }
       });
     }
@@ -1588,7 +1591,7 @@ class _PollWidget extends StatelessWidget {
               voted: voted,
               chosen: voted && option.id == poll.votedOptionId,
               isLight: isLight,
-              onTap: voted ? null : () => onVote(option.id),
+              onTap: () => onVote(option.id),
             ),
           ),
         Text(

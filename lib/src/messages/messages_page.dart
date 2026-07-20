@@ -319,10 +319,11 @@ class _MessagesPageState extends State<MessagesPage> {
   Future<void> _deleteConversation(ConversationSummary conv) async {
     setState(() => _convs.removeWhere((c) => c.id == conv.id));
     try {
-      await http.delete(
+      final res = await http.delete(
         conversationDeleteEndpoint(conv.id),
         headers: authGetHeaders(widget.token),
       );
+      if (res.statusCode != 200 && mounted) _load();
     } catch (_) {
       if (mounted) _load();
     }
@@ -1438,10 +1439,15 @@ class _ConversationPageState extends State<ConversationPage> {
           .toList();
       final serverIds  = msgs.map((m) => m.id).toSet();
       final serverKeys = msgs.map((m) => '${m.sender}\x00${m.text}').toSet();
+      // Only ever preserve *unconfirmed optimistic* sends (negative ids) here.
+      // A real (server-assigned) id missing from the server's response means
+      // it was deleted server-side, not that it's "pending" — treating it as
+      // local-only would make deleted messages reappear and never go away.
       final localOnly  = _messages
+          .where((m) => m.id < 0)
           .where((m) => !serverIds.contains(m.id))
-          .where((m) => m.id >= 0 || !serverKeys.contains('${m.sender}\x00${m.text}'))
-          .where((m) => m.id >= 0 || DateTime.now().difference(m.created) < const Duration(seconds: 20))
+          .where((m) => !serverKeys.contains('${m.sender}\x00${m.text}'))
+          .where((m) => DateTime.now().difference(m.created) < const Duration(seconds: 20))
           .toList();
       final merged = [...msgs, ...localOnly]..sort((a, b) => a.created.compareTo(b.created));
       final hadNewFromOther = merged.length > _messages.length &&
@@ -1509,20 +1515,24 @@ class _ConversationPageState extends State<ConversationPage> {
           .map(MessageItem.fromJson)
           .toList();
       if (!mounted) return;
-      // Merge: keep locally-cached messages the server didn't return.
-      // For optimistic (negative-ID) entries, also drop them if the server
-      // returned a matching sender+text — that means the send was confirmed
-      // and the real message has a new positive ID. Without this check,
-      // re-entering the DM would show the message twice.
+      // Merge: keep locally-cached OPTIMISTIC (negative-ID) messages the server
+      // didn't return yet — a real (positive-ID) message missing from the
+      // server's response means it was deleted server-side, not "pending", so
+      // it must NOT be preserved here (otherwise deletes would never stick).
+      // For optimistic entries, also drop them if the server returned a
+      // matching sender+text — that means the send was confirmed and the
+      // real message has a new positive ID. Without this check, re-entering
+      // the DM would show the message twice.
       final serverIds   = msgs.map((m) => m.id).toSet();
       final serverKeys  = msgs.map((m) => '${m.sender}\x00${m.text}').toSet();
       final localOnly   = _messages
+          .where((m) => m.id < 0)
           .where((m) => !serverIds.contains(m.id))
-          .where((m) => m.id >= 0 || !serverKeys.contains('${m.sender}\x00${m.text}'))
+          .where((m) => !serverKeys.contains('${m.sender}\x00${m.text}'))
           // An optimistic (negative-ID) message the server still hasn't echoed back after
           // this long clearly failed to send (e.g. a send error the client didn't catch) —
           // drop it so it doesn't linger forever as an unremovable, undeletable phantom.
-          .where((m) => m.id >= 0 || DateTime.now().difference(m.created) < const Duration(seconds: 20))
+          .where((m) => DateTime.now().difference(m.created) < const Duration(seconds: 20))
           .toList();
       final merged = [...msgs, ...localOnly]
         ..sort((a, b) => a.created.compareTo(b.created));
