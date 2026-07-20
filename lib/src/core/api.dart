@@ -141,6 +141,8 @@ Uri messageEditEndpoint(int conversationId, int messageId) =>
     Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/edit/');
 Uri messageReportEndpoint(int conversationId, int messageId) =>
     Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/report/');
+Uri conversationDeleteEndpoint(int conversationId) =>
+    Uri.parse('$apiBaseUrl/api/messages/$conversationId/delete/');
 
 const jsonHeaders = {
   'Content-Type': 'application/json; charset=utf-8',

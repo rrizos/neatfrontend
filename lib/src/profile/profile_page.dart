@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' show ImageFilter;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -37,6 +38,9 @@ class ProfilePage extends StatefulWidget {
     this.followEnabled = true,
     this.onNavTap,
     this.activeNavIndex = 0,
+    this.bouncePost = false,
+    this.autoOpenCommentActor,
+    this.onPostTapWithHighlight,
   });
   final String username;
   final UserProfile currentUser;
@@ -45,11 +49,14 @@ class ProfilePage extends StatefulWidget {
   final ValueChanged<String> onOpenUserProfile;
   final void Function(String username, int postId)? onOpenProfileAtPost;
   final ValueChanged<FeedPost> onPostTap;
+  final void Function(FeedPost post, String actor)? onPostTapWithHighlight;
   final Future<void> Function() onLogout;
   final ValueChanged<AuthSession> onSessionUpdated;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final int? initialPostId;
+  final bool bouncePost;
+  final String? autoOpenCommentActor;
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
   final bool followEnabled;
@@ -68,9 +75,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   UserProfile? _profile;
   bool? _followingOverride;
   bool _loading = true;
+  bool _autoNavigating = false;
+  int? _bouncePostId;
   final ImagePicker _imagePicker = ImagePicker();
   final Map<int, GlobalKey> _postKeys = {};
   late final TabController _tabController;
+  final _nestedScrollKey = GlobalKey<NestedScrollViewState>();
   List<FeedPost>? _likedPosts;
   bool _likedLoading = false;
   List<FeedPost>? _savedPosts;
@@ -125,14 +135,67 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       // If server didn't supply followsYou, check followers list as fallback
       if (!(_profile?.followsYou ?? false)) _checkFollowsYou();
       if (widget.initialPostId != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final key = _postKeys[widget.initialPostId!];
-          if (key?.currentContext != null) {
-            Scrollable.ensureVisible(
-              key!.currentContext!,
-              duration: const Duration(milliseconds: 450),
-              curve: Curves.easeInOut,
-            );
+        final bool doAuto = widget.bouncePost || widget.autoOpenCommentActor != null;
+        if (doAuto) {
+          setState(() => _autoNavigating = true);
+          widget.onHideNavBar?.call();
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+          // With cacheExtent: 30000, all post widgets are pre-built with valid
+          // RenderBoxes. Sum their actual rendered heights to get the exact offset.
+          final innerCtrl = _nestedScrollKey.currentState?.innerController;
+          if (innerCtrl != null && innerCtrl.hasClients) {
+            final profileUsername = _profile?.username ?? '';
+            final userPosts = widget.posts
+                .where((p) => p.author == profileUsername)
+                .toList();
+            final postIdx =
+                userPosts.indexWhere((p) => p.id == widget.initialPostId);
+            if (postIdx > 0) {
+              double targetOffset = 0;
+              for (int i = 0; i < postIdx; i++) {
+                final box = _postKeys[userPosts[i].id]
+                    ?.currentContext
+                    ?.findRenderObject() as RenderBox?;
+                targetOffset += box?.size.height ?? 480.0;
+              }
+              // Center the post on screen
+              final targetBox = _postKeys[userPosts[postIdx].id]
+                  ?.currentContext
+                  ?.findRenderObject() as RenderBox?;
+              final targetHeight = targetBox?.size.height ?? 480.0;
+              final viewportHeight = innerCtrl.position.viewportDimension;
+              targetOffset = targetOffset - viewportHeight / 2 + targetHeight / 2;
+              await innerCtrl.animateTo(
+                targetOffset.clamp(0.0, innerCtrl.position.maxScrollExtent),
+                duration: const Duration(milliseconds: 700),
+                curve: Curves.easeInOut,
+              );
+              if (!mounted) return;
+            }
+          }
+
+          if (widget.bouncePost) {
+            setState(() => _bouncePostId = widget.initialPostId);
+            await Future.delayed(const Duration(milliseconds: 900));
+            if (!mounted) return;
+            setState(() { _bouncePostId = null; _autoNavigating = false; });
+            widget.onShowNavBar?.call();
+          }
+
+          if (widget.autoOpenCommentActor != null) {
+            await Future.delayed(const Duration(milliseconds: 500));
+            if (!mounted) return;
+            FeedPost? post;
+            for (final p in widget.posts) {
+              if (p.id == widget.initialPostId) { post = p; break; }
+            }
+            if (post != null) {
+              widget.onPostTapWithHighlight?.call(post, widget.autoOpenCommentActor!);
+            }
+            if (mounted) setState(() => _autoNavigating = false);
+            widget.onShowNavBar?.call();
           }
         });
       }
@@ -517,6 +580,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       onSave: () => _savePost(post),
       onShare: () async {
         bool shared = false;
+        widget.onHideNavBar?.call();
         await showShareSheet(
           context: context,
           post: post,
@@ -525,6 +589,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           onLogout: widget.onLogout,
           onShared: () { shared = true; },
         );
+        widget.onShowNavBar?.call();
         return shared;
       },
       onVote: (optionId) => _voteOnPoll(post, optionId),
@@ -601,53 +666,25 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   void _openAvatarFullscreen(UserProfile profile) {
     if (profile.avatarUrl.isEmpty) return;
-    final bytes = _dataUrlBytes(profile.avatarUrl);
-    final Widget image = bytes != null
-        ? Image.memory(bytes, fit: BoxFit.contain)
-        : CachedNetworkImage(
-            imageUrl: profile.avatarUrl,
-            cacheManager: imageCacheManager,
-            fit: BoxFit.contain,
-            fadeInDuration: Duration.zero,
-          );
+    final isSelf = profile.username == widget.currentUser.username;
+    widget.onHideNavBar?.call();
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
-            children: [
-              Center(
-                child: InteractiveViewer(
-                  minScale: 0.5,
-                  maxScale: 4.0,
-                  child: image,
-                ),
-              ),
-              SafeArea(
-                child: Align(
-                  alignment: Alignment.topRight,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: GestureDetector(
-                      onTap: () => Navigator.of(context).pop(),
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
-                        ),
-                        padding: const EdgeInsets.all(8),
-                        child: const Icon(Icons.close, color: Colors.white, size: 22),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierDismissible: true,
+        barrierColor: Colors.transparent,
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (_, a1, a2) => _AvatarFullscreenPage(
+          avatarUrl: profile.avatarUrl,
+          username: profile.username,
+          isSelf: isSelf,
+          initialFollowing: _followingOverride ?? profile.isFollowing,
+          onToggleFollow: isSelf ? null : _toggleFollow,
         ),
+        transitionsBuilder: (_, anim, a2, child) =>
+            FadeTransition(opacity: anim, child: child),
       ),
-    );
+    ).then((_) => widget.onShowNavBar?.call());
   }
 
   Future<void> _openEditProfile() async {
@@ -727,7 +764,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final userPosts = widget.posts
         .where((p) => p.author == profile.username)
         .toList();
-    return Scaffold(
+    return AbsorbPointer(
+      absorbing: _autoNavigating,
+      child: Scaffold(
       backgroundColor: isLight ? Colors.white : const Color(0xff121212),
       bottomNavigationBar: widget.onNavTap == null
           ? null
@@ -739,32 +778,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ),
       appBar: AppBar(
         backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+        centerTitle: false,
         titleSpacing: 12,
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 14,
-              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-              foregroundImage:
-                  _dataUrlBytes(profile.avatarUrl) != null
-                      ? MemoryImage(_dataUrlBytes(profile.avatarUrl)!)
-                      : null,
-              child: _dataUrlBytes(profile.avatarUrl) == null
-                  ? Text(
-                      initialFor(profile.username),
-                      style: const TextStyle(fontSize: 12),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 10),
-            Text(
-              profile.username,
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                color: isLight ? Colors.black : Colors.white,
-              ),
-            ),
-          ],
+        title: Text(
+          profile.username,
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: isLight ? Colors.black : Colors.white,
+          ),
         ),
         actions: [
           if (profile.username == widget.currentUser.username && widget.currentUser.isAdmin)
@@ -800,6 +821,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         ],
       ),
       body: NestedScrollView(
+        key: _nestedScrollKey,
         headerSliverBuilder: (_, _) => [
           SliverToBoxAdapter(
             child: Column(
@@ -808,13 +830,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       GestureDetector(
                         onTap: (profile.avatarZoomable && profile.avatarUrl.isNotEmpty)
                             ? () => _openAvatarFullscreen(profile)
                             : null,
                         child: CircleAvatar(
-                          radius: 40,
+                          radius: 48,
                           backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
                           foregroundImage: _dataUrlBytes(profile.avatarUrl) != null
                               ? MemoryImage(_dataUrlBytes(profile.avatarUrl)!)
@@ -822,33 +845,56 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                           child: _dataUrlBytes(profile.avatarUrl) == null
                               ? Text(
                                   initialFor(profile.username),
-                                  style: TextStyle(color: isLight ? Colors.black : Colors.white),
+                                  style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 20),
                                 )
                               : null,
                         ),
                       ),
-                      const SizedBox(width: 24),
+                      const SizedBox(width: 20),
                       Expanded(
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _Metric(label: 'posts', value: '${userPosts.length}', onTap: null),
-                            _Metric(
-                              label: 'followers',
-                              value: '${profile.followers}',
-                              onTap: () => _openUserList(
-                                title: 'Followers',
-                                endpoint: followersEndpoint(profile.username),
-                                markFollowsYou: profile.username == widget.currentUser.username,
-                              ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  profile.fullName.isEmpty ? profile.username : profile.fullName,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: isLight ? Colors.black : Colors.white,
+                                  ),
+                                ),
+                                if (profile.isVerified) ...[
+                                  const SizedBox(width: 4),
+                                  const Icon(Icons.verified_rounded, size: 14, color: Color(0xff0095f6)),
+                                ],
+                              ],
                             ),
-                            _Metric(
-                              label: 'following',
-                              value: '${profile.following}',
-                              onTap: () => _openUserList(
-                                title: 'Following',
-                                endpoint: followingEndpoint(profile.username),
-                              ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                _Metric(label: 'posts', value: '${userPosts.length}', onTap: null),
+                                _Metric(
+                                  label: 'followers',
+                                  value: '${profile.followers}',
+                                  onTap: () => _openUserList(
+                                    title: 'Followers',
+                                    endpoint: followersEndpoint(profile.username),
+                                    markFollowsYou: profile.username == widget.currentUser.username,
+                                  ),
+                                ),
+                                _Metric(
+                                  label: 'following',
+                                  value: '${profile.following}',
+                                  onTap: () => _openUserList(
+                                    title: 'Following',
+                                    endpoint: followingEndpoint(profile.username),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -861,25 +907,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            profile.fullName.isEmpty ? profile.username : profile.fullName,
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: isLight ? Colors.black : Colors.white,
-                            ),
-                          ),
-                          if (profile.isVerified) ...[
-                            const SizedBox(width: 5),
-                            const Icon(Icons.verified_rounded, size: 18, color: Color(0xff0095f6)),
-                          ],
-                        ],
-                      ),
                       if (profile.bio.isNotEmpty) ...[
-                        const SizedBox(height: 4),
                         Text(
                           profile.bio,
                           style: TextStyle(
@@ -981,11 +1009,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 ? const CustomScrollView(slivers: [SliverFillRemaining(hasScrollBody: false, child: Center(child: Text('No posts yet.', style: TextStyle(color: Color(0xffb3b3b3)))))])
                 : ListView.builder(
                     key: const PageStorageKey('posts'),
+                    // ignore: deprecated_member_use
+                    cacheExtent: _autoNavigating ? 30000.0 : null,
                     itemCount: userPosts.length,
                     itemBuilder: (_, i) {
                       final post = userPosts[i];
                       final key = _postKeys.putIfAbsent(post.id, () => GlobalKey());
-                      return _buildPostCard(post, key: key);
+                      Widget card = _buildPostCard(post, key: key);
+                      if (post.id == _bouncePostId) {
+                        card = _BounceHighlight(child: card);
+                      }
+                      return card;
                     },
                   ),
             // Tab 1: Liked
@@ -995,7 +1029,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           ],
         ),
       ),
-    );
+    )); // Scaffold + AbsorbPointer
   }
 
   Widget _buildLikedTab(bool isOwn) {
@@ -1043,6 +1077,173 @@ Uint8List? _dataUrlBytes(String value) {
   } catch (_) {
     return null;
   }
+}
+
+// ── Instagram-style avatar fullscreen ────────────────────────────────────────
+
+class _AvatarFullscreenPage extends StatefulWidget {
+  const _AvatarFullscreenPage({
+    required this.avatarUrl,
+    required this.username,
+    required this.isSelf,
+    required this.initialFollowing,
+    this.onToggleFollow,
+  });
+  final String avatarUrl;
+  final String username;
+  final bool isSelf;
+  final bool initialFollowing;
+  final Future<void> Function()? onToggleFollow;
+
+  @override
+  State<_AvatarFullscreenPage> createState() => _AvatarFullscreenPageState();
+}
+
+class _AvatarFullscreenPageState extends State<_AvatarFullscreenPage> {
+  late bool _following = widget.initialFollowing;
+  bool _toggling = false;
+
+  ImageProvider _imageProvider() {
+    final bytes = _dataUrlBytes(widget.avatarUrl);
+    if (bytes != null) return MemoryImage(bytes);
+    final url = widget.avatarUrl.startsWith('/')
+        ? '$apiBaseUrl${widget.avatarUrl}'
+        : widget.avatarUrl;
+    return CachedNetworkImageProvider(url);
+  }
+
+  Future<void> _toggle() async {
+    if (_toggling) return;
+    setState(() { _toggling = true; _following = !_following; });
+    try {
+      await widget.onToggleFollow?.call();
+    } finally {
+      if (mounted) setState(() => _toggling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = _imageProvider();
+    return GestureDetector(
+      onTap: () => Navigator.of(context).pop(),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Blur the underlying profile page (shows through via opaque: false route)
+            BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+              child: Container(color: Colors.black.withValues(alpha: 0.35)),
+            ),
+            // Circle avatar + button
+            SafeArea(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Spacer(),
+                  // Circle PFP
+                  Container(
+                    width: 240,
+                    height: 240,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      image: DecorationImage(image: provider, fit: BoxFit.cover),
+                    ),
+                  ),
+                  const Spacer(),
+                  // Follow button (other users only)
+                  if (!widget.isSelf)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
+                      child: GestureDetector(
+                        onTap: _toggle,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 9),
+                          decoration: BoxDecoration(
+                            color: _following
+                                ? Colors.transparent
+                                : const Color(0xff3897f0),
+                            borderRadius: BorderRadius.circular(14),
+                            border: _following
+                                ? Border.all(color: Colors.white70, width: 1.5)
+                                : null,
+                          ),
+                          child: Center(
+                            child: _toggling
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Text(
+                                    _following ? 'Following' : 'Follow',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BounceHighlight extends StatefulWidget {
+  const _BounceHighlight({required this.child});
+  final Widget child;
+  @override
+  State<_BounceHighlight> createState() => _BounceHighlightState();
+}
+
+class _BounceHighlightState extends State<_BounceHighlight>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 230),
+  );
+  late final Animation<double> _scale =
+      Tween<double>(begin: 1.0, end: 1.025)
+          .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.forward()
+        .then((_) => _ctrl.reverse())
+        .then((_) => _ctrl.forward())
+        .then((_) => _ctrl.reverse());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _scale,
+        builder: (_, child) => Transform.scale(scale: _scale.value, child: child),
+        child: widget.child,
+      );
 }
 
 class _Metric extends StatelessWidget {

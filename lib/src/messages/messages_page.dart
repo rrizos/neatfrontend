@@ -234,6 +234,7 @@ class _MessagesPageState extends State<MessagesPage> {
   bool _loading = true;
   bool _isOffline = false;
   final _search = TextEditingController();
+  final ValueNotifier<int?> _openSwipeId = ValueNotifier(null);
   Timer? _presenceTimer;
   Timer? _inboxPollTimer;
 
@@ -252,6 +253,7 @@ class _MessagesPageState extends State<MessagesPage> {
     _presenceTimer?.cancel();
     _inboxPollTimer?.cancel();
     _search.dispose();
+    _openSwipeId.dispose();
     super.dispose();
   }
 
@@ -312,6 +314,18 @@ class _MessagesPageState extends State<MessagesPage> {
       ),
     ));
     if (mounted) _load();
+  }
+
+  Future<void> _deleteConversation(ConversationSummary conv) async {
+    setState(() => _convs.removeWhere((c) => c.id == conv.id));
+    try {
+      await http.delete(
+        conversationDeleteEndpoint(conv.id),
+        headers: authGetHeaders(widget.token),
+      );
+    } catch (_) {
+      if (mounted) _load();
+    }
   }
 
   Future<void> _startChatWith(String username) async {
@@ -477,12 +491,18 @@ class _MessagesPageState extends State<MessagesPage> {
                   height: 1, indent: 76, color: isLight ? _kDivLgt : _kDivDark,
                 ),
                 itemCount: filtered.length,
-                itemBuilder: (_, i) => _InboxRow(
-                  summary: filtered[i],
-                  currentUsername: widget.currentUsername,
-                  isLight: isLight,
-                  onTap: () => _open(filtered[i]),
-                ),
+                itemBuilder: (_, i) {
+                  final conv = filtered[i];
+                  return _SwipeableInboxRow(
+                    key: ValueKey(conv.id),
+                    summary: conv,
+                    currentUsername: widget.currentUsername,
+                    isLight: isLight,
+                    openSwipeId: _openSwipeId,
+                    onTap: () => _open(conv),
+                    onDelete: () => _deleteConversation(conv),
+                  );
+                },
               ),
           ],
         ),
@@ -629,6 +649,132 @@ class _InboxRow extends StatelessWidget {
               const SizedBox(width: 20),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Swipeable inbox row ──────────────────────────────────────────────────────
+
+class _SwipeableInboxRow extends StatefulWidget {
+  const _SwipeableInboxRow({
+    super.key,
+    required this.summary,
+    required this.currentUsername,
+    required this.isLight,
+    required this.openSwipeId,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  final ConversationSummary summary;
+  final String currentUsername;
+  final bool isLight;
+  final ValueNotifier<int?> openSwipeId;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  @override
+  State<_SwipeableInboxRow> createState() => _SwipeableInboxRowState();
+}
+
+class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
+    with SingleTickerProviderStateMixin {
+  static const double _actionWidth = 72.0;
+
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 200),
+  );
+
+  bool _open = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.openSwipeId.addListener(_onGlobalSwipeChange);
+  }
+
+  @override
+  void dispose() {
+    widget.openSwipeId.removeListener(_onGlobalSwipeChange);
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _onGlobalSwipeChange() {
+    if (_open && widget.openSwipeId.value != widget.summary.id) {
+      _ctrl.animateTo(0.0, curve: Curves.easeOut);
+      if (mounted) setState(() => _open = false);
+    }
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    _ctrl.value = (_ctrl.value - d.delta.dx / _actionWidth).clamp(0.0, 1.0);
+  }
+
+  void _onDragEnd(DragEndDetails d) {
+    if (_ctrl.value > 0.5) {
+      _ctrl.animateTo(1.0, curve: Curves.easeOut);
+      if (!_open) {
+        widget.openSwipeId.value = widget.summary.id;
+        setState(() => _open = true);
+      }
+    } else {
+      _ctrl.animateTo(0.0, curve: Curves.easeOut);
+      if (_open) {
+        if (widget.openSwipeId.value == widget.summary.id) {
+          widget.openSwipeId.value = null;
+        }
+        setState(() => _open = false);
+      }
+    }
+  }
+
+  void _close() {
+    _ctrl.animateTo(0.0, curve: Curves.easeOut);
+    if (widget.openSwipeId.value == widget.summary.id) {
+      widget.openSwipeId.value = null;
+    }
+    setState(() => _open = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    return GestureDetector(
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
+      child: Stack(
+        clipBehavior: Clip.hardEdge,
+        children: [
+          Positioned(
+            top: 0, bottom: 0, right: 0, width: _actionWidth,
+            child: GestureDetector(
+              onTap: widget.onDelete,
+              child: Container(
+                color: Colors.red,
+                alignment: Alignment.center,
+                child: const Icon(Icons.delete_outline, color: Colors.white, size: 26),
+              ),
+            ),
+          ),
+          AnimatedBuilder(
+            animation: _ctrl,
+            builder: (ctx, child) => Transform.translate(
+              offset: Offset(-_ctrl.value * _actionWidth, 0),
+              child: ColoredBox(
+                color: bg,
+                child: _InboxRow(
+                  summary: widget.summary,
+                  currentUsername: widget.currentUsername,
+                  isLight: widget.isLight,
+                  onTap: _open ? _close : widget.onTap,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

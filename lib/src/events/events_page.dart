@@ -8,6 +8,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/http_client.dart' as http;
+import 'package:giphy_flutter_sdk/giphy_dialog.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_content_type.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_media.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_settings.dart';
+import 'package:giphy_flutter_sdk/dto/giphy_theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -195,6 +200,7 @@ class EventsPage extends StatefulWidget {
     required this.onOpenUserProfile,
     this.preferredTab,
     this.attendEnabled = true,
+    this.initialEventId,
   });
 
   final String token;
@@ -203,6 +209,7 @@ class EventsPage extends StatefulWidget {
   final ValueChanged<String> onOpenUserProfile;
   final int? preferredTab;
   final bool attendEnabled;
+  final int? initialEventId;
 
   @override
   State<EventsPage> createState() => _EventsPageState();
@@ -216,6 +223,15 @@ class _EventsPageState extends State<EventsPage> {
   final ImagePicker _picker = ImagePicker();
   String _selectedCategory = 'All';
 
+  final ScrollController _outerScroll = ScrollController();
+  final Map<String, ScrollController> _hScrolls = {};
+  final Map<String, GlobalKey> _sectionKeys = {};
+
+  ScrollController _hScrollFor(String s) =>
+      _hScrolls.putIfAbsent(s, () => ScrollController());
+  GlobalKey _keyFor(String s) =>
+      _sectionKeys.putIfAbsent(s, () => GlobalKey());
+
   String get _cacheKey => 'neat_events_cache_${widget.city}';
 
   @override
@@ -227,6 +243,13 @@ class _EventsPageState extends State<EventsPage> {
     // user is still scrolling the feed — so the first event they open doesn't
     // pay it on the critical path.
     if (!kIsWeb && Platform.isAndroid) unawaited(_ensureAndroidSharedMapController());
+  }
+
+  @override
+  void dispose() {
+    _outerScroll.dispose();
+    for (final c in _hScrolls.values) { c.dispose(); }
+    super.dispose();
   }
 
   Future<void> _saveEventsCache(List<dynamic> raw) async {
@@ -282,8 +305,76 @@ class _EventsPageState extends State<EventsPage> {
       events.sort((a, b) => b.attendees.compareTo(a.attendees));
       if (!mounted) return;
       setState(() { _events = events; _loading = false; _isOffline = false; });
+      if (widget.initialEventId != null) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _scrollToEvent(widget.initialEventId!),
+        );
+      }
     } catch (_) {
       if (mounted) setState(() { _loading = false; _isOffline = true; });
+    }
+  }
+
+  Future<void> _scrollToEvent(int eventId) async {
+    if (!mounted) return;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final now = DateTime.now();
+    final today    = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final in7Days  = today.add(const Duration(days: 7));
+    final cutoff   = today.subtract(const Duration(days: 7));
+
+    final tabOrder = _tab == 0 ? [0, 1] : [1, 0];
+
+    for (final tabIdx in tabOrder) {
+      final visible = tabIdx == 0 ? _filteredOfficial : _community;
+
+      final sectionLists = <String, List<EventItem>>{
+        'Live Today':       visible.where((e) { final d = _dateOnly(e); return d != null && d == today; }).toList(),
+        'Upcoming Events':  visible.where((e) { final d = _dateOnly(e); return d != null && !d.isBefore(tomorrow) && !d.isAfter(in7Days); }).toList(),
+        'Other Events':     visible.where((e) { final d = _dateOnly(e); return d != null && d.isAfter(in7Days); }).toList(),
+        'Already Attended': visible.where((e) { final d = _dateOnly(e); return d != null && d.isBefore(today) && !d.isBefore(cutoff) && e.isAttending; }).toList(),
+        'Completed Events': visible.where((e) { final d = _dateOnly(e); return d != null && d.isBefore(today) && !d.isBefore(cutoff) && !e.isAttending; }).toList(),
+      };
+
+      String? sectionName;
+      int eventIndex = 0;
+      for (final entry in sectionLists.entries) {
+        final idx = entry.value.indexWhere((e) => e.id == eventId);
+        if (idx != -1) { sectionName = entry.key; eventIndex = idx; break; }
+      }
+      if (sectionName == null) continue;
+
+      // Switch to the correct tab if needed, then wait for rebuild
+      if (_tab != tabIdx) {
+        setState(() => _tab = tabIdx);
+        await Future.delayed(const Duration(milliseconds: 150));
+        if (!mounted) return;
+      }
+
+      // Scroll vertically to the section header
+      final sKey = _sectionKeys[sectionName];
+      if (sKey?.currentContext != null) {
+        await Scrollable.ensureVisible(
+          sKey!.currentContext!,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+        );
+      }
+      if (!mounted) return;
+      await Future.delayed(const Duration(milliseconds: 250));
+
+      // Scroll horizontally to the event card
+      final hCtrl = _hScrolls[sectionName];
+      if (hCtrl != null && hCtrl.hasClients) {
+        final cardWidth = screenWidth - 80.0 + 14.0;
+        await hCtrl.animateTo(
+          (eventIndex * cardWidth).clamp(0.0, hCtrl.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeInOut,
+        );
+      }
+      return;
     }
   }
 
@@ -489,6 +580,7 @@ class _EventsPageState extends State<EventsPage> {
   Widget _buildSection(bool isLight, String title, List<EventItem> events) {
     final hasImages = events.any((e) => e.imageUrl.isNotEmpty);
     return Column(
+      key: _keyFor(title),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
@@ -505,6 +597,7 @@ class _EventsPageState extends State<EventsPage> {
         SizedBox(
           height: hasImages ? 430.0 : 280.0,
           child: ListView.builder(
+            controller: _hScrollFor(title),
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(14, 0, 0, 0),
             itemCount: events.length,
@@ -690,6 +783,7 @@ class _EventsPageState extends State<EventsPage> {
                       );
                     }
                     return ListView(
+                      controller: _outerScroll,
                       padding: const EdgeInsets.only(bottom: 24),
                       children: [
                         if (liveToday.isNotEmpty)  _buildSection(isLight, 'Live Today',        liveToday),
@@ -2350,6 +2444,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
   final _likes = <int, int>{};
   FeedComment? _replyingTo;
   String _imageUrl = '';
+  String _gifUrl = '';
   bool _sending = false;
   bool _picking = false;
   bool _showInputBar = false;
@@ -2463,15 +2558,41 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
       final bytes = await picked.readAsBytes();
       if (!mounted) return;
       final mime = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
-      setState(() => _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}');
+      setState(() { _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}'; _gifUrl = ''; });
     } finally {
       if (mounted) setState(() => _picking = false);
     }
   }
 
+  Future<void> _pickGif() async {
+    final completer = Completer<String?>();
+    final listener = _EvtGifListener(
+      onSelect: (GiphyMedia media) {
+        final url = media.images.fixedWidth?.gifUrl ?? media.images.original?.gifUrl ?? '';
+        if (!completer.isCompleted) completer.complete(url.isNotEmpty ? url : null);
+      },
+      onDismissed: () { if (!completer.isCompleted) completer.complete(null); },
+    );
+    GiphyDialog.instance.addListener(listener);
+    GiphyDialog.instance.configure(
+      settings: GiphySettings(
+        theme: GiphyTheme.automaticTheme,
+        mediaTypeConfig: [GiphyContentType.gif, GiphyContentType.sticker],
+        selectedContentType: GiphyContentType.gif,
+        showSuggestionsBar: true,
+        showConfirmationScreen: false,
+      ),
+    );
+    GiphyDialog.instance.show();
+    final url = await completer.future;
+    GiphyDialog.instance.removeListener(listener);
+    if (!mounted || url == null || url.isEmpty) return;
+    setState(() { _gifUrl = url; _imageUrl = ''; });
+  }
+
   Future<void> _send() async {
     final text = _commentCtrl.text.trim();
-    if ((text.isEmpty && _imageUrl.isEmpty) || _sending) return;
+    if ((text.isEmpty && _imageUrl.isEmpty && _gifUrl.isEmpty) || _sending) return;
     setState(() => _sending = true);
     try {
       final res = await http.post(
@@ -2480,13 +2601,14 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
         body: jsonEncode({
           'text': text,
           if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
+          if (_gifUrl.isNotEmpty) 'imageUrl': _gifUrl,
           if (_replyingTo != null) 'parentId': _replyingTo!.id,
         }),
       );
       if (!mounted) return;
       if (res.statusCode == 200 || res.statusCode == 201) {
         _commentCtrl.clear();
-        setState(() { _replyingTo = null; _imageUrl = ''; });
+        setState(() { _replyingTo = null; _imageUrl = ''; _gifUrl = ''; });
         await _loadComments();
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollCtrl.hasClients) {
@@ -3136,7 +3258,9 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
         // ── comment input bar ────────────────────────────────────────
         if (_showInputBar && widget.attendEnabled)
         Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(context).bottom + MediaQuery.paddingOf(context).bottom,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -3156,6 +3280,35 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                           top: 4, right: 4,
                           child: GestureDetector(
                             onTap: () => setState(() => _imageUrl = ''),
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: const BoxDecoration(
+                                color: Colors.black54,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close, size: 14, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              if (_gifUrl.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: SizedBox(
+                    height: 72,
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.network(_gifUrl, height: 72, fit: BoxFit.cover),
+                        ),
+                        Positioned(
+                          top: 4, right: 4,
+                          child: GestureDetector(
+                            onTap: () => setState(() => _gifUrl = ''),
                             child: Container(
                               padding: const EdgeInsets.all(2),
                               decoration: const BoxDecoration(
@@ -3232,12 +3385,23 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                         ),
                       ),
                     ),
+                    GestureDetector(
+                      onTap: _pickGif,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(
+                          Icons.gif,
+                          size: 28,
+                          color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 4),
                     Expanded(
                       child: ValueListenableBuilder<TextEditingValue>(
                         valueListenable: _commentCtrl,
                         builder: (context, value, _) {
-                          final canSend = value.text.trim().isNotEmpty || _imageUrl.isNotEmpty;
+                          final canSend = value.text.trim().isNotEmpty || _imageUrl.isNotEmpty || _gifUrl.isNotEmpty;
                           return TextField(
                             controller: _commentCtrl,
                             style: TextStyle(
@@ -3765,4 +3929,16 @@ class _FriendsAttendingSheetState extends State<_FriendsAttendingSheet> {
       ],
     );
   }
+}
+
+class _EvtGifListener implements GiphyMediaSelectionListener {
+  _EvtGifListener({required this.onSelect, required this.onDismissed});
+  final void Function(GiphyMedia media) onSelect;
+  final VoidCallback onDismissed;
+
+  @override
+  void onMediaSelect(GiphyMedia media) => onSelect(media);
+
+  @override
+  void onDismiss() => onDismissed();
 }

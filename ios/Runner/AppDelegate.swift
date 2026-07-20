@@ -137,6 +137,21 @@ import UIKit
                     self?.nativeTabBar?.isHidden = false
                 }
                 result(nil)
+            case "setProfileImage":
+                let args = call.arguments as? [String: Any]
+                if let typedData = args?["bytes"] as? FlutterStandardTypedData {
+                    DispatchQueue.main.async {
+                        self?.setProfileTabImage(from: typedData.data)
+                    }
+                } else if let urlString = args?["url"] as? String, let url = URL(string: urlString) {
+                    URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+                        guard let data else { return }
+                        DispatchQueue.main.async {
+                            self?.setProfileTabImage(from: data)
+                        }
+                    }.resume()
+                }
+                result(nil)
             default:
                 result(FlutterMethodNotImplemented)
             }
@@ -190,6 +205,20 @@ import UIKit
         let item = UITabBarItem(title: nil, image: UIImage(systemName: outlined), tag: tag)
         item.selectedImage = UIImage(systemName: filled)
         return item
+    }
+
+    @available(iOS 26, *)
+    private func setProfileTabImage(from data: Data) {
+        guard let image = UIImage(data: data) else { return }
+        let size = CGSize(width: 28, height: 28)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let clipped = renderer.image { ctx in
+            ctx.cgContext.addEllipse(in: CGRect(origin: .zero, size: size))
+            ctx.cgContext.clip()
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }.withRenderingMode(.alwaysOriginal)
+        nativeTabBar?.items?[4].image = clipped
+        nativeTabBar?.items?[4].selectedImage = clipped
     }
 
     // MARK: - UITabBarDelegate

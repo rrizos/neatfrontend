@@ -1575,6 +1575,7 @@ class _PollWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final voted = poll.votedOptionId != null;
     final total = poll.totalVotes;
+    final muted = isLight ? const Color(0xff8a8a8a) : const Color(0xff9a9a9a);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1592,10 +1593,7 @@ class _PollWidget extends StatelessWidget {
           ),
         Text(
           total == 1 ? '1 vote' : '$total votes',
-          style: TextStyle(
-            fontSize: 13,
-            color: isLight ? const Color(0xff8a8a8a) : const Color(0xff9a9a9a),
-          ),
+          style: TextStyle(fontSize: 13, color: muted),
         ),
       ],
     );
@@ -1622,88 +1620,125 @@ class _PollOptionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final fraction = totalVotes > 0 ? option.votes / totalVotes : 0.0;
     final pct = (fraction * 100).round();
-    final border = isLight ? const Color(0xffd9dee6) : const Color(0xff303030);
+    final border = isLight ? const Color(0xffd9dee6) : const Color(0xff333333);
     final fg = isLight ? Colors.black : Colors.white;
+    final subFg = isLight ? const Color(0xff616161) : const Color(0xff9a9a9a);
 
     if (!voted) {
       return GestureDetector(
         onTap: onTap,
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             border: Border.all(color: border),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(12),
           ),
-          child: Text(
-            option.text,
-            style: TextStyle(fontSize: 15, color: fg, fontWeight: FontWeight.w500),
+          child: Row(
+            children: [
+              Container(
+                width: 17,
+                height: 17,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: border, width: 1.5),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  option.text,
+                  style: TextStyle(fontSize: 15, color: fg, fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
           ),
         ),
       );
     }
 
     final fillColor = chosen
-        ? const Color(0xff3897f0).withValues(alpha: 0.18)
-        : (isLight ? const Color(0xfff0f0f0) : const Color(0xff242424));
+        ? const Color(0xff3897f0).withValues(alpha: 0.15)
+        : (isLight ? const Color(0xfff2f2f2) : const Color(0xff222222));
     final borderColor = chosen ? const Color(0xff3897f0) : border;
-
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: fraction),
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOut,
-      builder: (_, value, _) {
-        return Container(
-          height: 42,
-          decoration: BoxDecoration(
-            border: Border.all(color: borderColor),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(9),
-            child: Stack(
-              children: [
-                FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: value,
-                  child: Container(color: fillColor),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          option.text,
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: fg,
-                            fontWeight: chosen ? FontWeight.w600 : FontWeight.w500,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (chosen) ...[
-                        const Icon(Icons.check_circle_rounded, size: 16, color: Color(0xff3897f0)),
-                        const SizedBox(width: 4),
-                      ],
-                      Text(
-                        '$pct%',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: isLight ? const Color(0xff616161) : const Color(0xff9a9a9a),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+    return GestureDetector(
+      onTap: onTap,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.0, end: fraction),
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOut,
+        builder: (_, value, _) {
+          return Container(
+            height: 44,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              border: Border.all(color: borderColor, width: chosen ? 1.5 : 1.0),
+              borderRadius: BorderRadius.circular(12),
             ),
-          ),
-        );
-      },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(11),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: value,
+                    child: Container(color: fillColor),
+                  ),
+                  Positioned.fill(
+                    child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        if (chosen)
+                          const Padding(
+                            padding: EdgeInsets.only(right: 8),
+                            child: Icon(Icons.check_circle_rounded, size: 15, color: Color(0xff3897f0)),
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Container(
+                              width: 15,
+                              height: 15,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: border, width: 1.5),
+                              ),
+                            ),
+                          ),
+                        Expanded(
+                          child: Text(
+                            option.text,
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: fg,
+                              fontWeight: chosen ? FontWeight.w600 : FontWeight.w400,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '$pct%',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: chosen ? const Color(0xff3897f0) : subFg,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
+

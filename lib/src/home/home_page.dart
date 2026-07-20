@@ -135,6 +135,7 @@ class _HomePageState extends State<HomePage> {
           if (mounted) {
             if (!_isIOS26) setState(() => _isIOS26 = true);
             _kTabChannel.invokeMethod('showTabBar');
+            _syncNativeProfileIcon();
           }
       }
     });
@@ -493,15 +494,18 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       if (res.statusCode == 201) {
         _compose.clear();
-        setState(() {
-          _composeMedia.clear();
-          _composePollActive = false;
-          for (final c in _composePollControllers) { c.dispose(); }
-          _composePollControllers.clear();
-        });
         popped = true;
         Navigator.of(context).pop();
         _load();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          setState(() {
+            _composeMedia.clear();
+            _composePollActive = false;
+            for (final c in _composePollControllers) { c.dispose(); }
+            _composePollControllers.clear();
+          });
+        });
       } else if (res.statusCode == 413) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('File too large. Try a shorter video or smaller photos.')),
@@ -750,7 +754,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _pushProfileRoute(String username, {int? postId, bool? followEnabled}) {
+  void _pushProfileRoute(String username, {int? postId, bool? followEnabled, bool bouncePost = false, String? highlightCommentActor}) {
     // Profile pages always show the native bar. Save the current hide count
     // so we can restore it when the profile pops (e.g. back into messages).
     final savedCount = _navBarHideCount;
@@ -769,7 +773,10 @@ class _HomePageState extends State<HomePage> {
           onLogout: widget.onLogout,
           onSessionUpdated: widget.onSessionChanged,
           onPostTap: _openComments,
+          onPostTapWithHighlight: (post, actor) => _openComments(post, highlightActor: actor),
           initialPostId: postId,
+          bouncePost: bouncePost,
+          autoOpenCommentActor: highlightCommentActor,
           themeMode: widget.themeMode,
           onThemeModeChanged: widget.onThemeModeChanged,
           onHideNavBar: _hideNativeBar,
@@ -817,7 +824,7 @@ class _HomePageState extends State<HomePage> {
     await _load();
   }
 
-  Future<void> _openEvents({int initialTab = 0}) async {
+  Future<void> _openEvents({int initialTab = 0, int? initialEventId}) async {
     setState(() => _hasOfficialEvents = false);
     unawaited(_markOfficialEventsSeen());
     _hideNativeBar();
@@ -830,6 +837,7 @@ class _HomePageState extends State<HomePage> {
           onOpenUserProfile: _pushProfileRoute,
           preferredTab: initialTab,
           attendEnabled: _activeCity == null,
+          initialEventId: initialEventId,
         ),
       ),
     );
@@ -839,23 +847,32 @@ class _HomePageState extends State<HomePage> {
   Future<void> _openNotificationTarget(NotificationItem item, {String? eventType}) async {
     if (item.targetType == 'event') {
       final tab = eventType == 'community' ? 1 : 0;
-      await _openEvents(initialTab: tab);
+      await _openEvents(
+        initialTab: tab,
+        initialEventId: int.tryParse(item.targetId),
+      );
       return;
     }
     if (item.targetType == 'post' && item.targetId.isNotEmpty) {
-      final post = _posts
-          .where((p) => p.id.toString() == item.targetId)
-          .toList();
-      if (post.isNotEmpty) {
-        _openComments(post.first);
+      final postId = int.tryParse(item.targetId);
+
+      if (item.verb == 'liked your post' && postId != null) {
+        _pushProfileRoute(
+          widget.session.user.username,
+          postId: postId,
+          bouncePost: true,
+        );
         return;
       }
-      await _load();
-      final refreshed = _posts
-          .where((p) => p.id.toString() == item.targetId)
-          .toList();
-      if (refreshed.isNotEmpty) {
-        _openComments(refreshed.first);
+
+      if (item.verb == 'commented on your post' && postId != null) {
+        await _load();
+        if (!mounted) return;
+        _pushProfileRoute(
+          widget.session.user.username,
+          postId: postId,
+          highlightCommentActor: item.actor,
+        );
         return;
       }
     }
@@ -935,7 +952,7 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
-  void _openComments(FeedPost post) {
+  void _openComments(FeedPost post, {String? highlightActor}) {
     _hideNativeBar();
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
@@ -950,6 +967,7 @@ class _HomePageState extends State<HomePage> {
         onRefresh: () {},
         onOpenUserProfile: _pushProfileRoute,
         likingEnabled: _activeCity == null,
+        highlightActor: highlightActor,
         onHideNavBar: _hideNativeBar,
         onShowNavBar: _showNativeBar,
       ),
@@ -1918,10 +1936,33 @@ class _HomePageState extends State<HomePage> {
 
   // ── iOS legacy nav bar ─────────────────────────────────────────────────────
 
+  ImageProvider? _resolveAvatarProvider(String url) {
+    if (url.isEmpty) return null;
+    if (url.startsWith('data:')) {
+      final bytes = decodeAvatarUrl(url);
+      return bytes != null ? MemoryImage(bytes) : null;
+    }
+    final resolved = url.startsWith('/') ? '$apiBaseUrl$url' : url;
+    return CachedNetworkImageProvider(resolved);
+  }
+
+  Future<void> _syncNativeProfileIcon() async {
+    final url = widget.session.user.avatarUrl;
+    if (url.isEmpty) return;
+    if (url.startsWith('data:')) {
+      final bytes = decodeAvatarUrl(url);
+      if (bytes != null) {
+        await _kTabChannel.invokeMethod('setProfileImage', {'bytes': bytes});
+      }
+    } else {
+      final resolved = url.startsWith('/') ? '$apiBaseUrl$url' : url;
+      await _kTabChannel.invokeMethod('setProfileImage', {'url': resolved});
+    }
+  }
+
   Widget _buildLegacyNavBar(bool isLight) {
-    final avatarBytes   = decodeAvatarUrl(widget.session.user.avatarUrl);
     final activeColor   = isLight ? Colors.black : Colors.white;
-    final imageProvider = avatarBytes != null ? MemoryImage(avatarBytes) : null;
+    final imageProvider = _resolveAvatarProvider(widget.session.user.avatarUrl);
 
     Widget profileIcon({required bool active}) {
       if (!active) {
@@ -3441,19 +3482,25 @@ class _ViralViewState extends State<_ViralView> {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        '@${post.author}',
-                        style: TextStyle(
-                          color: isLight ? Colors.black : Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
+                      Flexible(
+                        child: Text(
+                          '@${post.author}',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isLight ? Colors.black : Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                       if (post.city.isNotEmpty) ...[
                         const SizedBox(width: 6),
-                        Text(
-                          '· ${post.city}',
-                          style: TextStyle(color: muted, fontSize: 13),
+                        Flexible(
+                          child: Text(
+                            '· ${post.city}',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: muted, fontSize: 13),
+                          ),
                         ),
                       ],
                     ],
@@ -4262,6 +4309,7 @@ class _CommentSheet extends StatefulWidget {
     required this.onRefresh,
     required this.onOpenUserProfile,
     this.likingEnabled = true,
+    this.highlightActor,
     this.onHideNavBar,
     this.onShowNavBar,
   });
@@ -4270,6 +4318,7 @@ class _CommentSheet extends StatefulWidget {
   final VoidCallback onRefresh;
   final ValueChanged<String> onOpenUserProfile;
   final bool likingEnabled;
+  final String? highlightActor;
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
 
@@ -4285,6 +4334,8 @@ class _CommentSheetState extends State<_CommentSheet> {
   final _liked = <int, bool>{};
   final _likes = <int, int>{};
   final _likedByOwner = <int, bool>{};
+  final _commentKeys = <int, GlobalKey>{};
+  int? _highlightedCommentId;
   FeedComment? _replyingTo;
   String _imageUrl = '';
   String _gifUrl   = '';
@@ -4296,6 +4347,51 @@ class _CommentSheetState extends State<_CommentSheet> {
     super.initState();
     _comments = List.from(widget.post.comments);
     _seedMaps(_comments);
+    if (widget.highlightActor != null) {
+      Future.delayed(const Duration(milliseconds: 350), () {
+        if (mounted) _scrollToActorComment();
+      });
+    }
+  }
+
+  Future<void> _scrollToActorComment() async {
+    // Find the most recent comment/reply by the actor
+    FeedComment? target;
+    for (final c in _comments) {
+      if (c.author == widget.highlightActor) target = c;
+      for (final r in c.replies) {
+        if (r.author == widget.highlightActor) target = r;
+      }
+    }
+    if (target == null || !mounted) return;
+
+    // Phase 1: scroll to bottom so the latest comment is built in the viewport
+    if (_scroll.hasClients) {
+      await _scroll.animateTo(
+        _scroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+      );
+    }
+    await Future.delayed(const Duration(milliseconds: 100));
+    if (!mounted) return;
+
+    // Phase 2: precise scroll to the comment
+    final key = _commentKeys[target.id];
+    if (key?.currentContext != null) {
+      await Scrollable.ensureVisible(
+        key!.currentContext!,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+        alignment: 0.3,
+      );
+    }
+    if (!mounted) return;
+
+    // Phase 3: flash highlight
+    setState(() => _highlightedCommentId = target!.id);
+    await Future.delayed(const Duration(milliseconds: 1400));
+    if (mounted) setState(() => _highlightedCommentId = null);
   }
 
   void _seedMaps(List<FeedComment> list) {
@@ -4525,9 +4621,17 @@ class _CommentSheetState extends State<_CommentSheet> {
     final imgBytes = (!isNetworkImg && c.imageUrl.isNotEmpty) ? decodeAvatarUrl(c.imageUrl) : null;
     final isLiked = _liked[c.id] ?? c.liked;
     final likeCount = _likes[c.id] ?? c.likes;
+    final highlighted = c.id == _highlightedCommentId;
+    final commentKey = _commentKeys.putIfAbsent(c.id, () => GlobalKey());
     DateTime? created;
     try { created = DateTime.parse(c.createdAt); } catch (_) {}
-    return Padding(
+    return AnimatedContainer(
+      key: commentKey,
+      duration: const Duration(milliseconds: 300),
+      color: highlighted
+          ? (isLight ? const Color(0xfffff3cc) : const Color(0xff3a2e00))
+          : Colors.transparent,
+      child: Padding(
       padding: EdgeInsets.fromLTRB(isReply ? 52 : 16, 10, 16, 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4750,6 +4854,7 @@ class _CommentSheetState extends State<_CommentSheet> {
           ),
         ],
       ),
+      ), // AnimatedContainer
     );
   }
 
