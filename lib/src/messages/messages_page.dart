@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_content_type.dart';
@@ -19,6 +20,7 @@ import 'package:record/record.dart';
 import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
+import '../core/realtime_service.dart';
 import '../core/report_post_sheet.dart';
 
 // ─── Colour tokens ────────────────────────────────────────────────────────────
@@ -216,6 +218,7 @@ class MessagesPage extends StatefulWidget {
     required this.onLogout,
     this.onOpenPost,
     this.onOpenUserProfile,
+    this.realtime,
   });
 
   final String token;
@@ -224,6 +227,9 @@ class MessagesPage extends StatefulWidget {
   final Future<void> Function() onLogout;
   final void Function(String author, int postId)? onOpenPost;
   final ValueChanged<String>? onOpenUserProfile;
+  // Native only — see realtime_service.dart. Null on web, where this screen
+  // keeps its original polling behavior untouched.
+  final RealtimeService? realtime;
 
   @override
   State<MessagesPage> createState() => _MessagesPageState();
@@ -237,21 +243,33 @@ class _MessagesPageState extends State<MessagesPage> {
   final ValueNotifier<int?> _openSwipeId = ValueNotifier(null);
   Timer? _presenceTimer;
   Timer? _inboxPollTimer;
+  StreamSubscription<RealtimeEvent>? _realtimeSub;
 
   @override
   void initState() {
     super.initState();
     _loadInboxCache();
     _load();
-    _pingPresence();
-    _presenceTimer   = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
-    _inboxPollTimer  = Timer.periodic(const Duration(seconds: 3),  (_) => _load());
+    if (kIsWeb) {
+      _pingPresence();
+      _presenceTimer  = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
+      _inboxPollTimer = Timer.periodic(const Duration(seconds: 3),  (_) => _load());
+    } else {
+      // Presence is connection-driven over the socket now (see
+      // RealtimeService/consumers.py) — no heartbeat needed. Any relevant
+      // push event just triggers an immediate refetch of the inbox; the
+      // slow timer below is purely a safety net in case an event is ever
+      // missed (a dropped connection during the reconnect window, etc).
+      _realtimeSub = widget.realtime?.events.listen((_) => _load());
+      _inboxPollTimer = Timer.periodic(const Duration(seconds: 25), (_) => _load());
+    }
   }
 
   @override
   void dispose() {
     _presenceTimer?.cancel();
     _inboxPollTimer?.cancel();
+    _realtimeSub?.cancel();
     _search.dispose();
     _openSwipeId.dispose();
     super.dispose();
@@ -311,6 +329,7 @@ class _MessagesPageState extends State<MessagesPage> {
         onLogout: widget.onLogout,
         onOpenPost: widget.onOpenPost,
         onOpenUserProfile: widget.onOpenUserProfile,
+        realtime: widget.realtime,
       ),
     ));
     if (mounted) _load();
@@ -1095,6 +1114,7 @@ class ConversationPage extends StatefulWidget {
     this.otherLastActive,
     this.onOpenPost,
     this.onOpenUserProfile,
+    this.realtime,
   });
 
   final String token;
@@ -1107,6 +1127,9 @@ class ConversationPage extends StatefulWidget {
   final Future<void> Function() onLogout;
   final void Function(String author, int postId)? onOpenPost;
   final ValueChanged<String>? onOpenUserProfile;
+  // Native only — see realtime_service.dart. Null on web, where this screen
+  // keeps its original polling behavior untouched.
+  final RealtimeService? realtime;
 
   @override
   State<ConversationPage> createState() => _ConversationPageState();
@@ -1136,6 +1159,7 @@ class _ConversationPageState extends State<ConversationPage> {
   // and skip clobbering the fresher local state — without this, a poll that
   // raced a reaction/edit/delete could revert it until the next cycle.
   DateTime? _lastLocalMutationAt;
+  StreamSubscription<RealtimeEvent>? _realtimeSub;
 
   Future<void> _react(int msgId, String emoji) async {
     final index = _messages.indexWhere((m) => m.id == msgId);
@@ -1378,13 +1402,22 @@ class _ConversationPageState extends State<ConversationPage> {
     _otherLastActive = widget.otherLastActive;
     _loadCache();
     _load(initial: true);
-    _pingPresence();
-    _presenceTimer   = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
-    // Polls messages/reactions/typing/read-receipts while this conversation is
-    // open. There's no push channel for DMs yet, so this interval is the whole
-    // "how fast does the other person's reaction/edit/delete show up" budget —
-    // kept short (not 3s) so reactions feel closer to instant on both sides.
-    _typingPollTimer = Timer.periodic(const Duration(seconds: 2),  (_) => _poll());
+    if (kIsWeb) {
+      _pingPresence();
+      _presenceTimer   = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
+      // Polls messages/reactions/typing/read-receipts while this conversation
+      // is open. There's no push channel on web, so this interval is the
+      // whole "how fast does the other person's reaction/edit/delete show
+      // up" budget — kept short (not 3s) so reactions feel closer to instant.
+      _typingPollTimer = Timer.periodic(const Duration(seconds: 2),  (_) => _poll());
+    } else {
+      // Native: messages/reactions/edits/deletes/typing/read-receipts/presence
+      // all arrive live over RealtimeService instead. Presence is
+      // connection-driven (no heartbeat needed). The slow timer below is
+      // purely a safety net in case a push event is ever missed.
+      _realtimeSub = widget.realtime?.events.listen(_handleRealtimeEvent);
+      _typingPollTimer = Timer.periodic(const Duration(seconds: 25), (_) => _poll());
+    }
     _composer.addListener(_onComposerChanged);
   }
 
@@ -1393,11 +1426,86 @@ class _ConversationPageState extends State<ConversationPage> {
     _presenceTimer?.cancel();
     _typingPollTimer?.cancel();
     _typingSignalDebounce?.cancel();
+    _realtimeSub?.cancel();
     _composer.removeListener(_onComposerChanged);
     if (_iTyping) _sendTypingSignal(false);
     _composer.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _handleRealtimeEvent(RealtimeEvent e) {
+    if (!mounted) return;
+    final payload = e.payload;
+    switch (e.type) {
+      case 'resynced':
+        _poll();
+        return;
+      case 'message.new':
+      case 'message.edited':
+      case 'message.reaction':
+        if (payload['conversation_id'] != widget.conversationId) return;
+        final raw = payload['message'];
+        if (raw is! Map) return;
+        final msg = MessageItem.fromJson(raw.cast<String, dynamic>());
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == msg.id);
+          if (idx != -1) {
+            _messages[idx] = msg;
+          } else {
+            // _sendRaw() never rewrites its optimistic (negative-id) entry's
+            // id once the REST send confirms — it relies on this event (or
+            // the safety-net poll) to reconcile it, matched by sender+text,
+            // same as _poll()'s merge. Without this, our own just-sent
+            // message would show up twice until the next safety-net poll.
+            final optimisticIdx = _messages.indexWhere(
+              (m) => m.id < 0 && m.sender == msg.sender && m.text == msg.text,
+            );
+            if (optimisticIdx != -1) {
+              _messages[optimisticIdx] = msg;
+            } else {
+              _messages = [..._messages, msg]..sort((a, b) => a.created.compareTo(b.created));
+            }
+          }
+        });
+        _saveCache(_messages);
+        if (e.type == 'message.new' && msg.sender != widget.currentUsername) {
+          _scrollToBottom();
+          widget.realtime?.send({'action': 'mark_read', 'conversation_id': widget.conversationId});
+        }
+        return;
+      case 'message.deleted':
+        if (payload['conversation_id'] != widget.conversationId) return;
+        final id = int.tryParse(payload['message_id']?.toString() ?? '');
+        if (id == null) return;
+        setState(() => _messages = _messages.where((m) => m.id != id).toList());
+        _saveCache(_messages);
+        return;
+      case 'typing':
+        if (payload['conversation_id'] != widget.conversationId) return;
+        final typing = payload['typing'] == true;
+        if (typing != _otherTyping) {
+          setState(() => _otherTyping = typing);
+          if (typing) _scrollToBottom();
+        }
+        return;
+      case 'read_receipt':
+        if (payload['conversation_id'] != widget.conversationId) return;
+        if (payload['reader']?.toString() != widget.otherUsername) return;
+        final readAt = DateTime.tryParse(payload['read_at']?.toString() ?? '');
+        if (readAt != null) setState(() => _otherLastReadAt = readAt);
+        return;
+      case 'presence':
+        if (payload['username']?.toString() != widget.otherUsername) return;
+        final lastActive = DateTime.tryParse(payload['last_active']?.toString() ?? '');
+        if (lastActive != null) setState(() => _otherLastActive = lastActive);
+        return;
+      case 'block':
+      case 'unblock':
+        if (payload['username']?.toString() != widget.otherUsername) return;
+        setState(() => _blocked = e.type == 'block');
+        return;
+    }
   }
 
   void _onComposerChanged() {
@@ -1419,6 +1527,14 @@ class _ConversationPageState extends State<ConversationPage> {
   }
 
   Future<void> _sendTypingSignal(bool typing) async {
+    if (!kIsWeb) {
+      widget.realtime?.send({
+        'action': 'typing',
+        'conversation_id': widget.conversationId,
+        'typing': typing,
+      });
+      return;
+    }
     try {
       await http.post(
         typingEndpoint(widget.conversationId),

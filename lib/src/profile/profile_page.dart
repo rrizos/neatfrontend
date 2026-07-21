@@ -12,6 +12,7 @@ import '../core/legacy_nav_bar.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
+import '../core/realtime_service.dart';
 import '../admin/admin_panel_page.dart';
 import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
@@ -41,6 +42,7 @@ class ProfilePage extends StatefulWidget {
     this.bouncePost = false,
     this.autoOpenCommentActor,
     this.onPostTapWithHighlight,
+    this.realtime,
   });
   final String username;
   final UserProfile currentUser;
@@ -66,6 +68,8 @@ class ProfilePage extends StatefulWidget {
   /// would otherwise hide HomePage's bottomNavigationBar entirely.
   final ValueChanged<int>? onNavTap;
   final int activeNavIndex;
+  // Native only — see realtime_service.dart. Null on web.
+  final RealtimeService? realtime;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -459,6 +463,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   widget.onOpenProfileAtPost!(author, postId);
                 }
               : null,
+          realtime: widget.realtime,
         ),
       ),
     );

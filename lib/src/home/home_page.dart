@@ -24,6 +24,7 @@ import '../core/mentions.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
 import '../core/push_service.dart';
+import '../core/realtime_service.dart';
 import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../events/events_page.dart';
@@ -84,6 +85,11 @@ class _HomePageState extends State<HomePage> {
   int? _inlinePostId;
   bool _isIOS26 = false;
   int _navBarHideCount = 0; // reference count; bar only shows when this reaches 0
+  // One WebSocket connection for the whole logged-in session (native only —
+  // see realtime_service.dart); owned here and handed down to the messaging
+  // and profile screens so it survives navigating between them.
+  late final RealtimeService _realtime = RealtimeService(token: widget.session.token);
+  StreamSubscription<RealtimeEvent>? _realtimeBadgeSub;
 
   static bool _detectIOS26() {
     if (kIsWeb || !Platform.isIOS) return false;
@@ -105,6 +111,11 @@ class _HomePageState extends State<HomePage> {
     PushService.instance.onDmTap = _openConversationById;
     PushService.instance.onSoftTap = _openNotifications;
     PushService.instance.replayPending();
+    _realtime.start();
+    // Instant nav-badge updates on native, on top of the existing on-demand
+    // refresh triggers below — web has no RealtimeService, so this stream
+    // simply never fires there.
+    _realtimeBadgeSub = _realtime.events.listen((_) => _loadUnreadMessages());
   }
 
   bool _cityMapPrewarmed = false;
@@ -155,6 +166,8 @@ class _HomePageState extends State<HomePage> {
     for (final c in _composePollControllers) { c.dispose(); }
     _cityScroll.dispose();
     _followingScroll.dispose();
+    _realtimeBadgeSub?.cancel();
+    _realtime.dispose();
     super.dispose();
   }
 
@@ -782,6 +795,7 @@ class _HomePageState extends State<HomePage> {
           onHideNavBar: _hideNativeBar,
           onShowNavBar: _showNativeBar,
           followEnabled: followEnabled ?? _activeCity == null,
+          realtime: _realtime,
         ),
       ),
     ).then((_) {
@@ -944,6 +958,7 @@ class _HomePageState extends State<HomePage> {
             _openProfileAtPost(author, postId);
           },
           onOpenUserProfile: _pushProfileRoute,
+          realtime: _realtime,
         ),
       ));
       _showNativeBar();
@@ -1827,6 +1842,7 @@ class _HomePageState extends State<HomePage> {
                         _openProfileAtPost(author, postId);
                       },
                       onOpenUserProfile: _pushProfileRoute,
+                      realtime: _realtime,
                     ),
                   ),
                 );
