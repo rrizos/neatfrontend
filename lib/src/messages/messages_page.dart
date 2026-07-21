@@ -1135,7 +1135,8 @@ class ConversationPage extends StatefulWidget {
   State<ConversationPage> createState() => _ConversationPageState();
 }
 
-class _ConversationPageState extends State<ConversationPage> {
+class _ConversationPageState extends State<ConversationPage>
+    with SingleTickerProviderStateMixin {
   final _composer = TextEditingController();
   final _scroll   = ScrollController();
   List<MessageItem> _messages = [];
@@ -1160,6 +1161,15 @@ class _ConversationPageState extends State<ConversationPage> {
   // raced a reaction/edit/delete could revert it until the next cycle.
   DateTime? _lastLocalMutationAt;
   StreamSubscription<RealtimeEvent>? _realtimeSub;
+
+  // Slide-to-reveal timestamps
+  double _slideOffset = 0;
+  double _slideAnimStart = 0;
+  double _ptrStartX = 0;
+  double _ptrStartY = 0;
+  bool _hTracking = false;
+  bool _vTracking = false;
+  late final AnimationController _slideCtrl;
 
   Future<void> _react(int msgId, String emoji) async {
     final index = _messages.indexWhere((m) => m.id == msgId);
@@ -1396,9 +1406,27 @@ class _ConversationPageState extends State<ConversationPage> {
     } catch (_) {}
   }
 
+  static String _msgTime(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  void _animateSlideBack() {
+    if (_slideOffset == 0) return;
+    _slideAnimStart = _slideOffset;
+    _slideCtrl.reset();
+    _slideCtrl.forward();
+  }
+
+  void _onSlideAnim() {
+    if (!mounted) return;
+    final t = CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut).value;
+    setState(() => _slideOffset = _slideAnimStart * (1 - t));
+  }
+
   @override
   void initState() {
     super.initState();
+    _slideCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 200));
+    _slideCtrl.addListener(_onSlideAnim);
     _otherLastActive = widget.otherLastActive;
     _loadCache();
     _load(initial: true);
@@ -1423,6 +1451,7 @@ class _ConversationPageState extends State<ConversationPage> {
 
   @override
   void dispose() {
+    _slideCtrl.dispose();
     _presenceTimer?.cancel();
     _typingPollTimer?.cancel();
     _typingSignalDebounce?.cancel();
@@ -2022,96 +2051,151 @@ class _ConversationPageState extends State<ConversationPage> {
       body: Column(
         children: [
           Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator(color: _kBlue))
-                : _messages.isEmpty
-                    ? _EmptyConversation(
-                        username: widget.otherUsername,
-                        avatarUrl: widget.otherAvatarUrl,
-                        fullName: widget.otherFullName,
-                        isLight: isLight,
-                      )
-                    : ListView.builder(
-                        controller: _scroll,
-                        reverse: true,
-                        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                        padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-                        itemCount: _messages.length + (_otherTyping ? 1 : 0),
-                        itemBuilder: (_, i) {
-                          // With reverse:true, i=0 is the visual bottom (newest).
-                          // Typing indicator sits at the very bottom when active.
-                          if (_otherTyping && i == 0) {
-                            return Padding(
-                              padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  _avatar(
-                                    username: widget.otherUsername,
-                                    url: widget.otherAvatarUrl,
-                                    radius: 14,
-                                    isLight: isLight,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  _TypingBubble(isLight: isLight),
-                                ],
-                              ),
-                            );
-                          }
-                          // Shift index by 1 when typing indicator occupies slot 0.
-                          final msgI = _otherTyping ? i - 1 : i;
-                          // Map visual index to forward message index.
-                          final actualIdx = _messages.length - 1 - msgI;
-                          final msg    = _messages[actualIdx];
-                          final mine   = msg.sender == widget.currentUsername;
-                          final isLast = _isLastInGroup(_messages, actualIdx);
-                          // Show "Read" under the last message I sent that the other person has read.
-                          bool showRead = false;
-                          if (mine && _otherLastReadAt != null) {
-                            final isRead = !msg.created.isAfter(_otherLastReadAt!);
-                            if (isRead) {
-                              showRead = !_messages.skip(actualIdx + 1).any((m) =>
-                                  m.sender == widget.currentUsername &&
-                                  !m.created.isAfter(_otherLastReadAt!));
+            child: Listener(
+              onPointerDown: (e) {
+                _ptrStartX = e.localPosition.dx;
+                _ptrStartY = e.localPosition.dy;
+                _hTracking = false;
+                _vTracking = false;
+                _slideCtrl.stop();
+              },
+              onPointerMove: (e) {
+                if (_vTracking) return;
+                final dx = e.localPosition.dx - _ptrStartX;
+                final dy = e.localPosition.dy - _ptrStartY;
+                if (!_hTracking) {
+                  if (dx.abs() < 6 && dy.abs() < 6) return;
+                  if (dy.abs() >= dx.abs() || dx > 0) { _vTracking = true; return; }
+                  _hTracking = true;
+                }
+                final next = (_slideOffset + e.delta.dx).clamp(-60.0, 0.0);
+                if (next != _slideOffset) setState(() => _slideOffset = next);
+              },
+              onPointerUp: (_) {
+                if (_hTracking) _animateSlideBack();
+                _hTracking = false;
+                _vTracking = false;
+              },
+              onPointerCancel: (_) {
+                if (_hTracking) _animateSlideBack();
+                _hTracking = false;
+                _vTracking = false;
+              },
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator(color: _kBlue))
+                  : _messages.isEmpty
+                      ? _EmptyConversation(
+                          username: widget.otherUsername,
+                          avatarUrl: widget.otherAvatarUrl,
+                          fullName: widget.otherFullName,
+                          isLight: isLight,
+                        )
+                      : ListView.builder(
+                          controller: _scroll,
+                          reverse: true,
+                          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                          itemCount: _messages.length + (_otherTyping ? 1 : 0),
+                          itemBuilder: (_, i) {
+                            if (_otherTyping && i == 0) {
+                              return Padding(
+                                padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    _avatar(
+                                      username: widget.otherUsername,
+                                      url: widget.otherAvatarUrl,
+                                      radius: 14,
+                                      isLight: isLight,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    _TypingBubble(isLight: isLight),
+                                  ],
+                                ),
+                              );
                             }
-                          }
-                          final msgKey = _messageKeys.putIfAbsent(msg.id, () => GlobalKey());
-                          final replyData = _parseReply(msg.text);
-                          return Column(
-                            key: msgKey,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_showDivider(_messages, actualIdx))
-                                _TimeDivider(time: msg.created, isLight: isLight),
-                              _MessageRow(
-                                message: msg,
-                                mine: mine,
-                                isLast: isLast,
-                                showRead: showRead,
-                                otherUsername: widget.otherUsername,
-                                otherAvatarUrl: widget.otherAvatarUrl,
-                                isLight: isLight,
-                                onOpenPost: widget.onOpenPost,
-                                onOpenUserProfile: widget.onOpenUserProfile != null
-                                    ? () => widget.onOpenUserProfile!(widget.otherUsername)
-                                    : null,
-                                reactions: msg.activeEmojis,
-                                onReply: () => _setReplyTo(msg),
-                                onDoubleTap: () => _react(msg.id, '❤️'),
-                                onLongPress: msg.id >= 0 ? () => _showLongPressSheet(msg) : null,
-                                onTapQuote: replyData != null ? () {
-                                  final targetId = _findReplyTarget(
-                                    sender: replyData.sender,
-                                    preview: replyData.preview,
-                                    id: replyData.id,
-                                  );
-                                  if (targetId != null) _scrollToMessage(targetId);
-                                } : null,
-                              ),
-                            ],
-                          );
-                        },
-                      ),
+                            final msgI      = _otherTyping ? i - 1 : i;
+                            final actualIdx = _messages.length - 1 - msgI;
+                            final msg    = _messages[actualIdx];
+                            final mine   = msg.sender == widget.currentUsername;
+                            final isLast = _isLastInGroup(_messages, actualIdx);
+                            bool showRead = false;
+                            if (mine && _otherLastReadAt != null) {
+                              final isRead = !msg.created.isAfter(_otherLastReadAt!);
+                              if (isRead) {
+                                showRead = !_messages.skip(actualIdx + 1).any((m) =>
+                                    m.sender == widget.currentUsername &&
+                                    !m.created.isAfter(_otherLastReadAt!));
+                              }
+                            }
+                            final msgKey    = _messageKeys.putIfAbsent(msg.id, () => GlobalKey());
+                            final replyData = _parseReply(msg.text);
+                            final timeStr   = _msgTime(msg.created);
+                            final progress  = (-_slideOffset / 60).clamp(0.0, 1.0);
+                            return Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Positioned(
+                                  right: -56.0 - _slideOffset,
+                                  top: 0, bottom: 0,
+                                  width: 52,
+                                  child: Opacity(
+                                    opacity: progress,
+                                    child: Center(
+                                      child: Text(
+                                        timeStr,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isLight
+                                              ? const Color(0xff737373)
+                                              : const Color(0xff8e8e8e),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Transform.translate(
+                                  offset: Offset(_slideOffset, 0),
+                                  child: Column(
+                                    key: msgKey,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (_showDivider(_messages, actualIdx))
+                                        _TimeDivider(time: msg.created, isLight: isLight),
+                                      _MessageRow(
+                                        message: msg,
+                                        mine: mine,
+                                        isLast: isLast,
+                                        showRead: showRead,
+                                        otherUsername: widget.otherUsername,
+                                        otherAvatarUrl: widget.otherAvatarUrl,
+                                        isLight: isLight,
+                                        onOpenPost: widget.onOpenPost,
+                                        onOpenUserProfile: widget.onOpenUserProfile != null
+                                            ? () => widget.onOpenUserProfile!(widget.otherUsername)
+                                            : null,
+                                        reactions: msg.activeEmojis,
+                                        onReply: () => _setReplyTo(msg),
+                                        onDoubleTap: () => _react(msg.id, '❤️'),
+                                        onLongPress: msg.id >= 0 ? () => _showLongPressSheet(msg) : null,
+                                        onTapQuote: replyData != null ? () {
+                                          final targetId = _findReplyTarget(
+                                            sender: replyData.sender,
+                                            preview: replyData.preview,
+                                            id: replyData.id,
+                                          );
+                                          if (targetId != null) _scrollToMessage(targetId);
+                                        } : null,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+            ),
           ),
           if (_isOffline) _ConvOfflineBanner(isLight: isLight),
           if (_unavailable)

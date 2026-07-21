@@ -1466,7 +1466,10 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                     onTap: widget.onComment,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: CommentBubbleIcon(color: isLight ? Colors.black : Colors.white, size: 25),
+                      child: Transform.translate(
+                        offset: const Offset(0, 1),
+                        child: CommentBubbleIcon(color: isLight ? Colors.black : Colors.white, size: 25),
+                      ),
                     ),
                   ),
                   if (widget.post.comments.isNotEmpty) ...[
@@ -1513,19 +1516,20 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                   ],
                   const Spacer(),
                   // ── Save ──────────────────────────────────────────────
-                  GestureDetector(
-                    onTap: _handleSave,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 8, 5.5, 8),
-                      child: Icon(
-                        _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-                        color: _saved
-                            ? const Color(0xffFFB800)
-                            : (isLight ? Colors.black : Colors.white),
-                        size: 28,
+                  if (widget.likingEnabled)
+                    GestureDetector(
+                      onTap: _handleSave,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 8, 5.5, 8),
+                        child: Icon(
+                          _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                          color: _saved
+                              ? const Color(0xffFFB800)
+                              : (isLight ? Colors.black : Colors.white),
+                          size: 28,
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
