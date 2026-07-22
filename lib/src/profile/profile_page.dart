@@ -90,6 +90,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   List<FeedPost>? _savedPosts;
   bool _savedLoading = false;
   final Set<String> _followingAuthors = {};
+  List<FeedPost>? _otherCityPosts;
+  bool _otherCityPostsLoading = false;
 
   @override
   void initState() {
@@ -138,6 +140,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       if (_tabController.index == 2) _loadSavedPosts();
       // If server didn't supply followsYou, check followers list as fallback
       if (!(_profile?.followsYou ?? false)) _checkFollowsYou();
+      // For other-city profiles, fetch their posts from the API
+      if (!widget.followEnabled) _loadOtherCityPosts();
       if (widget.initialPostId != null) {
         final bool doAuto = widget.bouncePost || widget.autoOpenCommentActor != null;
         if (doAuto) {
@@ -573,16 +577,18 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Widget _buildPostCard(FeedPost post, {Key? key}) {
+    final interactive = widget.followEnabled;
     return FeedPostCard(
       key: key,
       post: post,
       token: widget.token,
       currentUser: widget.currentUser,
       followingAuthors: _followingAuthors,
-      onFollowUser: _followUser,
-      onUnfollowUser: _unfollowUser,
-      onLike: () => _likePost(post),
-      onSave: () => _savePost(post),
+      onFollowUser: interactive ? _followUser : null,
+      onUnfollowUser: interactive ? _unfollowUser : null,
+      likingEnabled: interactive,
+      onLike: interactive ? () => _likePost(post) : () async => false,
+      onSave: interactive ? () => _savePost(post) : () async => false,
       onShare: () async {
         bool shared = false;
         widget.onHideNavBar?.call();
@@ -597,7 +603,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         widget.onShowNavBar?.call();
         return shared;
       },
-      onVote: (optionId) => _voteOnPoll(post, optionId),
+      onVote: interactive ? (optionId) => _voteOnPoll(post, optionId) : null,
       onMore: () => _openMoreSheet(post),
       onComment: () => widget.onPostTap(post),
       onProfileTap: () => widget.onOpenUserProfile(post.author),
@@ -668,6 +674,34 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     } catch (_) {
       _savedLoading = false;
       if (mounted) setState(() { _savedPosts ??= []; _savedLoading = false; });
+    }
+  }
+
+  Future<void> _loadOtherCityPosts() async {
+    final profile = _profile;
+    if (profile == null || _otherCityPostsLoading) return;
+    if (mounted) setState(() => _otherCityPostsLoading = true);
+    try {
+      final res = await http.get(
+        postsEndpoint(city: profile.city),
+        headers: authGetHeaders(widget.token),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        final all = (decoded['posts'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(FeedPost.fromJson)
+            .toList();
+        setState(() {
+          _otherCityPosts = all.where((p) => p.author == profile.username).toList();
+          _otherCityPostsLoading = false;
+        });
+      } else {
+        setState(() { _otherCityPosts = []; _otherCityPostsLoading = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _otherCityPosts ??= []; _otherCityPostsLoading = false; });
     }
   }
 
@@ -744,6 +778,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           onOpenProfile: widget.onOpenUserProfile,
           isOwn: profile.username == widget.currentUser.username,
           initialTab: initialTab,
+          followEnabled: widget.followEnabled,
         ),
       ),
     );
@@ -758,9 +793,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final isOwn = profile.username == widget.currentUser.username;
-    final userPosts = widget.posts
-        .where((p) => p.author == profile.username)
-        .toList();
+    final feedPosts = widget.posts.where((p) => p.author == profile.username).toList();
+    final fetched = _otherCityPosts;
+    final userPosts = widget.followEnabled
+        ? feedPosts
+        : ((fetched != null && fetched.isNotEmpty) ? fetched : feedPosts);
     return AbsorbPointer(
       absorbing: _autoNavigating,
       child: Scaffold(
@@ -995,7 +1032,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           controller: _tabController,
           children: [
             // Tab 0: Posts
-            userPosts.isEmpty
+            (!widget.followEnabled && _otherCityPostsLoading)
+                ? const Center(child: CircularProgressIndicator())
+                : userPosts.isEmpty
                 ? const CustomScrollView(slivers: [SliverFillRemaining(hasScrollBody: false, child: Center(child: Text('No posts yet.', style: TextStyle(color: Color(0xffb3b3b3)))))])
                 : ListView.builder(
                     key: const PageStorageKey('posts'),
@@ -1955,6 +1994,7 @@ class _UserListPage extends StatefulWidget {
     required this.onOpenProfile,
     required this.isOwn,
     this.initialTab = 0,
+    this.followEnabled = true,
   });
 
   final String profileUsername;
@@ -1968,6 +2008,7 @@ class _UserListPage extends StatefulWidget {
   final ValueChanged<String> onOpenProfile;
   final bool isOwn;
   final int initialTab;
+  final bool followEnabled;
 
   @override
   State<_UserListPage> createState() => _UserListPageState();
@@ -2326,6 +2367,7 @@ class _UserListPageState extends State<_UserListPage>
 
     return GestureDetector(
       onTap: () => widget.onOpenProfile(user.username),
+      behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
@@ -2387,7 +2429,7 @@ class _UserListPageState extends State<_UserListPage>
                 ],
               ),
             ),
-            if (canToggle) ...[
+            if (canToggle && widget.followEnabled) ...[
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: () => _toggleFollow(user),
