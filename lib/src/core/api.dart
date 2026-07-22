@@ -33,7 +33,9 @@ Uri postsEndpoint({bool fresh = false, String? city}) {
 
 Uri viralPostsEndpoint({required String city, required String period}) {
   final uri = Uri.parse('$apiBaseUrl/api/posts/viral/');
-  final params = <String, String>{'period': period};
+  // light=1 opts into the compact charts payload (comment counts instead of
+  // full comment threads); the comment sheet lazy-loads threads on open.
+  final params = <String, String>{'period': period, 'light': '1'};
   if (city.isNotEmpty) params['city'] = city;
   return uri.replace(queryParameters: params);
 }

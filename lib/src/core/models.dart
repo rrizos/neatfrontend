@@ -253,6 +253,17 @@ class FeedPost {
   bool saved = false;
   Poll? poll;
 
+  // Server-sent comment count. Populated for lightweight payloads (e.g. the
+  // viral/charts list) that ship the count but not the full comment threads.
+  // Null for older/other payloads, where the loaded [comments] list is the
+  // source of truth. Use [commentCount] to read either uniformly.
+  int? serverCommentCount;
+
+  /// Comment count for display/scoring, independent of whether the full
+  /// comment threads were shipped: prefers the server-sent count, else the
+  /// length of the loaded [comments] list.
+  int get commentCount => serverCommentCount ?? comments.length;
+
   factory FeedPost.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
     final comments = (json['comments'] as List<dynamic>? ?? const [])
@@ -301,6 +312,7 @@ class FeedPost {
     );
     post.liked = json['liked'] == true;
     post.saved = json['saved'] == true;
+    if (json['comment_count'] != null) post.serverCommentCount = parseInt(json['comment_count']);
     if (json['poll'] != null) post.poll = Poll.fromJson(json['poll'] as Map<String, dynamic>);
     return post;
   }

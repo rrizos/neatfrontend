@@ -98,7 +98,9 @@ class _BlockedAccountsPageState extends State<BlockedAccountsPage> {
                       leading: CircleAvatar(
                         backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
                         foregroundImage: user.avatarUrl.isNotEmpty
-                            ? CachedNetworkImageProvider(user.avatarUrl, cacheManager: imageCacheManager)
+                            ? ResizeImage(
+                                CachedNetworkImageProvider(user.avatarUrl, cacheManager: imageCacheManager),
+                                width: 120) // ~20px radius × 2 × 3.0 max DPR
                             : null,
                         child: Text(
                           initialFor(user.username),

@@ -67,10 +67,17 @@ Widget _avatar({
   bool isLight = false,
   bool ring = false,
 }) {
+  // Decode avatars at the circle's physical size instead of full resolution.
+  // radius*2 logical px × a 3.0 max device-pixel-ratio cap covers all phones;
+  // over-decoding on the rare DPR>3 screen is harmless.
+  final base = _imgProvider(url);
+  final avatarImage = base == null
+      ? null
+      : ResizeImage(base, width: (radius * 2 * 3).round());
   Widget w = CircleAvatar(
     radius: radius,
     backgroundColor: isLight ? const Color(0xffd8d8d8) : const Color(0xff3a3a3a),
-    foregroundImage: _imgProvider(url),
+    foregroundImage: avatarImage,
     // always provide child as letter fallback in case foregroundImage fails
     child: Text(
       initialFor(username),
@@ -3205,7 +3212,8 @@ class _SharedPostCard extends StatelessWidget {
     final border    = isLight ? const Color(0xffdbdbdb) : const Color(0xff363636);
     final textClr   = isLight ? Colors.black : Colors.white;
     final sub       = isLight ? _kSubLgt : _kSubDark;
-    final avatarImg = avatarUrl.isNotEmpty ? _imgProvider(avatarUrl) : null;
+    final avatarBase = avatarUrl.isNotEmpty ? _imgProvider(avatarUrl) : null;
+    final avatarImg = avatarBase == null ? null : ResizeImage(avatarBase, width: 288);
     final mediaBytes = mediaUrl.isNotEmpty ? _dataUrlBytes(mediaUrl) : null;
 
     // A real photo/video always wins; otherwise synthesize a "photo-styled"
@@ -3229,11 +3237,12 @@ class _SharedPostCard extends StatelessWidget {
                 child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 44),
               )
             : (mediaBytes != null
-                ? Image.memory(mediaBytes, fit: BoxFit.cover)
+                ? Image.memory(mediaBytes, fit: BoxFit.cover, cacheWidth: 630)
                 : CachedNetworkImage(
                     imageUrl: mediaUrl,
                     cacheManager: imageCacheManager,
                     fit: BoxFit.cover,
+                    memCacheWidth: 630, // ~210 logical px card × 3.0 max DPR
                     fadeInDuration: Duration.zero,
                   )),
       );

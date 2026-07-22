@@ -443,11 +443,14 @@ class _ShareSheetState extends State<_ShareSheet> {
                             final isSent = _sent.contains(t.username);
                             final isSending = _sending.contains(t.username);
                             final bytes = t.avatarUrl.startsWith('data:') ? _dataUrlBytes(t.avatarUrl) : null;
-                            final ImageProvider? avatarImg = bytes != null
+                            final ImageProvider? avatarBase = bytes != null
                                 ? MemoryImage(bytes)
                                 : (t.avatarUrl.startsWith('http')
                                     ? CachedNetworkImageProvider(t.avatarUrl, cacheManager: imageCacheManager)
                                     : null);
+                            // Cap the avatar decode (radius 22) — loss-free, tiny in memory.
+                            final ImageProvider? avatarImg =
+                                avatarBase == null ? null : ResizeImage(avatarBase, width: 288);
                             return Padding(
                               padding: const EdgeInsets.symmetric(vertical: 9),
                               child: Row(
@@ -583,11 +586,12 @@ class _PostPreview extends StatelessWidget {
               child: SizedBox(
                 width: 48, height: 48,
                 child: bytes != null
-                    ? Image.memory(bytes, fit: BoxFit.cover)
+                    ? Image.memory(bytes, fit: BoxFit.cover, cacheWidth: 144)
                     : CachedNetworkImage(
                         imageUrl: post.imageUrl,
                         cacheManager: imageCacheManager,
                         fit: BoxFit.cover,
+                        memCacheWidth: 144, // 48 logical px × 3.0 max DPR
                         fadeInDuration: Duration.zero,
                       ),
               ),

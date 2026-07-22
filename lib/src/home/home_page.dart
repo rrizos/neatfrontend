@@ -33,6 +33,15 @@ import '../map/greece_cities.dart';
 import '../messages/messages_page.dart';
 import '../profile/profile_page.dart';
 
+// Top-level so it can run on a background isolate via `compute`. Decoding a
+// large city feed and mapping every entry to a FeedPost is CPU work that would
+// otherwise block the UI isolate (janking the frame on load/refresh). Must stay
+// a pure top-level function with no captured state for `compute` to accept it.
+List<FeedPost> _parseFeedPosts(String body) {
+  final decoded = jsonDecode(body) as List<dynamic>;
+  return decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList();
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({
     super.key,
@@ -175,10 +184,10 @@ class _HomePageState extends State<HomePage> {
   String get _postsCacheKey =>
       _activeCity == null ? 'cached_posts_home' : 'cached_posts_city_$_activeCity';
 
-  Future<void> _saveCachedPosts(List<dynamic> raw) async {
+  Future<void> _saveCachedPosts(String rawBody) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_postsCacheKey, jsonEncode(raw));
+      await prefs.setString(_postsCacheKey, rawBody);
     } catch (_) {}
   }
 
@@ -187,8 +196,7 @@ class _HomePageState extends State<HomePage> {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_postsCacheKey);
       if (raw == null || !mounted) return;
-      final decoded = jsonDecode(raw) as List<dynamic>;
-      final posts = decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList();
+      final posts = await compute(_parseFeedPosts, raw);
       if (mounted) {
         setState(() {
           _posts
@@ -207,12 +215,8 @@ class _HomePageState extends State<HomePage> {
         headers: authGetHeaders(widget.session.token),
       );
       if (res.statusCode == 401) return widget.onLogout();
-      final decoded = jsonDecode(res.body) as List<dynamic>;
-      final posts = decoded
-          .whereType<Map<String, dynamic>>()
-          .map(FeedPost.fromJson)
-          .toList();
-      unawaited(_saveCachedPosts(decoded));
+      final posts = await compute(_parseFeedPosts, res.body);
+      unawaited(_saveCachedPosts(res.body));
       if (!mounted) return;
       setState(() {
         _posts
@@ -1006,6 +1010,9 @@ class _HomePageState extends State<HomePage> {
             builder: (pageContext, setPageState) {
           // ── helper: single media cell with X button ──────────────────────
           Widget mediaCell(_ComposeMedia item, int index, double size) {
+            // Freshly-picked photos can be huge; decode only to the cell size.
+            final cellPx =
+                (size * MediaQuery.devicePixelRatioOf(context)).round();
             Widget preview;
             if (item.isVideo) {
               preview = Container(
@@ -1016,12 +1023,13 @@ class _HomePageState extends State<HomePage> {
                 ),
               );
             } else if (item.imageBytes != null) {
-              preview = Image.memory(item.imageBytes!, fit: BoxFit.cover);
+              preview = Image.memory(item.imageBytes!, fit: BoxFit.cover, cacheWidth: cellPx);
             } else if (item.externalUrl != null) {
               preview = CachedNetworkImage(
                 imageUrl: item.externalUrl!,
                 cacheManager: imageCacheManager,
                 fit: BoxFit.cover,
+                memCacheWidth: cellPx,
                 fadeInDuration: Duration.zero,
               );
             } else {
@@ -1066,6 +1074,8 @@ class _HomePageState extends State<HomePage> {
 
             if (_composeMedia.length == 1) {
               final item = _composeMedia.first;
+              final singlePx =
+                  (width * MediaQuery.devicePixelRatioOf(context)).round();
               Widget preview;
               if (item.isVideo) {
                 preview = Container(
@@ -1076,12 +1086,13 @@ class _HomePageState extends State<HomePage> {
                   ),
                 );
               } else if (item.imageBytes != null) {
-                preview = Image.memory(item.imageBytes!, fit: BoxFit.cover);
+                preview = Image.memory(item.imageBytes!, fit: BoxFit.cover, cacheWidth: singlePx);
               } else if (item.externalUrl != null) {
                 preview = CachedNetworkImage(
                   imageUrl: item.externalUrl!,
                   cacheManager: imageCacheManager,
                   fit: BoxFit.cover,
+                  memCacheWidth: singlePx,
                   fadeInDuration: Duration.zero,
                 );
               } else {
@@ -1953,12 +1964,18 @@ class _HomePageState extends State<HomePage> {
 
   ImageProvider? _resolveAvatarProvider(String url) {
     if (url.isEmpty) return null;
+    final ImageProvider base;
     if (url.startsWith('data:')) {
       final bytes = decodeAvatarUrl(url);
-      return bytes != null ? MemoryImage(bytes) : null;
+      if (bytes == null) return null;
+      base = MemoryImage(bytes);
+    } else {
+      final resolved = url.startsWith('/') ? '$apiBaseUrl$url' : url;
+      base = CachedNetworkImageProvider(resolved);
     }
-    final resolved = url.startsWith('/') ? '$apiBaseUrl$url' : url;
-    return CachedNetworkImageProvider(resolved);
+    // Avatars never render larger than a ~96px-logical circle; cap the decode
+    // at 288 physical px (loss-free everywhere, tiny in memory).
+    return ResizeImage(base, width: 288);
   }
 
   Future<void> _syncNativeProfileIcon() async {
@@ -2461,7 +2478,7 @@ class _LogoMark extends StatelessWidget {
 // ── Viral posts tab ───────────────────────────────────────────────────────────
 
 class _ViralView extends StatefulWidget {
-  _ViralView({
+  const _ViralView({
     super.key,
     required this.token,
     required this.currentUser,
@@ -2543,7 +2560,7 @@ class _ViralViewState extends State<_ViralView> {
   // ranked posts the server returns — ranking/filtering itself happens
   // server-side now (see viral_posts in posts/views.py), instead of
   // downloading the whole city feed and sorting it locally on every load.
-  double _score(FeedPost p) => (p.likes * 0.45 + p.comments.length * 0.55) * 100;
+  double _score(FeedPost p) => (p.likes * 0.45 + p.commentCount * 0.55) * 100;
 
   String get _periodParam => switch (_period) {
         _ViralPeriod.daily => 'daily',
@@ -2563,8 +2580,8 @@ class _ViralViewState extends State<_ViralView> {
         setState(() => _loadingViral = false);
         return;
       }
-      final decoded = jsonDecode(res.body) as List<dynamic>;
-      final posts = decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList();
+      final posts = await compute(_parseFeedPosts, res.body);
+      if (!mounted) return;
       setState(() {
         _viralPosts = posts;
         _loadingViral = false;
@@ -3058,8 +3075,8 @@ class _ViralViewState extends State<_ViralView> {
     try {
       final res = await http.get(postsEndpoint(city: widget.currentUser.city), headers: authGetHeaders(widget.token));
       if (!mounted || res.statusCode != 200) return;
-      final decoded = jsonDecode(res.body) as List<dynamic>;
-      if (mounted) setState(() => _cityPosts = decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList());
+      final posts = await compute(_parseFeedPosts, res.body);
+      if (mounted) setState(() => _cityPosts = posts);
     } catch (_) {}
   }
 
@@ -4036,11 +4053,13 @@ class _NotifAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bytes = decodeAvatarUrl(url);
-    final ImageProvider? img = bytes != null
+    final ImageProvider? base = bytes != null
         ? MemoryImage(bytes)
         : (url.startsWith('http')
             ? CachedNetworkImageProvider(url, cacheManager: imageCacheManager)
             : null);
+    // Cap the notification-avatar decode — loss-free, tiny in memory.
+    final ImageProvider? img = base == null ? null : ResizeImage(base, width: 288);
     return CircleAvatar(
       radius: 22,
       backgroundColor: isLight ? const Color(0xffe0e0e0) : const Color(0xff2a2a2a),
@@ -4127,6 +4146,7 @@ class _NotifTile extends StatelessWidget {
               imageUrl: eventImageUrl,
               cacheManager: imageCacheManager,
               fit: BoxFit.cover,
+              memCacheWidth: 132, // 44 logical px × 3.0 max DPR
               fadeInDuration: Duration.zero,
               errorWidget: (_, _, _) => const SizedBox.shrink(),
             ),
@@ -4150,7 +4170,7 @@ class _NotifTile extends StatelessWidget {
           try { bytes = base64Decode(imgUrl.substring(comma + 1)); } catch (_) {}
         }
         if (bytes != null) {
-          thumb = Image.memory(bytes, width: 44, height: 44, fit: BoxFit.cover);
+          thumb = Image.memory(bytes, width: 44, height: 44, fit: BoxFit.cover, cacheWidth: 132);
         }
       } else if (imgUrl.isNotEmpty) {
         thumb = CachedNetworkImage(
@@ -4159,6 +4179,7 @@ class _NotifTile extends StatelessWidget {
           width: 44,
           height: 44,
           fit: BoxFit.cover,
+          memCacheWidth: 132, // 44 logical px × 3.0 max DPR
           fadeInDuration: Duration.zero,
           errorWidget: (_, _, _) => const SizedBox.shrink(),
         );
@@ -4342,16 +4363,40 @@ class _CommentSheetState extends State<_CommentSheet> {
   String _gifUrl   = '';
   bool _sending = false;
   bool _picking = false;
+  bool _hydratingComments = false;
 
   @override
   void initState() {
     super.initState();
     _comments = List.from(widget.post.comments);
     _seedMaps(_comments);
+    // Lightweight payloads (the viral/charts list) ship the comment count but
+    // not the threads, to keep that response small. If we were opened on such a
+    // post, pull the real comments now from the post-detail endpoint.
+    if (_comments.isEmpty && widget.post.commentCount > 0) {
+      _hydrateComments();
+    }
     if (widget.highlightActor != null) {
       Future.delayed(const Duration(milliseconds: 350), () {
         if (mounted) _scrollToActorComment();
       });
+    }
+  }
+
+  Future<void> _hydrateComments() async {
+    setState(() => _hydratingComments = true);
+    try {
+      final res = await http.get(
+        postDetailEndpoint(widget.post.id),
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        _applyUpdatedPost(jsonDecode(res.body) as Map<String, dynamic>);
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _hydratingComments = false);
     }
   }
 
@@ -4891,14 +4936,16 @@ class _CommentSheetState extends State<_CommentSheet> {
               Expanded(
                 child: _comments.isEmpty
                     ? Center(
-                        child: Text(
-                          widget.likingEnabled ? 'No comments yet.\nBe the first!' : 'No comments yet.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: isLight ? const Color(0xff8b95a3) : const Color(0xffb3b3b3),
-                            height: 1.6,
-                          ),
-                        ),
+                        child: _hydratingComments
+                            ? const CircularProgressIndicator(strokeWidth: 2)
+                            : Text(
+                                widget.likingEnabled ? 'No comments yet.\nBe the first!' : 'No comments yet.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: isLight ? const Color(0xff8b95a3) : const Color(0xffb3b3b3),
+                                  height: 1.6,
+                                ),
+                              ),
                       )
                     : ListView.builder(
                         controller: _scroll,

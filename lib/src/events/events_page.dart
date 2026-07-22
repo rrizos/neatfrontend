@@ -191,6 +191,26 @@ String _timeAgo(DateTime dt) {
   return '${d.inDays}d ago';
 }
 
+// Top-level so it can run on a background isolate via `compute`, keeping the
+// decode + map + city-filter + sort off the UI isolate. Accepts either the
+// server's `{events: [...]}` wrapper or a bare cached list. Must stay pure with
+// no captured state for `compute` to accept it.
+List<EventItem> _parseEvents((String, String) args) {
+  final (body, city) = args;
+  final decoded = jsonDecode(body);
+  final rawList = decoded is Map<String, dynamic>
+      ? (decoded['events'] as List<dynamic>? ?? const [])
+      : decoded as List<dynamic>;
+  final lc = city.toLowerCase();
+  final events = rawList
+      .whereType<Map<String, dynamic>>()
+      .map(EventItem.fromJson)
+      .where((e) => e.city.toLowerCase() == lc)
+      .toList();
+  events.sort((a, b) => b.attendees.compareTo(a.attendees));
+  return events;
+}
+
 class EventsPage extends StatefulWidget {
   const EventsPage({
     super.key,
@@ -252,10 +272,10 @@ class _EventsPageState extends State<EventsPage> {
     super.dispose();
   }
 
-  Future<void> _saveEventsCache(List<dynamic> raw) async {
+  Future<void> _saveEventsCache(String rawBody) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_cacheKey, jsonEncode(raw));
+      await prefs.setString(_cacheKey, rawBody);
     } catch (_) {}
   }
 
@@ -264,12 +284,7 @@ class _EventsPageState extends State<EventsPage> {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_cacheKey);
       if (raw == null || !mounted) return;
-      final events = (jsonDecode(raw) as List)
-          .whereType<Map<String, dynamic>>()
-          .map(EventItem.fromJson)
-          .where((e) => e.city.toLowerCase() == widget.city.toLowerCase())
-          .toList();
-      events.sort((a, b) => b.attendees.compareTo(a.attendees));
+      final events = await compute(_parseEvents, (raw, widget.city));
       if (!mounted || events.isEmpty) return;
       setState(() { _events = events; _loading = false; });
     } catch (_) {}
@@ -294,15 +309,8 @@ class _EventsPageState extends State<EventsPage> {
         if (mounted) setState(() => _loading = false);
         return;
       }
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final rawList = (decoded['events'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .toList();
-      unawaited(_saveEventsCache(rawList));
-      final events = rawList.map(EventItem.fromJson)
-          .where((e) => e.city.toLowerCase() == widget.city.toLowerCase())
-          .toList();
-      events.sort((a, b) => b.attendees.compareTo(a.attendees));
+      unawaited(_saveEventsCache(res.body));
+      final events = await compute(_parseEvents, (res.body, widget.city));
       if (!mounted) return;
       setState(() { _events = events; _loading = false; _isOffline = false; });
       if (widget.initialEventId != null) {
@@ -2383,6 +2391,12 @@ class _EventMedia extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Cap the decode to the display width in physical px (full-bleed card
+    // image); avoids decoding a full-res photo into memory. Width-only keeps
+    // the aspect ratio.
+    final decodeWidth =
+        (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context))
+            .round();
     if (url.startsWith('data:')) {
       final comma = url.indexOf(',');
       if (comma > -1) {
@@ -2390,6 +2404,7 @@ class _EventMedia extends StatelessWidget {
           return Image.memory(
             base64Decode(url.substring(comma + 1)),
             fit: BoxFit.cover,
+            cacheWidth: decodeWidth,
           );
         } catch (_) {}
       }
@@ -2398,6 +2413,7 @@ class _EventMedia extends StatelessWidget {
       imageUrl: url,
       cacheManager: imageCacheManager,
       fit: BoxFit.cover,
+      memCacheWidth: decodeWidth,
       fadeInDuration: Duration.zero,
     );
   }
@@ -2482,18 +2498,24 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
 
   ImageProvider? _avatarImage(String url) {
     if (url.isEmpty) return null;
+    final ImageProvider base;
     if (url.startsWith('data:')) {
       final bytes = decodeAvatarUrl(url);
-      return bytes != null ? MemoryImage(bytes) : null;
+      if (bytes == null) return null;
+      base = MemoryImage(bytes);
+    } else {
+      String resolved = url;
+      if (url.startsWith('/')) {
+        resolved = kIsWeb ? '$webBaseUrl$url' : '$apiBaseUrl$url';
+      } else if (kIsWeb && url.startsWith('http://')) {
+        final uri = Uri.tryParse(url);
+        if (uri != null) resolved = '$webBaseUrl${uri.path}';
+      }
+      base = CachedNetworkImageProvider(resolved);
     }
-    String resolved = url;
-    if (url.startsWith('/')) {
-      resolved = kIsWeb ? '$webBaseUrl$url' : '$apiBaseUrl$url';
-    } else if (kIsWeb && url.startsWith('http://')) {
-      final uri = Uri.tryParse(url);
-      if (uri != null) resolved = '$webBaseUrl${uri.path}';
-    }
-    return CachedNetworkImageProvider(resolved);
+    // Avatars never render larger than a ~96px-logical circle; cap the decode
+    // at 288 physical px (loss-free everywhere, tiny in memory).
+    return ResizeImage(base, width: 288);
   }
 
   void _seedMaps(List<FeedComment> list) {

@@ -640,6 +640,9 @@ class _CityCard extends StatelessWidget {
                                   imageUrl: imageUrl!,
                                   cacheManager: imageCacheManager,
                                   fit: BoxFit.cover,
+                                  memCacheWidth: (MediaQuery.sizeOf(context).width *
+                                          MediaQuery.devicePixelRatioOf(context))
+                                      .round(),
                                   fadeInDuration: Duration.zero,
                                   placeholder: (ctx, _) => _placeholder(),
                                   errorWidget: (ctx, url, err) {

@@ -874,7 +874,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                           radius: 48,
                           backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
                           foregroundImage: _dataUrlBytes(profile.avatarUrl) != null
-                              ? MemoryImage(_dataUrlBytes(profile.avatarUrl)!)
+                              ? ResizeImage(MemoryImage(_dataUrlBytes(profile.avatarUrl)!), width: 288)
                               : null,
                           child: _dataUrlBytes(profile.avatarUrl) == null
                               ? Text(
@@ -1393,7 +1393,7 @@ class _MutualsRow extends StatelessWidget {
                       radius: 9,
                       backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
                       foregroundImage: _dataUrlBytes(preview[i].avatarUrl) != null
-                          ? MemoryImage(_dataUrlBytes(preview[i].avatarUrl)!)
+                          ? ResizeImage(MemoryImage(_dataUrlBytes(preview[i].avatarUrl)!), width: 288)
                           : null,
                       child: _dataUrlBytes(preview[i].avatarUrl) == null
                           ? Text(
@@ -1482,9 +1482,13 @@ class _EditorField extends StatelessWidget {
 }
 
 class _AvatarPreview extends StatelessWidget {
-  const _AvatarPreview({required this.url});
+  const _AvatarPreview({required this.url, this.decodeWidth});
 
   final String url;
+
+  /// Caps the decoded bitmap width (physical px). Sized to the display box so
+  /// a full-res photo isn't decoded into a small thumbnail.
+  final int? decodeWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -1495,6 +1499,7 @@ class _AvatarPreview extends StatelessWidget {
           return Image.memory(
             base64Decode(url.substring(comma + 1)),
             fit: BoxFit.cover,
+            cacheWidth: decodeWidth,
           );
         } catch (_) {}
       }
@@ -1503,6 +1508,7 @@ class _AvatarPreview extends StatelessWidget {
       imageUrl: url,
       cacheManager: imageCacheManager,
       fit: BoxFit.cover,
+      memCacheWidth: decodeWidth,
       fadeInDuration: Duration.zero,
     );
   }
@@ -1667,8 +1673,9 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                     backgroundColor: Theme.of(context).brightness == Brightness.light
                         ? const Color(0xffe6e9ef)
                         : const Color(0xff2a2a2a),
-                    foregroundImage:
-                        avatarBytes != null ? MemoryImage(avatarBytes) : null,
+                    foregroundImage: avatarBytes != null
+                        ? ResizeImage(MemoryImage(avatarBytes), width: 288)
+                        : null,
                     child: avatarBytes == null
                         ? Text(
                             initialFor(widget.profile.username),
@@ -1964,7 +1971,7 @@ class _SavedPostsPageState extends State<_SavedPostsPage> {
                                     child: SizedBox(
                                       width: 52,
                                       height: 52,
-                                      child: _AvatarPreview(url: post.imageUrl),
+                                      child: _AvatarPreview(url: post.imageUrl, decodeWidth: 156),
                                     ),
                                   ),
                                 ),
@@ -2378,10 +2385,12 @@ class _UserListPageState extends State<_UserListPage>
                   ? const Color(0xffe6e9ef)
                   : const Color(0xff2a2a2a),
               foregroundImage: user.avatarUrl.isNotEmpty
-                  ? (bytes != null
-                      ? MemoryImage(bytes) as ImageProvider
-                      : CachedNetworkImageProvider(user.avatarUrl,
-                          cacheManager: imageCacheManager))
+                  ? ResizeImage(
+                      bytes != null
+                          ? MemoryImage(bytes) as ImageProvider
+                          : CachedNetworkImageProvider(user.avatarUrl,
+                              cacheManager: imageCacheManager),
+                      width: 156) // 26px radius × 2 × 3.0 max DPR
                   : null,
               child: Text(initialFor(user.username),
                   style: TextStyle(

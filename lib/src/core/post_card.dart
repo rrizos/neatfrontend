@@ -132,6 +132,15 @@ class _FeedMedia extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Downsample the decoded bitmap to the display width in physical pixels.
+    // A full-res photo (e.g. 3000×4000) otherwise decodes to a ~48MB ARGB
+    // bitmap; capping the decode keeps memory bounded without any visible
+    // quality loss for a full-width feed image. Passing only the width lets
+    // the decoder preserve the aspect ratio.
+    final decodeWidth =
+        (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context))
+            .round();
+
     if (url.startsWith('data:')) {
       final comma = url.indexOf(',');
       if (comma > -1) {
@@ -141,6 +150,7 @@ class _FeedMedia extends StatelessWidget {
             fit: fit,
             width: double.infinity,
             height: double.infinity,
+            cacheWidth: decodeWidth,
           );
         } catch (_) {}
       }
@@ -151,6 +161,7 @@ class _FeedMedia extends StatelessWidget {
       fit: fit,
       width: double.infinity,
       height: double.infinity,
+      memCacheWidth: decodeWidth,
       fadeInDuration: Duration.zero,
       placeholder: (context, _) {
         final isLight = Theme.of(context).brightness == Brightness.light;
@@ -275,7 +286,16 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
   }
 
   void _onVideoUpdate() {
-    if (mounted) setState(() {});
+    // Only the fullscreen controls overlay (seek bar, time counter, play/pause
+    // icon) depends on per-frame controller updates. In the feed the
+    // VideoPlayer widget repaints its own frames, so rebuilding this whole
+    // widget on every controller tick (~30-60x/sec for each visible video) is
+    // pure waste and a real scroll-jank source. Skip it unless the overlay
+    // that reads position/isPlaying is actually on screen.
+    if (!mounted) return;
+    if (!widget.fullscreen) return;
+    if (!_showControls && !kIsWeb) return;
+    setState(() {});
   }
 
   @override
@@ -1472,12 +1492,12 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                       ),
                     ),
                   ),
-                  if (widget.post.comments.isNotEmpty) ...[
+                  if (widget.post.commentCount > 0) ...[
                     const SizedBox(width: 5),
                     GestureDetector(
                       onTap: widget.onComment,
                       child: Text(
-                        _formatCount(widget.post.comments.length),
+                        _formatCount(widget.post.commentCount),
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,

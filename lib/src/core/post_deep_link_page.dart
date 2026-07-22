@@ -607,9 +607,14 @@ class _ImageMedia extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Cap the decode to the screen width in physical px; a full-bleed post
+    // image doesn't need to decode beyond the display resolution.
+    final decodeWidth =
+        (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context))
+            .round();
     final bytes = _decodeDataUrl(url);
     if (bytes != null) {
-      return Image.memory(bytes, fit: BoxFit.contain, width: double.infinity, height: double.infinity);
+      return Image.memory(bytes, fit: BoxFit.contain, width: double.infinity, height: double.infinity, cacheWidth: decodeWidth);
     }
     return CachedNetworkImage(
       imageUrl: url,
@@ -617,6 +622,7 @@ class _ImageMedia extends StatelessWidget {
       fit: BoxFit.contain,
       width: double.infinity,
       height: double.infinity,
+      memCacheWidth: decodeWidth,
       fadeInDuration: Duration.zero,
     );
   }
