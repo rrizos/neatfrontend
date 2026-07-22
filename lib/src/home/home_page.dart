@@ -119,6 +119,7 @@ class _HomePageState extends State<HomePage> {
     _loadNotifications(silent: true);
     PushService.instance.onDmTap = _openConversationById;
     PushService.instance.onSoftTap = _openNotifications;
+    PushService.instance.onNotificationTap = _openNotificationTargetFromPush;
     PushService.instance.replayPending();
     _realtime.start();
     // Instant nav-badge updates on native, on top of the existing on-demand
@@ -170,6 +171,9 @@ class _HomePageState extends State<HomePage> {
     }
     if (identical(PushService.instance.onSoftTap, _openNotifications)) {
       PushService.instance.onSoftTap = null;
+    }
+    if (identical(PushService.instance.onNotificationTap, _openNotificationTargetFromPush)) {
+      PushService.instance.onNotificationTap = null;
     }
     _compose.dispose();
     for (final c in _composePollControllers) { c.dispose(); }
@@ -862,6 +866,18 @@ class _HomePageState extends State<HomePage> {
     _showNativeBar();
   }
 
+  // Verbs whose target is a specific comment/reply — these open the comment
+  // panel scrolled to that exact comment, not the actor's profile.
+  static const _kCommentVerbs = {
+    'commented on your post',
+    'replied to your comment',
+    'liked your comment',
+    'mentioned you in a comment',
+  };
+
+  /// The single navigation entry point for a notification, used identically by
+  /// both the in-app notifications list and a tapped push (see
+  /// [_openNotificationTargetFromPush]) so the two behave the same.
   Future<void> _openNotificationTarget(NotificationItem item, {String? eventType}) async {
     if (item.targetType == 'event') {
       final tab = eventType == 'community' ? 1 : 0;
@@ -883,18 +899,72 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
-      if (item.verb == 'commented on your post' && postId != null) {
-        await _load();
-        if (!mounted) return;
-        _pushProfileRoute(
-          widget.session.user.username,
-          postId: postId,
-          highlightCommentActor: item.actor,
+      if (_kCommentVerbs.contains(item.verb) && postId != null) {
+        await _openPostComments(
+          postId,
+          highlightCommentId: item.targetCommentId > 0 ? item.targetCommentId : null,
+          highlightActor: item.actor,
         );
         return;
       }
     }
     _pushProfileRoute(item.actor);
+  }
+
+  /// Reconstructs a [NotificationItem] from a tapped push's data payload (see
+  /// push/signals.py) and routes it through the same [_openNotificationTarget]
+  /// the in-app list uses — so a push tap scrolls to the post / opens the
+  /// comment panel exactly like tapping the notification inside the app.
+  Future<void> _openNotificationTargetFromPush(Map<String, dynamic> data) async {
+    int parseInt(Object? v) => int.tryParse('${v ?? ''}') ?? 0;
+    final item = NotificationItem(
+      id: parseInt(data['notificationId']),
+      actor: data['actor']?.toString() ?? '',
+      actorAvatarUrl: '',
+      verb: data['verb']?.toString() ?? '',
+      targetType: data['targetType']?.toString() ?? '',
+      targetId: data['targetId']?.toString() ?? '',
+      targetCommentId: parseInt(data['targetCommentId']),
+      targetText: '',
+      imageUrl: '',
+      videoUrl: '',
+      isRead: true,
+      created: DateTime.now(),
+    );
+    await _openNotificationTarget(item);
+  }
+
+  /// Finds the post [postId] — from the loaded feed if present, otherwise by
+  /// fetching it — then opens its comment panel, scrolled to [highlightCommentId]
+  /// (falling back to [highlightActor]) so the panel lands on the exact comment
+  /// the interaction came from.
+  Future<void> _openPostComments(
+    int postId, {
+    int? highlightCommentId,
+    String? highlightActor,
+  }) async {
+    FeedPost? post;
+    for (final p in _posts) {
+      if (p.id == postId) { post = p; break; }
+    }
+    if (post == null) {
+      try {
+        final res = await http.get(
+          postDetailEndpoint(postId),
+          headers: authGetHeaders(widget.session.token),
+        );
+        if (res.statusCode == 401) { await widget.onLogout(); return; }
+        if (res.statusCode == 200) {
+          post = FeedPost.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+        }
+      } catch (_) {}
+    }
+    if (post == null || !mounted) return;
+    _openComments(
+      post,
+      highlightActor: highlightActor,
+      highlightCommentId: highlightCommentId,
+    );
   }
 
   void _openNotifications() {
@@ -970,7 +1040,7 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
-  void _openComments(FeedPost post, {String? highlightActor}) {
+  void _openComments(FeedPost post, {String? highlightActor, int? highlightCommentId}) {
     _hideNativeBar();
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
@@ -986,6 +1056,7 @@ class _HomePageState extends State<HomePage> {
         onOpenUserProfile: _pushProfileRoute,
         likingEnabled: _activeCity == null,
         highlightActor: highlightActor,
+        highlightCommentId: highlightCommentId,
         onHideNavBar: _hideNativeBar,
         onShowNavBar: _showNativeBar,
       ),
@@ -4332,6 +4403,7 @@ class _CommentSheet extends StatefulWidget {
     required this.onOpenUserProfile,
     this.likingEnabled = true,
     this.highlightActor,
+    this.highlightCommentId,
     this.onHideNavBar,
     this.onShowNavBar,
   });
@@ -4341,6 +4413,9 @@ class _CommentSheet extends StatefulWidget {
   final ValueChanged<String> onOpenUserProfile;
   final bool likingEnabled;
   final String? highlightActor;
+  // Exact comment/reply id to scroll to and flash-highlight; takes precedence
+  // over [highlightActor] when set.
+  final int? highlightCommentId;
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
 
@@ -4376,12 +4451,19 @@ class _CommentSheetState extends State<_CommentSheet> {
     if (_comments.isEmpty && widget.post.commentCount > 0) {
       _hydrateComments();
     }
-    if (widget.highlightActor != null) {
-      Future.delayed(const Duration(milliseconds: 350), () {
-        if (mounted) _scrollToActorComment();
-      });
+    if (_hasHighlightTarget) {
+      // If comments are already loaded, scroll after they lay out; the empty
+      // case is handled once _hydrateComments finishes.
+      if (_comments.isNotEmpty) {
+        Future.delayed(const Duration(milliseconds: 350), () {
+          if (mounted) _scrollToHighlightTarget();
+        });
+      }
     }
   }
+
+  bool get _hasHighlightTarget =>
+      widget.highlightCommentId != null || widget.highlightActor != null;
 
   Future<void> _hydrateComments() async {
     setState(() => _hydratingComments = true);
@@ -4393,6 +4475,12 @@ class _CommentSheetState extends State<_CommentSheet> {
       if (!mounted) return;
       if (res.statusCode == 200) {
         _applyUpdatedPost(jsonDecode(res.body) as Map<String, dynamic>);
+        // Comments just arrived — if we were opened to highlight one, do it now.
+        if (mounted && _hasHighlightTarget && _comments.isNotEmpty) {
+          Future.delayed(const Duration(milliseconds: 250), () {
+            if (mounted) _scrollToHighlightTarget();
+          });
+        }
       }
     } catch (_) {
     } finally {
@@ -4400,13 +4488,28 @@ class _CommentSheetState extends State<_CommentSheet> {
     }
   }
 
-  Future<void> _scrollToActorComment() async {
-    // Find the most recent comment/reply by the actor
+  /// Finds the comment/reply to land on — by exact [highlightCommentId] when
+  /// provided (the interaction's real target), otherwise the actor's most
+  /// recent comment — then scrolls to it and flashes a highlight.
+  Future<void> _scrollToHighlightTarget() async {
     FeedComment? target;
-    for (final c in _comments) {
-      if (c.author == widget.highlightActor) target = c;
-      for (final r in c.replies) {
-        if (r.author == widget.highlightActor) target = r;
+    final wantedId = widget.highlightCommentId;
+    if (wantedId != null) {
+      for (final c in _comments) {
+        if (c.id == wantedId) { target = c; break; }
+        for (final r in c.replies) {
+          if (r.id == wantedId) { target = r; break; }
+        }
+        if (target != null) break;
+      }
+    }
+    if (target == null && widget.highlightActor != null) {
+      // Fallback: the actor's most recent comment/reply.
+      for (final c in _comments) {
+        if (c.author == widget.highlightActor) target = c;
+        for (final r in c.replies) {
+          if (r.author == widget.highlightActor) target = r;
+        }
       }
     }
     if (target == null || !mounted) return;

@@ -41,8 +41,12 @@ class PushService {
 
   void Function(int conversationId)? onDmTap;
   VoidCallback? onSoftTap;
+  // Receives the full push data map for an activity ("soft") notification so it
+  // can navigate to the exact target (post / comment) like an in-app tap.
+  void Function(Map<String, dynamic> data)? onNotificationTap;
   int? _pendingConversationId;
   bool _pendingSoft = false;
+  Map<String, dynamic>? _pendingNotificationData;
 
   Future<void>? _initFuture;
 
@@ -88,6 +92,14 @@ class PushService {
 
   Future<void> _checkInitialMessage(FirebaseMessaging messaging) async {
     try {
+      // On iOS, getInitialMessage() (the cold-start-from-a-tapped-notification
+      // path) can hang or return null if it runs before the APNs device token
+      // has been set — the same ordering dependency getToken() has. Waiting for
+      // the token first is what lets a killed-app notification tap actually
+      // route on iOS; without it the tap was silently dropped (it worked on
+      // Android because Android has no APNs step). This is why a tapped DM
+      // opened the chat on Android but not iOS.
+      if (!kIsWeb && Platform.isIOS) await _waitForApnsToken();
       final initialMessage =
           await messaging.getInitialMessage().timeout(const Duration(seconds: 10));
       if (initialMessage != null) _dispatchTap(initialMessage.data);
@@ -214,6 +226,17 @@ class PushService {
       } else {
         _pendingConversationId = id;
       }
+    } else if (data['type'] == 'notification') {
+      // Activity push: navigate to the exact target (post/comment). Fall back
+      // to just opening the notifications bell if the rich handler isn't wired.
+      final handler = onNotificationTap;
+      if (handler != null) {
+        handler(data);
+      } else if (onSoftTap != null) {
+        onSoftTap!();
+      } else {
+        _pendingNotificationData = data;
+      }
     } else {
       final handler = onSoftTap;
       if (handler != null) {
@@ -231,6 +254,15 @@ class PushService {
     if (id != null) {
       _pendingConversationId = null;
       onDmTap?.call(id);
+    }
+    final notifData = _pendingNotificationData;
+    if (notifData != null) {
+      _pendingNotificationData = null;
+      if (onNotificationTap != null) {
+        onNotificationTap!(notifData);
+      } else {
+        onSoftTap?.call();
+      }
     }
     if (_pendingSoft) {
       _pendingSoft = false;

@@ -384,6 +384,7 @@ class NotificationItem {
     required this.videoUrl,
     required this.isRead,
     required this.created,
+    this.targetCommentId = 0,
   });
 
   final int id;
@@ -393,6 +394,9 @@ class NotificationItem {
   final String targetType;
   final String targetId;
   final String targetText;
+  // The specific comment a comment-related notification concerns (0 if none),
+  // so the comment panel can scroll to the exact position.
+  final int targetCommentId;
   final String imageUrl;
   final String videoUrl;
   final bool isRead;
@@ -407,6 +411,7 @@ class NotificationItem {
       verb: json['verb']?.toString() ?? '',
       targetType: json['targetType']?.toString() ?? '',
       targetId: json['targetId']?.toString() ?? '',
+      targetCommentId: parseInt(json['targetCommentId']),
       targetText: json['targetText']?.toString() ?? '',
       imageUrl: _resolveMediaUrl(json['imageUrl']?.toString() ?? ''),
       videoUrl: _resolveMediaUrl(json['videoUrl']?.toString() ?? ''),
