@@ -1,17 +1,21 @@
 import Flutter
 import UIKit
-import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UITabBarDelegate {
 
     private var tabChannel: FlutterMethodChannel?
     private var nativeTabBar: UITabBar?
+    // Held so we can replay the launch notification into firebase_messaging after
+    // it registers late — see replayLaunchNotificationForFirebaseMessaging(_:).
+    private var pendingLaunchOptions: [UIApplication.LaunchOptionsKey: Any]?
 
     override func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        pendingLaunchOptions = launchOptions
+
         // firebase_messaging normally does this itself, by observing
         // UIApplicationDidFinishLaunchingNotification when its plugin is
         // registered — but GeneratedPluginRegistrant.register(with:) here
@@ -21,19 +25,6 @@ import UserNotifications
         // token at all (confirmed via device syslog: no apsd connection).
         application.registerForRemoteNotifications()
 
-        // Same late-plugin-registration problem, second symptom: normally the
-        // UNUserNotificationCenter delegate is set at launch and
-        // firebase_messaging's swizzling attaches its notification-response
-        // handler to it — but because our plugins register late (implicit
-        // engine), no delegate was ever set, so on iOS a tapped notification
-        // just foregrounded the app and onMessageOpenedApp / getInitialMessage
-        // never fired (nothing routed). We set the delegate ourselves
-        // (FlutterAppDelegate already conforms to UNUserNotificationCenterDelegate
-        // and forwards the response callbacks to registered plugins); FCM then
-        // receives the tap and surfaces it to the Dart handlers. Android has no
-        // such delegate step, which is why it already worked there.
-        UNUserNotificationCenter.current().delegate = self
-
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 
@@ -41,12 +32,44 @@ import UserNotifications
     // the binary messenger is ready and the view hierarchy is set up.
     func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
         GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+        replayLaunchNotificationForFirebaseMessaging(engineBridge.pluginRegistry)
         registerNativeCityMap(with: engineBridge.pluginRegistry)
         registerShareChannel(with: engineBridge.pluginRegistry)
 
         if #available(iOS 26, *) {
             setupNativeTabBar(with: engineBridge.pluginRegistry)
         }
+    }
+
+    /// firebase_messaging installs all of its notification handling — the
+    /// UNUserNotificationCenter delegate, app-delegate swizzling, and the
+    /// cold-start "initial notification" capture — from a
+    /// UIApplicationDidFinishLaunchingNotification observer it adds when its
+    /// plugin registers. Because our plugins register late (implicit engine),
+    /// that system notification already fired and was missed, so none of that
+    /// setup ran: on iOS a tapped notification just foregrounded the app and
+    /// onMessageOpenedApp / getInitialMessage never fired (nothing routed).
+    /// Android has no such step, which is why it worked there.
+    ///
+    /// Invoke that same handler directly now, passing the real launch options so
+    /// a cold-start tap is still captured. Targeting just this plugin (rather
+    /// than re-broadcasting the system notification) avoids disturbing other
+    /// launch observers.
+    private func replayLaunchNotificationForFirebaseMessaging(_ registry: FlutterPluginRegistry) {
+        guard let messaging = registry.valuePublished(byPlugin: "FLTFirebaseMessagingPlugin") else { return }
+        let selector = NSSelectorFromString("application_onDidFinishLaunchingNotification:")
+        guard messaging.responds(to: selector) else { return }
+
+        var userInfo: [AnyHashable: Any]? = nil
+        if let remote = pendingLaunchOptions?[.remoteNotification] {
+            userInfo = [UIApplication.LaunchOptionsKey.remoteNotification.rawValue: remote]
+        }
+        let note = NSNotification(
+            name: UIApplication.didFinishLaunchingNotification,
+            object: nil,
+            userInfo: userInfo
+        )
+        messaging.perform(selector, with: note)
     }
 
     // MARK: - Native share sheet
