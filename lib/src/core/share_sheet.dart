@@ -210,6 +210,7 @@ class _ShareSheetState extends State<_ShareSheet> {
     final firstMedia = media.isNotEmpty
         ? {'type': media.first.type, 'url': media.first.url}
         : (widget.post.imageUrl.isNotEmpty ? {'type': 'image', 'url': widget.post.imageUrl} : null);
+    final poll = widget.post.poll;
     return '__neat_post__:${jsonEncode({
       'id': widget.post.id,
       'author': widget.post.author,
@@ -217,6 +218,11 @@ class _ShareSheetState extends State<_ShareSheet> {
       'authorVerified': widget.post.authorVerified,
       'text': widget.post.text,
       'media': firstMedia,
+      // So a shared text-only or poll post can render a "photo-styled"
+      // preview instead of a blank placeholder when there's no real media.
+      'poll': poll != null
+          ? {'options': poll.options.map((o) => {'text': o.text, 'votes': o.votes}).toList()}
+          : null,
     })}';
   }
 

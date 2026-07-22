@@ -3199,6 +3199,7 @@ class _SharedPostCard extends StatelessWidget {
     final mediaType = media?['type']?.toString() ?? (data['imageUrl'] != null ? 'image' : '');
     final mediaUrl  = (media?['url'] ?? data['imageUrl'])?.toString() ?? '';
     final isVideo   = mediaType == 'video';
+    final pollOptions = (data['poll'] as Map?)?['options'] as List? ?? const [];
 
     final cardBg    = isLight ? Colors.white : const Color(0xff1c1c1e);
     final border    = isLight ? const Color(0xffdbdbdb) : const Color(0xff363636);
@@ -3206,6 +3207,59 @@ class _SharedPostCard extends StatelessWidget {
     final sub       = isLight ? _kSubLgt : _kSubDark;
     final avatarImg = avatarUrl.isNotEmpty ? _imgProvider(avatarUrl) : null;
     final mediaBytes = mediaUrl.isNotEmpty ? _dataUrlBytes(mediaUrl) : null;
+
+    // A real photo/video always wins; otherwise synthesize a "photo-styled"
+    // graphic from whatever content the post actually has (poll or text)
+    // instead of leaving the square blank — a poll or caption preview is
+    // shown inside that graphic, so the plain-text caption below is skipped
+    // in those cases to avoid repeating the same content twice.
+    final Widget mediaArea;
+    final bool showCaptionBelow;
+    if (mediaUrl.isNotEmpty) {
+      mediaArea = AspectRatio(
+        aspectRatio: 1,
+        child: isVideo
+            // A static play-button treatment rather than decoding/playing
+            // the video — Instagram's own DM preview is a static frame,
+            // and actually decoding video just for a chat thumbnail isn't
+            // worth the cost here.
+            ? Container(
+                color: Colors.black,
+                alignment: Alignment.center,
+                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 44),
+              )
+            : (mediaBytes != null
+                ? Image.memory(mediaBytes, fit: BoxFit.cover)
+                : CachedNetworkImage(
+                    imageUrl: mediaUrl,
+                    cacheManager: imageCacheManager,
+                    fit: BoxFit.cover,
+                    fadeInDuration: Duration.zero,
+                  )),
+      );
+      showCaptionBelow = true;
+    } else if (pollOptions.isNotEmpty) {
+      mediaArea = AspectRatio(
+        aspectRatio: 1,
+        child: _SharedPollGraphic(
+          question: text,
+          options: pollOptions.cast<Map>(),
+          isLight: isLight,
+        ),
+      );
+      showCaptionBelow = false;
+    } else if (text.isNotEmpty) {
+      mediaArea = AspectRatio(aspectRatio: 1, child: _SharedTextGraphic(text: text));
+      showCaptionBelow = false;
+    } else {
+      mediaArea = Container(
+        height: _kCardWidth,
+        color: isLight ? const Color(0xfff2f2f2) : const Color(0xff262626),
+        alignment: Alignment.center,
+        child: Icon(Icons.image_outlined, color: sub, size: 36),
+      );
+      showCaptionBelow = false;
+    }
 
     return GestureDetector(
       onTap: onTap,
@@ -3252,37 +3306,9 @@ class _SharedPostCard extends StatelessWidget {
                 ],
               ),
             ),
-            // ── square media, like Instagram's shared-post bubble ──
-            if (mediaUrl.isNotEmpty)
-              AspectRatio(
-                aspectRatio: 1,
-                child: isVideo
-                    // A static play-button treatment rather than decoding/playing
-                    // the video — Instagram's own DM preview is a static frame,
-                    // and actually decoding video just for a chat thumbnail isn't
-                    // worth the cost here.
-                    ? Container(
-                        color: Colors.black,
-                        alignment: Alignment.center,
-                        child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 44),
-                      )
-                    : (mediaBytes != null
-                        ? Image.memory(mediaBytes, fit: BoxFit.cover)
-                        : CachedNetworkImage(
-                            imageUrl: mediaUrl,
-                            cacheManager: imageCacheManager,
-                            fit: BoxFit.cover,
-                            fadeInDuration: Duration.zero,
-                          )),
-              )
-            else
-              Container(
-                height: _kCardWidth,
-                color: isLight ? const Color(0xfff2f2f2) : const Color(0xff262626),
-                alignment: Alignment.center,
-                child: Icon(Icons.image_outlined, color: sub, size: 36),
-              ),
-            if (text.isNotEmpty)
+            // ── square media (or a synthesized poll/text graphic) ──
+            mediaArea,
+            if (showCaptionBelow && text.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
                 child: Text(
@@ -3296,6 +3322,128 @@ class _SharedPostCard extends StatelessWidget {
               const SizedBox(height: 10),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// A "photo-styled" stand-in for a shared poll post — since there's no real
+// photo to show, this renders the question + up to 3 option bars (sized by
+// vote share, like the real feed poll's result view) inside the same square
+// slot a photo/video would otherwise occupy.
+class _SharedPollGraphic extends StatelessWidget {
+  const _SharedPollGraphic({required this.question, required this.options, required this.isLight});
+  final String question;
+  final List<Map> options;
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = options.take(3).toList();
+    final total = shown.fold<int>(0, (s, o) => s + ((o['votes'] as num?)?.toInt() ?? 0));
+    final bg      = isLight ? const Color(0xfff7f7f7) : const Color(0xff232323);
+    final barBg   = isLight ? const Color(0xffe8e8e8) : const Color(0xff2f2f2f);
+    final textClr = isLight ? Colors.black : Colors.white;
+
+    return Container(
+      color: bg,
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.poll_rounded, size: 13, color: _kBlue),
+              const SizedBox(width: 5),
+              Text(
+                'POLL',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _kBlue, letterSpacing: 0.6),
+              ),
+            ],
+          ),
+          if (question.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              question,
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: textClr, height: 1.25),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          const SizedBox(height: 9),
+          for (final o in shown) ...[
+            _bar(o, total, barBg, textClr),
+            if (o != shown.last) const SizedBox(height: 6),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _bar(Map option, int total, Color barBg, Color textClr) {
+    final votes    = (option['votes'] as num?)?.toInt() ?? 0;
+    final fraction = total > 0 ? (votes / total).clamp(0.0, 1.0) : 0.0;
+    final optText  = option['text']?.toString() ?? '';
+    return SizedBox(
+      height: 20,
+      child: Stack(
+        children: [
+          Container(decoration: BoxDecoration(color: barBg, borderRadius: BorderRadius.circular(6))),
+          FractionallySizedBox(
+            widthFactor: fraction,
+            child: Container(
+              decoration: BoxDecoration(
+                color: _kBlue.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 7),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  optText,
+                  style: TextStyle(fontSize: 10.5, color: textClr, fontWeight: FontWeight.w500),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// A "photo-styled" stand-in for a shared text-only post — a gradient card
+// with the caption itself as the centerpiece, rather than a blank icon.
+class _SharedTextGraphic extends StatelessWidget {
+  const _SharedTextGraphic({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xff3897f0), Color(0xff8e44ec)],
+        ),
+      ),
+      padding: const EdgeInsets.all(18),
+      alignment: Alignment.center,
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600, height: 1.35),
+        maxLines: 6,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
