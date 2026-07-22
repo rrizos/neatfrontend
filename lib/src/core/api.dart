@@ -196,6 +196,63 @@ Map<String, String> authGetHeaders(String token) => {
   'Authorization': 'Token $token',
 };
 
+const _kNoConnection =
+    'No internet connection. Please check your connection and try again.';
+
+// Transport failures, matched by text so this works on every platform (dart:io
+// types aren't available on web, so we can't type-check SocketException here).
+const _kNetworkMarkers = [
+  'socketexception',
+  'clientexception',
+  'handshakeexception',
+  'failed host lookup',
+  'connection refused',
+  'connection closed',
+  'connection reset',
+  'connection timed out',
+  'network is unreachable',
+  'no route to host',
+  'software caused connection abort',
+  'xmlhttprequest error', // web
+  'connection attempt failed',
+  'os error',
+];
+
+bool _looksLikeNetworkFailure(String text) {
+  final lower = text.toLowerCase();
+  return _kNetworkMarkers.any(lower.contains);
+}
+
+/// Removes anything that would expose infrastructure — the API host/IP, a
+/// `uri=...` tail, or a bare address — from a message before it reaches a user.
+String _scrubEndpoints(String message) {
+  var out = message;
+  if (apiBaseUrl.isNotEmpty) out = out.replaceAll(apiBaseUrl, 'the server');
+  out = out.replaceAll(RegExp(r',?\s*uri=\S+'), '');
+  out = out.replaceAll(RegExp(r'https?://\S+'), 'the server');
+  // Bare IPv4, with or without a port.
+  out = out.replaceAll(RegExp(r'\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b'), 'the server');
+  return out.trim();
+}
+
+/// Turns a caught error into something safe to show a user.
+///
+/// Messages we raise deliberately (e.g. `Exception(friendlyHttpError(res))`,
+/// which carries the server's own wording) pass through; anything that looks
+/// like a transport failure becomes a plain connection message. Raw
+/// SocketException text embeds the server host/IP and the full request URL, so
+/// it must never reach the screen.
+String friendlyError(Object error) {
+  final raw = error.toString();
+  if (_looksLikeNetworkFailure(raw)) return _kNoConnection;
+  if (raw.toLowerCase().contains('timeoutexception')) {
+    return 'The connection timed out. Please try again.';
+  }
+  final message = _scrubEndpoints(raw.replaceFirst('Exception: ', ''));
+  if (message.isEmpty) return 'Something went wrong. Please try again.';
+  return message;
+}
+
 String friendlyHttpError(http.Response response) {
   final body = response.body.trim();
   try {

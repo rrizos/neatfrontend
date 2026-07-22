@@ -149,7 +149,7 @@ widget.onAuthenticated(session);
 }
 } catch (e) {
 if (mounted) {
-setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+setState(() => _error = friendlyError(e));
 }
 } finally {
 if (mounted) {
