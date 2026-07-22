@@ -3337,9 +3337,13 @@ class _SharedPollGraphic extends StatelessWidget {
   final List<Map> options;
   final bool isLight;
 
+  // Posts cap polls at 4 options (see _ComposePollEditor in home_page.dart),
+  // so this always has room to show every option — never just a subset.
+  static const _kAccent = Color(0xff1479ff); // neat's brand blue, see app.dart
+
   @override
   Widget build(BuildContext context) {
-    final shown = options.take(3).toList();
+    final shown = options.take(4).toList();
     final total = shown.fold<int>(0, (s, o) => s + ((o['votes'] as num?)?.toInt() ?? 0));
     final bg      = isLight ? const Color(0xfff7f7f7) : const Color(0xff232323);
     final barBg   = isLight ? const Color(0xffe8e8e8) : const Color(0xff2f2f2f);
@@ -3347,7 +3351,7 @@ class _SharedPollGraphic extends StatelessWidget {
 
     return Container(
       color: bg,
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -3355,27 +3359,27 @@ class _SharedPollGraphic extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.poll_rounded, size: 13, color: _kBlue),
+              const Icon(Icons.poll_rounded, size: 13, color: _kAccent),
               const SizedBox(width: 5),
-              Text(
+              const Text(
                 'POLL',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _kBlue, letterSpacing: 0.6),
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _kAccent, letterSpacing: 0.6),
               ),
             ],
           ),
           if (question.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               question,
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: textClr, height: 1.25),
-              maxLines: 2,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textClr, height: 1.2),
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ],
-          const SizedBox(height: 9),
+          const SizedBox(height: 7),
           for (final o in shown) ...[
             _bar(o, total, barBg, textClr),
-            if (o != shown.last) const SizedBox(height: 6),
+            if (o != shown.last) const SizedBox(height: 5),
           ],
         ],
       ),
@@ -3387,16 +3391,16 @@ class _SharedPollGraphic extends StatelessWidget {
     final fraction = total > 0 ? (votes / total).clamp(0.0, 1.0) : 0.0;
     final optText  = option['text']?.toString() ?? '';
     return SizedBox(
-      height: 20,
+      height: 18,
       child: Stack(
         children: [
-          Container(decoration: BoxDecoration(color: barBg, borderRadius: BorderRadius.circular(6))),
+          Container(decoration: BoxDecoration(color: barBg, borderRadius: BorderRadius.circular(5))),
           FractionallySizedBox(
             widthFactor: fraction,
             child: Container(
               decoration: BoxDecoration(
-                color: _kBlue.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(6),
+                color: _kAccent.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(5),
               ),
             ),
           ),
@@ -3407,7 +3411,7 @@ class _SharedPollGraphic extends StatelessWidget {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   optText,
-                  style: TextStyle(fontSize: 10.5, color: textClr, fontWeight: FontWeight.w500),
+                  style: TextStyle(fontSize: 10, color: textClr, fontWeight: FontWeight.w500),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -3430,10 +3434,13 @@ class _SharedTextGraphic extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
+        // neat's own blue (see app.dart's theme `secondary` colors), not an
+        // unrelated purple — a lighter tint fading into the app's primary
+        // blue rather than a different hue entirely.
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xff3897f0), Color(0xff8e44ec)],
+          colors: [Color(0xff4ea3ff), Color(0xff1479ff)],
         ),
       ),
       padding: const EdgeInsets.all(18),
