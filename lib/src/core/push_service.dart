@@ -87,7 +87,10 @@ class PushService {
     // explicit request not to notify while already inside the app. The
     // in-app UI (notifications bell, conversation view) reflects new
     // activity through its own existing polling instead.
-    FirebaseMessaging.onMessageOpenedApp.listen((m) => _dispatchTap(m.data));
+    FirebaseMessaging.onMessageOpenedApp.listen((m) {
+      debugPrint('PushService: onMessageOpenedApp fired data=${m.data}');
+      _dispatchTap(m.data);
+    });
 
     // Fire-and-forget: this is only for routing a cold-start tap, unrelated
     // to token registration. On this device it has been observed to hang
@@ -108,6 +111,7 @@ class PushService {
       if (!kIsWeb && Platform.isIOS) await _waitForApnsToken();
       final initialMessage =
           await messaging.getInitialMessage().timeout(const Duration(seconds: 10));
+      debugPrint('PushService: getInitialMessage=${initialMessage?.data}');
       if (initialMessage != null) _dispatchTap(initialMessage.data);
     } catch (e) {
       debugPrint('PushService._checkInitialMessage failed: $e');
@@ -223,6 +227,8 @@ class PushService {
   // ── Tap → navigate ───────────────────────────────────────────────────────
 
   void _dispatchTap(Map<String, dynamic> data) {
+    debugPrint('PushService._dispatchTap: type=${data['type']} '
+        'dmHandler=${onDmTap != null} notifHandler=${onNotificationTap != null} data=$data');
     if (data['type'] == 'dm') {
       final id = int.tryParse('${data['conversationId']}');
       if (id == null) return;
@@ -256,6 +262,8 @@ class PushService {
   /// Called once HomePage has registered [onDmTap]/[onSoftTap], in case a
   /// push was tapped before the handlers existed (cold start).
   void replayPending() {
+    debugPrint('PushService.replayPending: dm=$_pendingConversationId '
+        'notif=${_pendingNotificationData != null} soft=$_pendingSoft');
     final id = _pendingConversationId;
     if (id != null) {
       _pendingConversationId = null;

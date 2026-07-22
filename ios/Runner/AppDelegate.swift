@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import UserNotifications
+import FirebaseCore
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UITabBarDelegate {
@@ -12,6 +13,19 @@ import UserNotifications
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        // Configure Firebase natively and early. Normally firebase_core does
+        // this from Dart (Firebase.initializeApp), but that happens late here
+        // because our plugins register late (implicit engine). FCM installs the
+        // swizzling that routes notification taps *at configure time*, so if we
+        // set the UNUserNotificationCenter delegate before Firebase is
+        // configured, that swizzling isn't in place yet to attach to it — and
+        // taps never reach onMessageOpenedApp / getInitialMessage. Configuring
+        // here first, then setting the delegate below, fixes the ordering.
+        // (Idempotent: Dart's Firebase.initializeApp reuses this default app.)
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+
         // firebase_messaging normally does this itself, by observing
         // UIApplicationDidFinishLaunchingNotification when its plugin is
         // registered — but GeneratedPluginRegistrant.register(with:) here
