@@ -63,10 +63,16 @@ class PushService {
 
     final messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
+    // No foreground presentation: while the app is open, pushes must not pop a
+    // tray notification (the in-app UI reflects activity instead — see below).
+    // This matters now that iOS has a UNUserNotificationCenter delegate set (in
+    // AppDelegate, to make notification taps route): without turning these off,
+    // FCM's foreground handler would start showing banners on iOS while the app
+    // is open. Tap routing (didReceive) is unaffected by these options.
     await messaging.setForegroundNotificationPresentationOptions(
-      alert: true,
-      badge: true,
-      sound: true,
+      alert: false,
+      badge: false,
+      sound: false,
     );
 
     messaging.onTokenRefresh.listen((token) {

@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UITabBarDelegate {
@@ -19,6 +20,20 @@ import UIKit
         // missed. Without this, the app never asks Apple for an APNs device
         // token at all (confirmed via device syslog: no apsd connection).
         application.registerForRemoteNotifications()
+
+        // Same late-plugin-registration problem, second symptom: normally the
+        // UNUserNotificationCenter delegate is set at launch and
+        // firebase_messaging's swizzling attaches its notification-response
+        // handler to it — but because our plugins register late (implicit
+        // engine), no delegate was ever set, so on iOS a tapped notification
+        // just foregrounded the app and onMessageOpenedApp / getInitialMessage
+        // never fired (nothing routed). We set the delegate ourselves
+        // (FlutterAppDelegate already conforms to UNUserNotificationCenterDelegate
+        // and forwards the response callbacks to registered plugins); FCM then
+        // receives the tap and surfaces it to the Dart handlers. Android has no
+        // such delegate step, which is why it already worked there.
+        UNUserNotificationCenter.current().delegate = self
+
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 
