@@ -74,6 +74,10 @@ Uri adminSecurityLogsEndpoint({
 Uri get adminReportsEndpoint => Uri.parse('$apiBaseUrl/api/auth/admin/reports/');
 Uri adminDismissReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/auth/admin/reports/$id/');
 Uri adminDeletePostEndpoint(int id) => Uri.parse('$apiBaseUrl/api/auth/admin/posts/$id/');
+Uri adminDeleteCommentEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/auth/admin/comments/$id/');
+Uri adminDeleteMessageEndpoint(int id) =>
+    Uri.parse('$apiBaseUrl/api/auth/admin/messages/$id/');
 Uri adminUsersEndpoint([String query = '']) {
   final uri = Uri.parse('$apiBaseUrl/api/auth/admin/users/');
   if (query.trim().isEmpty) return uri;

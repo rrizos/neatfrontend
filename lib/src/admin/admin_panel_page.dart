@@ -96,10 +96,35 @@ class _ReportsTabState extends State<_ReportsTab> with AutomaticKeepAliveClientM
     }
   }
 
-  Future<void> _deletePost(int postId, int reportId) async {
-    await http.delete(adminDeletePostEndpoint(postId), headers: authGetHeaders(widget.token));
-    setState(() => _reports.removeWhere((r) => r.postId == postId));
-    if (mounted) _showSnack('Post deleted');
+  /// Routes to the right admin endpoint for the reported content type —
+  /// deleting a reported comment must not hit the post endpoint (which would
+  /// delete an unrelated post that happens to share the id).
+  Future<void> _deleteContent(_Report report) async {
+    final Uri? endpoint = switch (report.type) {
+      'post' => adminDeletePostEndpoint(report.postId),
+      'comment' => adminDeleteCommentEndpoint(report.postId),
+      'message' => adminDeleteMessageEndpoint(report.postId),
+      _ => null,
+    };
+    if (endpoint == null) {
+      _showSnack('No admin delete available for a ${report.type}');
+      return;
+    }
+    try {
+      final res = await http.delete(endpoint, headers: authGetHeaders(widget.token));
+      if (!mounted) return;
+      if (res.statusCode != 200 && res.statusCode != 204) {
+        _showSnack('Delete failed (${res.statusCode})');
+        return;
+      }
+      // Clear every report against that same content, not just this one.
+      setState(() => _reports.removeWhere(
+            (r) => r.type == report.type && r.postId == report.postId,
+          ));
+      _showSnack('${report.type[0].toUpperCase()}${report.type.substring(1)} deleted');
+    } catch (_) {
+      if (mounted) _showSnack('Network error');
+    }
   }
 
   Future<void> _dismissReport(int reportId) async {
@@ -154,7 +179,7 @@ class _ReportsTabState extends State<_ReportsTab> with AutomaticKeepAliveClientM
         separatorBuilder: (_, _) => const SizedBox(height: 0),
         itemBuilder: (_, i) => _ReportCard(
           report: _reports[i],
-          onDeletePost: () => _deletePost(_reports[i].postId, _reports[i].id),
+          onDeletePost: () => _deleteContent(_reports[i]),
           onDismiss: () => _dismissReport(_reports[i].id),
         ),
       ),
@@ -216,7 +241,7 @@ class _ReportCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '@${report.reporterUsername}  reported a post',
+                        '@${report.reporterUsername} reported this ${report.type}',
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
                       ),
                       Text(
@@ -235,9 +260,15 @@ class _ReportCard extends StatelessWidget {
             child: Wrap(
               spacing: 6,
               children: [
-                _Chip(label: report.reason, color: const Color(0xfff66c6c)),
+                _Chip(label: report.type.toUpperCase(), color: const Color(0xff0095f6)),
+                _Chip(label: report.reasonLabel, color: const Color(0xfff66c6c)),
                 if (report.subReason.isNotEmpty)
                   _Chip(label: report.subReason, color: const Color(0xffff9800)),
+                if (report.reportCount > 1)
+                  _Chip(
+                    label: '${report.reportCount}x reported',
+                    color: const Color(0xffb8860b),
+                  ),
               ],
             ),
           ),
@@ -247,19 +278,69 @@ class _ReportCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
             child: Text(
-              'Post by @${report.postAuthor}',
+              '${report.type[0].toUpperCase()}${report.type.substring(1)} by '
+              '@${report.postAuthor.isEmpty ? "unknown" : report.postAuthor}'
+              '${report.city.isNotEmpty ? " · ${report.city}" : ""}'
+              '${report.postId > 0 ? " · #${report.postId}" : ""}',
               style: TextStyle(fontSize: 11, color: subColor, fontWeight: FontWeight.w600),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
             child: Text(
               report.postText.isEmpty ? '(no text)' : report.postText,
               style: TextStyle(fontSize: 14, color: textColor, height: 1.4),
-              maxLines: 3,
+              maxLines: 6,
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (report.imageUrl.isNotEmpty || report.videoUrl.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: report.videoUrl.isNotEmpty
+                    ? Container(
+                        height: 150,
+                        color: Colors.black,
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.play_circle_outline,
+                            color: Colors.white70, size: 40),
+                      )
+                    : Image.network(
+                        report.imageUrl,
+                        height: 150,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        // Reported media can be a full-res photo; cap the decode.
+                        cacheWidth: 900,
+                        errorBuilder: (_, _, _) => Container(
+                          height: 60,
+                          color: divColor,
+                          alignment: Alignment.center,
+                          child: Text('media unavailable',
+                              style: TextStyle(fontSize: 11, color: subColor)),
+                        ),
+                      ),
+              ),
+            ),
+          if (report.context.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: divColor.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  report.context,
+                  style: TextStyle(fontSize: 12, color: subColor, height: 1.35),
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
           Divider(height: 1, color: divColor),
           // Actions
           Row(
@@ -275,18 +356,20 @@ class _ReportCard extends StatelessWidget {
                   ),
                 ),
               ),
-              Container(width: 1, height: 32, color: divColor),
-              Expanded(
-                child: TextButton.icon(
-                  onPressed: () => _confirmDeletePost(context),
-                  icon: const Icon(Icons.delete_outline, size: 16),
-                  label: const Text('Delete Post'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xfff66c6c),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+              if (report.type != 'event') ...[
+                Container(width: 1, height: 32, color: divColor),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => _confirmDeletePost(context),
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    label: Text('Delete ${report.type}'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xfff66c6c),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ],
@@ -298,8 +381,11 @@ class _ReportCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Delete post?'),
-        content: const Text('This will permanently delete the post and all its reports.'),
+        title: Text('Delete ${report.type}?'),
+        content: Text(
+          'This permanently deletes the ${report.type} by '
+          '@${report.postAuthor.isEmpty ? "unknown" : report.postAuthor} and all of its reports.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
@@ -615,35 +701,74 @@ class _UserCard extends StatelessWidget {
 
 class _Report {
   final int id;
+  final String type; // post | comment | message | event
   final String reason;
+  final String reasonLabel;
   final String subReason;
   final DateTime created;
+  final int reportCount;
   final String reporterUsername;
+  final String reportedUsername;
   final int postId;
   final String postAuthor;
   final String postText;
+  final String imageUrl;
+  final String videoUrl;
+  final String context;
+  final String city;
 
   const _Report({
     required this.id,
+    required this.type,
     required this.reason,
+    required this.reasonLabel,
     required this.subReason,
     required this.created,
+    required this.reportCount,
     required this.reporterUsername,
+    required this.reportedUsername,
     required this.postId,
     required this.postAuthor,
     required this.postText,
+    required this.imageUrl,
+    required this.videoUrl,
+    required this.context,
+    required this.city,
   });
 
-  factory _Report.fromJson(Map<String, dynamic> j) => _Report(
-    id: j['id'] as int,
-    reason: j['reason']?.toString() ?? '',
-    subReason: j['subReason']?.toString() ?? '',
-    created: DateTime.tryParse(j['created']?.toString() ?? '') ?? DateTime.now(),
-    reporterUsername: (j['reporter'] as Map?)?['username']?.toString() ?? '',
-    postId: (j['post'] as Map?)?['id'] as int? ?? 0,
-    postAuthor: (j['post'] as Map?)?['author']?.toString() ?? '',
-    postText: (j['post'] as Map?)?['text']?.toString() ?? '',
-  );
+  bool get isPost => type == 'post';
+
+  factory _Report.fromJson(Map<String, dynamic> j) {
+    // NOTE: the payload key is `content` (it covers posts, comments, messages
+    // and events) — reading `post` here is what previously dropped the reported
+    // item entirely, leaving reports with no visible subject.
+    final content = (j['content'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final reporter = (j['reporter'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final reported = (j['reported'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final rawReason = j['reason']?.toString() ?? '';
+    return _Report(
+      id: (j['id'] as num?)?.toInt() ?? 0,
+      type: j['type']?.toString() ?? 'post',
+      reason: rawReason,
+      reasonLabel: (j['reasonLabel']?.toString().isNotEmpty ?? false)
+          ? j['reasonLabel'].toString()
+          : rawReason.replaceAll('_', ' '),
+      subReason: j['subReason']?.toString() ?? '',
+      created: DateTime.tryParse(j['created']?.toString() ?? '') ?? DateTime.now(),
+      reportCount: (j['reportCount'] as num?)?.toInt() ?? 1,
+      reporterUsername: reporter['username']?.toString() ?? '',
+      reportedUsername: reported['username']?.toString() ??
+          content['author']?.toString() ??
+          '',
+      postId: (content['id'] as num?)?.toInt() ?? 0,
+      postAuthor: content['author']?.toString() ?? '',
+      postText: content['text']?.toString() ?? '',
+      imageUrl: content['imageUrl']?.toString() ?? '',
+      videoUrl: content['videoUrl']?.toString() ?? '',
+      context: content['context']?.toString() ?? '',
+      city: content['city']?.toString() ?? '',
+    );
+  }
 }
 
 class _AdminUser {
