@@ -10,6 +10,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../core/media_cache.dart';
+import '../core/neat_loader.dart';
 import 'greece_cities.dart';
 
 // MapKit JS JWT — origin: netnest.net
@@ -718,18 +719,9 @@ class _CityCard extends StatelessWidget {
   }
 
   Widget _placeholder() {
-    return Container(
-      color: const Color(0xff1e1f21),
-      child: Center(
-        child: SizedBox(
-          width: 28,
-          height: 28,
-          child: CircularProgressIndicator(
-            strokeWidth: 2.5,
-            color: Colors.white.withValues(alpha: 0.35),
-          ),
-        ),
-      ),
+    return const ColoredBox(
+      color: Color(0xff1e1f21),
+      child: NeatLoader(size: 52),
     );
   }
 
