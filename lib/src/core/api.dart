@@ -51,6 +51,7 @@ Uri postReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/report/')
 Uri postPollVoteEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/poll/vote/');
 
 // Admin endpoints
+Uri get adminAnalyticsEndpoint => Uri.parse('$apiBaseUrl/api/auth/admin/analytics/');
 Uri get adminReportsEndpoint => Uri.parse('$apiBaseUrl/api/auth/admin/reports/');
 Uri adminDismissReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/auth/admin/reports/$id/');
 Uri adminDeletePostEndpoint(int id) => Uri.parse('$apiBaseUrl/api/auth/admin/posts/$id/');
