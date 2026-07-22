@@ -41,7 +41,10 @@ class ProfilePage extends StatefulWidget {
     this.activeNavIndex = 0,
     this.bouncePost = false,
     this.autoOpenCommentActor,
+    this.autoOpenCommentId,
+    this.autoOpenCommentPost,
     this.onPostTapWithHighlight,
+    this.onOpenCommentsExact,
     this.realtime,
   });
   final String username;
@@ -59,6 +62,12 @@ class ProfilePage extends StatefulWidget {
   final int? initialPostId;
   final bool bouncePost;
   final String? autoOpenCommentActor;
+  // Exact comment id to open the panel at, and the already-fetched post to open
+  // it on (so the panel opens even if the post isn't in [posts]). Used by the
+  // comment-notification flow.
+  final int? autoOpenCommentId;
+  final FeedPost? autoOpenCommentPost;
+  final void Function(FeedPost post, int? commentId, String? actor)? onOpenCommentsExact;
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
   final bool followEnabled;
@@ -143,7 +152,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       // For other-city profiles, fetch their posts from the API
       if (!widget.followEnabled) _loadOtherCityPosts();
       if (widget.initialPostId != null) {
-        final bool doAuto = widget.bouncePost || widget.autoOpenCommentActor != null;
+        final bool wantsComments = widget.autoOpenCommentActor != null ||
+            widget.autoOpenCommentId != null ||
+            widget.autoOpenCommentPost != null;
+        final bool doAuto = widget.bouncePost || wantsComments;
         if (doAuto) {
           setState(() => _autoNavigating = true);
           widget.onHideNavBar?.call();
@@ -192,15 +204,29 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             widget.onShowNavBar?.call();
           }
 
-          if (widget.autoOpenCommentActor != null) {
+          if (wantsComments) {
+            // Let the scroll settle so the post is visible behind the panel.
             await Future.delayed(const Duration(milliseconds: 500));
             if (!mounted) return;
-            FeedPost? post;
-            for (final p in widget.posts) {
-              if (p.id == widget.initialPostId) { post = p; break; }
+            // Prefer the post handed in (already fetched with the fresh thread),
+            // falling back to the loaded feed copy.
+            FeedPost? post = widget.autoOpenCommentPost;
+            if (post == null) {
+              for (final p in widget.posts) {
+                if (p.id == widget.initialPostId) { post = p; break; }
+              }
             }
             if (post != null) {
-              widget.onPostTapWithHighlight?.call(post, widget.autoOpenCommentActor!);
+              if (widget.onOpenCommentsExact != null &&
+                  (widget.autoOpenCommentId != null || widget.autoOpenCommentActor != null)) {
+                widget.onOpenCommentsExact!(
+                  post,
+                  widget.autoOpenCommentId,
+                  widget.autoOpenCommentActor,
+                );
+              } else if (widget.autoOpenCommentActor != null) {
+                widget.onPostTapWithHighlight?.call(post, widget.autoOpenCommentActor!);
+              }
             }
             if (mounted) setState(() => _autoNavigating = false);
             widget.onShowNavBar?.call();

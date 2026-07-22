@@ -775,7 +775,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _pushProfileRoute(String username, {int? postId, bool? followEnabled, bool bouncePost = false, String? highlightCommentActor}) {
+  void _pushProfileRoute(String username, {int? postId, bool? followEnabled, bool bouncePost = false, String? highlightCommentActor, int? autoOpenCommentId, FeedPost? autoOpenCommentPost}) {
     // Profile pages always show the native bar. Save the current hide count
     // so we can restore it when the profile pops (e.g. back into messages).
     final savedCount = _navBarHideCount;
@@ -795,9 +795,13 @@ class _HomePageState extends State<HomePage> {
           onSessionUpdated: widget.onSessionChanged,
           onPostTap: _openComments,
           onPostTapWithHighlight: (post, actor) => _openComments(post, highlightActor: actor),
+          onOpenCommentsExact: (post, commentId, actor) =>
+              _openComments(post, highlightCommentId: commentId, highlightActor: actor),
           initialPostId: postId,
           bouncePost: bouncePost,
           autoOpenCommentActor: highlightCommentActor,
+          autoOpenCommentId: autoOpenCommentId,
+          autoOpenCommentPost: autoOpenCommentPost,
           themeMode: widget.themeMode,
           onThemeModeChanged: widget.onThemeModeChanged,
           onHideNavBar: _hideNativeBar,
@@ -900,7 +904,7 @@ class _HomePageState extends State<HomePage> {
       }
 
       if (_kCommentVerbs.contains(item.verb) && postId != null) {
-        await _openPostComments(
+        await _openPostThenComments(
           postId,
           highlightCommentId: item.targetCommentId > 0 ? item.targetCommentId : null,
           highlightActor: item.actor,
@@ -934,18 +938,17 @@ class _HomePageState extends State<HomePage> {
     await _openNotificationTarget(item);
   }
 
-  /// Finds the post [postId] — from the loaded feed if present, otherwise by
-  /// fetching it — then opens its comment panel, scrolled to [highlightCommentId]
-  /// (falling back to [highlightActor]) so the panel lands on the exact comment
-  /// the interaction came from.
-  Future<void> _openPostComments(
+  /// TikTok-style comment-notification flow: land on the exact post (scrolled
+  /// to it in the author's profile, like the "liked your post" flow), then open
+  /// its comment panel scrolled to [highlightCommentId] (falling back to
+  /// [highlightActor]). Fetches the post fresh so the just-arrived comment is
+  /// present, and passes it along so the panel opens even if the post isn't in
+  /// the loaded feed.
+  Future<void> _openPostThenComments(
     int postId, {
     int? highlightCommentId,
     String? highlightActor,
   }) async {
-    // Always fetch fresh: the notification's comment is newer than whatever the
-    // feed loaded, so the loaded copy usually wouldn't contain it and the
-    // highlight would find nothing. The detail payload has the full thread.
     FeedPost? post;
     try {
       final res = await http.get(
@@ -957,18 +960,18 @@ class _HomePageState extends State<HomePage> {
         post = FeedPost.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
       }
     } catch (_) {}
-    // Fall back to a loaded copy if the fetch failed, so a tap still does
-    // something useful offline.
     if (post == null) {
       for (final p in _posts) {
         if (p.id == postId) { post = p; break; }
       }
     }
     if (post == null || !mounted) return;
-    _openComments(
-      post,
-      highlightActor: highlightActor,
-      highlightCommentId: highlightCommentId,
+    _pushProfileRoute(
+      post.author,
+      postId: postId,
+      autoOpenCommentPost: post,
+      autoOpenCommentId: highlightCommentId,
+      highlightCommentActor: highlightActor,
     );
   }
 
@@ -994,6 +997,11 @@ class _HomePageState extends State<HomePage> {
           onTapItem: (item, eventType) async {
             await _markNotificationsRead([item]);
             if (!mounted) return;
+            // Close the notifications sheet first so we land cleanly on the
+            // target (post + comments), TikTok-style, instead of stacking the
+            // comment panel on top of the sheet. The sheet is the top route
+            // here, so popping the root navigator dismisses it.
+            Navigator.of(context, rootNavigator: true).pop();
             await _openNotificationTarget(item, eventType: eventType);
           },
         ),
