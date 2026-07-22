@@ -31,6 +31,13 @@ Uri postsEndpoint({bool fresh = false, String? city}) {
   return uri.replace(queryParameters: params);
 }
 
+Uri viralPostsEndpoint({required String city, required String period}) {
+  final uri = Uri.parse('$apiBaseUrl/api/posts/viral/');
+  final params = <String, String>{'period': period};
+  if (city.isNotEmpty) params['city'] = city;
+  return uri.replace(queryParameters: params);
+}
+
 Uri postLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/like/');
 Uri postShareEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/share/');
 Uri postLikersEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/likers/');

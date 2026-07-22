@@ -2539,27 +2539,23 @@ class _ViralViewState extends State<_ViralView> {
     super.dispose();
   }
 
+  // Only used to render the "N neat pts" badge on the (at most 10) already-
+  // ranked posts the server returns — ranking/filtering itself happens
+  // server-side now (see viral_posts in posts/views.py), instead of
+  // downloading the whole city feed and sorting it locally on every load.
   double _score(FeedPost p) => (p.likes * 0.45 + p.comments.length * 0.55) * 100;
 
-  int _minutesSincePeriodStart() {
-    final now = DateTime.now();
-    final DateTime periodStart;
-    switch (_period) {
-      case _ViralPeriod.daily:
-        periodStart = DateTime(now.year, now.month, now.day, 0, 0, 0);
-      case _ViralPeriod.weekly:
-        periodStart = DateTime(now.year, now.month, now.day - (now.weekday - 1), 0, 0, 0);
-      case _ViralPeriod.monthly:
-        periodStart = DateTime(now.year, now.month, 1, 0, 0, 0);
-    }
-    return now.difference(periodStart).inMinutes;
-  }
+  String get _periodParam => switch (_period) {
+        _ViralPeriod.daily => 'daily',
+        _ViralPeriod.weekly => 'weekly',
+        _ViralPeriod.monthly => 'monthly',
+      };
 
   Future<void> _loadViral() async {
     if (mounted) setState(() => _loadingViral = true);
     try {
       final res = await http.get(
-        postsEndpoint(city: _city),
+        viralPostsEndpoint(city: _city, period: _periodParam),
         headers: authGetHeaders(widget.token),
       );
       if (!mounted) return;
@@ -2568,19 +2564,9 @@ class _ViralViewState extends State<_ViralView> {
         return;
       }
       final decoded = jsonDecode(res.body) as List<dynamic>;
-      final cutoff = _minutesSincePeriodStart();
-      final posts = decoded
-          .whereType<Map<String, dynamic>>()
-          .map(FeedPost.fromJson)
-          .where((p) => p.minutesAgo <= cutoff)
-          .toList();
-      posts.sort((a, b) {
-        final diff = _score(b).compareTo(_score(a));
-        if (diff != 0) return diff;
-        return a.minutesAgo.compareTo(b.minutesAgo);
-      });
+      final posts = decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList();
       setState(() {
-        _viralPosts = posts.take(10).toList();
+        _viralPosts = posts;
         _loadingViral = false;
       });
     } catch (_) {
