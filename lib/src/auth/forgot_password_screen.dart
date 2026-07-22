@@ -37,6 +37,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   bool _loading = false;
   String? _error;
   bool _obscurePass = true;
+  // Masked destination returned by the server (e.g. j***n@g***l.com), so the
+  // code step can show where the email actually went when the user typed a
+  // username rather than an address.
+  String? _maskedEmail;
   bool _obscureConfirm = true;
 
   int _resendSeconds = 0;
@@ -85,7 +89,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Future<void> _sendCode() async {
     final email = _emailCtrl.text.trim();
     if (email.isEmpty) {
-      setState(() => _error = 'Please enter your email');
+      setState(() => _error = 'Please enter your email or username');
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -97,6 +101,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       );
       if (!mounted) return;
       if (res.statusCode != 200) throw Exception(friendlyHttpError(res));
+      // When the identifier was a username, the server resolves it and returns
+      // the masked address, so the next step can confirm where the code went
+      // instead of echoing back the username.
+      try {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic>) {
+          _maskedEmail = decoded['maskedEmail']?.toString();
+        }
+      } catch (_) {}
       _clearOtp();
       setState(() { _step = 1; _loading = false; });
       _startResendTimer();
@@ -228,7 +241,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         border: _border,
       );
       case 1: return _CodeStep(
-        email: _emailCtrl.text.trim(),
+        email: (_maskedEmail != null && _maskedEmail!.isNotEmpty)
+            ? _maskedEmail!
+            : _emailCtrl.text.trim(),
         otpCtrls: _otpCtrls,
         otpFoci: _otpFoci,
         loading: _loading,
