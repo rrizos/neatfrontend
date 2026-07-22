@@ -943,21 +943,26 @@ class _HomePageState extends State<HomePage> {
     int? highlightCommentId,
     String? highlightActor,
   }) async {
+    // Always fetch fresh: the notification's comment is newer than whatever the
+    // feed loaded, so the loaded copy usually wouldn't contain it and the
+    // highlight would find nothing. The detail payload has the full thread.
     FeedPost? post;
-    for (final p in _posts) {
-      if (p.id == postId) { post = p; break; }
-    }
+    try {
+      final res = await http.get(
+        postDetailEndpoint(postId),
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (res.statusCode == 401) { await widget.onLogout(); return; }
+      if (res.statusCode == 200) {
+        post = FeedPost.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+      }
+    } catch (_) {}
+    // Fall back to a loaded copy if the fetch failed, so a tap still does
+    // something useful offline.
     if (post == null) {
-      try {
-        final res = await http.get(
-          postDetailEndpoint(postId),
-          headers: authGetHeaders(widget.session.token),
-        );
-        if (res.statusCode == 401) { await widget.onLogout(); return; }
-        if (res.statusCode == 200) {
-          post = FeedPost.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
-        }
-      } catch (_) {}
+      for (final p in _posts) {
+        if (p.id == postId) { post = p; break; }
+      }
     }
     if (post == null || !mounted) return;
     _openComments(
