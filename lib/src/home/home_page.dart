@@ -997,11 +997,6 @@ class _HomePageState extends State<HomePage> {
           onTapItem: (item, eventType) async {
             await _markNotificationsRead([item]);
             if (!mounted) return;
-            // Close the notifications sheet first so we land cleanly on the
-            // target (post + comments), TikTok-style, instead of stacking the
-            // comment panel on top of the sheet. The sheet is the top route
-            // here, so popping the root navigator dismisses it.
-            Navigator.of(context, rootNavigator: true).pop();
             await _openNotificationTarget(item, eventType: eventType);
           },
         ),
