@@ -517,7 +517,10 @@ class _HomePageState extends State<HomePage> {
         _compose.clear();
         popped = true;
         Navigator.of(context).pop();
-        _load();
+        // Show the city feed (tab 0) where the new post lands, and refresh it.
+        if (mounted) setState(() => _selectedTab = 0);
+        await _load();
+        if (!mounted) return;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           setState(() {
@@ -526,6 +529,15 @@ class _HomePageState extends State<HomePage> {
             for (final c in _composePollControllers) { c.dispose(); }
             _composePollControllers.clear();
           });
+          // The feed is newest-first, so the just-created post is at the very
+          // top — scroll there so the user sees their post in the feed.
+          if (_cityScroll.hasClients) {
+            _cityScroll.animateTo(
+              0,
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeOut,
+            );
+          }
         });
       } else if (res.statusCode == 413) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2279,21 +2291,8 @@ class _TopBar extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 4),
-              _iconWithDot(
-                isLight: isLight,
-                showDot: hasOfficialEvents,
-                onTap: onEventsTap,
-                icon: Icons.event_note_outlined,
-              ),
             ],
             if (activeCity == null) ...[
-              _iconWithDot(
-                isLight: isLight,
-                showDot: hasOfficialEvents,
-                onTap: onEventsTap,
-                icon: Icons.event_note_outlined,
-              ),
               _iconWithDot(
                 isLight: isLight,
                 showDot: notifications > 0,
