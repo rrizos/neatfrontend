@@ -3100,24 +3100,36 @@ class _SharedPostCard extends StatelessWidget {
   final bool isLight;
   final VoidCallback? onTap;
 
+  static const _kCardWidth = 210.0;
+
   @override
   Widget build(BuildContext context) {
-    final author   = data['author']?.toString() ?? '';
-    final text     = data['text']?.toString() ?? '';
-    final imageUrl = data['imageUrl']?.toString() ?? '';
-    final likes    = (data['likes'] as num?)?.toInt() ?? 0;
-    final cardBg   = isLight ? Colors.white : const Color(0xff1c1c1e);
-    final border   = isLight ? const Color(0xffe0e0e0) : const Color(0xff333333);
-    final textClr  = isLight ? Colors.black : Colors.white;
-    final sub      = isLight ? _kSubLgt : _kSubDark;
-    final imgBytes = imageUrl.isNotEmpty ? _dataUrlBytes(imageUrl) : null;
+    final author         = data['author']?.toString() ?? '';
+    final avatarUrl      = data['avatarUrl']?.toString() ?? '';
+    final authorVerified = data['authorVerified'] == true;
+    final text           = data['text']?.toString() ?? '';
+    // Back-compat: posts shared before the `media` field existed only ever
+    // carried a flat `imageUrl` — that's why videos/GIFs used to show up
+    // blank, since imageUrl is only ever populated for plain image posts.
+    final media     = data['media'] as Map?;
+    final mediaType = media?['type']?.toString() ?? (data['imageUrl'] != null ? 'image' : '');
+    final mediaUrl  = (media?['url'] ?? data['imageUrl'])?.toString() ?? '';
+    final isVideo   = mediaType == 'video';
+
+    final cardBg    = isLight ? Colors.white : const Color(0xff1c1c1e);
+    final border    = isLight ? const Color(0xffdbdbdb) : const Color(0xff363636);
+    final textClr   = isLight ? Colors.black : Colors.white;
+    final sub       = isLight ? _kSubLgt : _kSubDark;
+    final avatarImg = avatarUrl.isNotEmpty ? _imgProvider(avatarUrl) : null;
+    final mediaBytes = mediaUrl.isNotEmpty ? _dataUrlBytes(mediaUrl) : null;
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
+        width: _kCardWidth,
         decoration: BoxDecoration(
           color: cardBg,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(color: border),
         ),
         clipBehavior: Clip.hardEdge,
@@ -3125,65 +3137,79 @@ class _SharedPostCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (imageUrl.isNotEmpty)
-              AspectRatio(
-                aspectRatio: 1.6,
-                child: imgBytes != null
-                    ? Image.memory(imgBytes, fit: BoxFit.cover)
-                    : CachedNetworkImage(
-                        imageUrl: imageUrl,
-                        cacheManager: imageCacheManager,
-                        fit: BoxFit.cover,
-                        fadeInDuration: Duration.zero,
-                      ),
-              ),
+            // ── header: avatar + username, like Instagram's shared-post bubble ──
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              padding: const EdgeInsets.fromLTRB(10, 9, 10, 8),
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 12,
-                        backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff3a3a3a),
-                        child: Text(
-                          initialFor(author),
-                          style: TextStyle(fontSize: 10, color: textClr, fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text('@$author', style: TextStyle(color: textClr, fontWeight: FontWeight.w700, fontSize: 13)),
-                    ],
+                  CircleAvatar(
+                    radius: 11,
+                    backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff3a3a3a),
+                    backgroundImage: avatarImg,
+                    child: avatarImg == null
+                        ? Text(
+                            initialFor(author),
+                            style: TextStyle(fontSize: 9, color: textClr, fontWeight: FontWeight.w700),
+                          )
+                        : null,
                   ),
-                  if (text.isNotEmpty) ...[
-                    const SizedBox(height: 5),
-                    Text(
-                      text.length > 100 ? '${text.substring(0, 100)}…' : text,
-                      style: TextStyle(color: sub, fontSize: 13, height: 1.35),
-                      maxLines: 3,
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      author,
+                      style: TextStyle(color: textClr, fontWeight: FontWeight.w600, fontSize: 13),
                       overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      if (likes > 0) ...[
-                        const Icon(Icons.favorite_rounded, size: 12, color: Colors.red),
-                        const SizedBox(width: 3),
-                        Text('$likes', style: TextStyle(color: sub, fontSize: 12)),
-                        const SizedBox(width: 8),
-                      ],
-                      if (onTap != null)
-                        const Text(
-                          'View post',
-                          style: TextStyle(color: _kBlue, fontSize: 12, fontWeight: FontWeight.w600),
-                        ),
-                    ],
                   ),
+                  if (authorVerified) ...[
+                    const SizedBox(width: 3),
+                    const Icon(Icons.verified_rounded, size: 13, color: _kBlue),
+                  ],
                 ],
               ),
             ),
+            // ── square media, like Instagram's shared-post bubble ──
+            if (mediaUrl.isNotEmpty)
+              AspectRatio(
+                aspectRatio: 1,
+                child: isVideo
+                    // A static play-button treatment rather than decoding/playing
+                    // the video — Instagram's own DM preview is a static frame,
+                    // and actually decoding video just for a chat thumbnail isn't
+                    // worth the cost here.
+                    ? Container(
+                        color: Colors.black,
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 44),
+                      )
+                    : (mediaBytes != null
+                        ? Image.memory(mediaBytes, fit: BoxFit.cover)
+                        : CachedNetworkImage(
+                            imageUrl: mediaUrl,
+                            cacheManager: imageCacheManager,
+                            fit: BoxFit.cover,
+                            fadeInDuration: Duration.zero,
+                          )),
+              )
+            else
+              Container(
+                height: _kCardWidth,
+                color: isLight ? const Color(0xfff2f2f2) : const Color(0xff262626),
+                alignment: Alignment.center,
+                child: Icon(Icons.image_outlined, color: sub, size: 36),
+              ),
+            if (text.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                child: Text(
+                  text,
+                  style: TextStyle(color: sub, fontSize: 12.5, height: 1.3),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              )
+            else
+              const SizedBox(height: 10),
           ],
         ),
       ),

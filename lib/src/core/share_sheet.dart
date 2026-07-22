@@ -203,12 +203,20 @@ class _ShareSheetState extends State<_ShareSheet> {
   // ── DM sending ──────────────────────────────────────────────────────────────
 
   String get _dmPayload {
+    final media = widget.post.media;
+    // Prefer the real media array (so video/GIF posts carry their actual
+    // type instead of silently dropping their thumbnail) — imageUrl is only
+    // a legacy fallback for old posts that predate the media array.
+    final firstMedia = media.isNotEmpty
+        ? {'type': media.first.type, 'url': media.first.url}
+        : (widget.post.imageUrl.isNotEmpty ? {'type': 'image', 'url': widget.post.imageUrl} : null);
     return '__neat_post__:${jsonEncode({
       'id': widget.post.id,
       'author': widget.post.author,
+      'avatarUrl': widget.post.avatarUrl,
+      'authorVerified': widget.post.authorVerified,
       'text': widget.post.text,
-      'imageUrl': widget.post.imageUrl,
-      'likes': widget.post.likes,
+      'media': firstMedia,
     })}';
   }
 
