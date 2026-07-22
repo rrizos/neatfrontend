@@ -8,6 +8,7 @@ import '../core/http_client.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
+import '../core/neat_loader.dart';
 import '../core/legacy_nav_bar.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
@@ -816,7 +817,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final isLight = Theme.of(context).brightness == Brightness.light;
     final profile = _profile;
     if (_loading || profile == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(body: NeatLoader());
     }
     final isOwn = profile.username == widget.currentUser.username;
     final feedPosts = widget.posts.where((p) => p.author == profile.username).toList();
@@ -865,6 +866,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 MaterialPageRoute(
                   builder: (_) => SettingsPage(
                     themeMode: widget.themeMode,
+                    onThemeModeChanged: widget.onThemeModeChanged,
                     onLogout: widget.onLogout,
                     token: widget.token,
                   ),
@@ -1091,7 +1093,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     if (!isOwn) {
       return const Center(child: Icon(Icons.lock_outline, size: 48, color: Color(0xffb3b3b3)));
     }
-    if (_likedLoading) return const Center(child: CircularProgressIndicator());
+    if (_likedLoading) return const NeatLoader();
     final liked = _likedPosts;
     if (liked == null) return const SizedBox.shrink();
     if (liked.isEmpty) {
@@ -1108,7 +1110,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     if (!isOwn) {
       return const Center(child: Icon(Icons.lock_outline, size: 48, color: Color(0xffb3b3b3)));
     }
-    if (_savedLoading) return const Center(child: CircularProgressIndicator());
+    if (_savedLoading) return const NeatLoader();
     final saved = _savedPosts;
     if (saved == null) return const SizedBox.shrink();
     if (saved.isEmpty) {
@@ -1774,29 +1776,6 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                 Switch(
                   value: _avatarZoomable,
                   onChanged: (v) => setState(() => _avatarZoomable = v),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Text(
-                  'Light mode',
-                  style: TextStyle(
-                    color: Theme.of(context).brightness == Brightness.light
-                        ? Colors.black
-                        : Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
-                Switch(
-                  value: Theme.of(context).brightness == Brightness.light,
-                  onChanged: (value) {
-                    widget.onThemeModeChanged(
-                      value ? ThemeMode.light : ThemeMode.dark,
-                    );
-                  },
                 ),
               ],
             ),

@@ -22,6 +22,7 @@ import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/mentions.dart';
 import '../core/models.dart';
+import '../core/neat_loader.dart';
 import '../core/post_card.dart';
 import '../core/push_service.dart';
 import '../core/realtime_service.dart';
@@ -1903,7 +1904,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(body: NeatLoader());
     }
 
     final cityPosts = _posts;
@@ -2988,7 +2989,7 @@ class _ViralViewState extends State<_ViralView> {
   // ── Viral body ─────────────────────────────────────────────────────────────
 
   Widget _buildViralBody(bool isLight) {
-    if (_loadingViral) return const Center(child: CircularProgressIndicator());
+    if (_loadingViral) return const NeatLoader();
     if (_viralPosts.isEmpty) {
       return Center(
         child: Column(
@@ -3474,7 +3475,7 @@ class _ViralViewState extends State<_ViralView> {
         // ── Results ───────────────────────────────────────────────────────
         Expanded(
           child: _searchLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? const NeatLoader()
               : AnimatedSwitcher(
                   duration: const Duration(milliseconds: 200),
                   child: KeyedSubtree(
@@ -3503,7 +3504,7 @@ class _ViralViewState extends State<_ViralView> {
     final people = _users.isEmpty ? _topUsers : _users;
     if (people.isEmpty) {
       return _loadingTop
-          ? const Center(child: CircularProgressIndicator())
+          ? const NeatLoader()
           : _buildEmpty(query, isLight);
     }
     return ListView.separated(

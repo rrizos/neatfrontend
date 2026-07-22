@@ -9,11 +9,13 @@ class SettingsPage extends StatelessWidget {
   const SettingsPage({
     super.key,
     required this.themeMode,
+    required this.onThemeModeChanged,
     required this.onLogout,
     required this.token,
   });
 
   final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
   final Future<void> Function() onLogout;
   final String token;
 
@@ -35,6 +37,24 @@ class SettingsPage extends StatelessWidget {
       body: SafeArea(
         child: ListView(
           children: [
+            _SectionHeader(label: 'Appearance', color: sectionColor),
+            SwitchListTile(
+              value: isLight,
+              onChanged: (value) =>
+                  onThemeModeChanged(value ? ThemeMode.light : ThemeMode.dark),
+              secondary: Icon(
+                isLight ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                color: isLight ? Colors.black : Colors.white,
+              ),
+              title: Text(
+                'Light mode',
+                style: TextStyle(
+                  color: isLight ? Colors.black : Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            const SizedBox(height: 28),
             _SectionHeader(label: 'Legal', color: sectionColor),
             _SettingsRow(
               icon: Icons.description_outlined,

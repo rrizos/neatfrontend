@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'auth/auth_gate.dart';
+import 'core/neat_loader.dart';
 import 'core/post_deep_link_page.dart';
 
 class NeatApp extends StatefulWidget {
@@ -139,7 +140,7 @@ class _NeatAppState extends State<NeatApp> {
         darkTheme: _darkTheme(),
         themeMode: _themeMode,
         home: const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
+          body: NeatLoader(),
         ),
       );
     }
