@@ -52,6 +52,25 @@ Uri postPollVoteEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/poll/vo
 
 // Admin endpoints
 Uri get adminAnalyticsEndpoint => Uri.parse('$apiBaseUrl/api/auth/admin/analytics/');
+Uri get adminSecuritySummaryEndpoint =>
+    Uri.parse('$apiBaseUrl/api/auth/admin/security/summary/');
+Uri get adminSecurityActionsEndpoint =>
+    Uri.parse('$apiBaseUrl/api/auth/admin/security/actions/');
+Uri adminSecurityLogsEndpoint({
+  String severity = 'all',
+  String eventType = 'all',
+  String query = '',
+  int limit = 100,
+}) {
+  final params = <String, String>{
+    'severity': severity,
+    'event_type': eventType,
+    'limit': '$limit',
+  };
+  if (query.trim().isNotEmpty) params['q'] = query.trim();
+  return Uri.parse('$apiBaseUrl/api/auth/admin/security/logs/')
+      .replace(queryParameters: params);
+}
 Uri get adminReportsEndpoint => Uri.parse('$apiBaseUrl/api/auth/admin/reports/');
 Uri adminDismissReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/auth/admin/reports/$id/');
 Uri adminDeletePostEndpoint(int id) => Uri.parse('$apiBaseUrl/api/auth/admin/posts/$id/');

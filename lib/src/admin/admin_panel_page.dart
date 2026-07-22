@@ -5,6 +5,7 @@ import '../core/http_client.dart' as http;
 
 import '../core/api.dart';
 import 'analytics_tab.dart';
+import 'security_tab.dart';
 
 class AdminPanelPage extends StatelessWidget {
   final String token;
@@ -15,7 +16,7 @@ class AdminPanelPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
         appBar: AppBar(
@@ -33,6 +34,7 @@ class AdminPanelPage extends StatelessWidget {
             indicatorColor: const Color(0xff0095f6),
             tabs: const [
               Tab(text: 'Analytics'),
+              Tab(text: 'Security'),
               Tab(text: 'Reports'),
               Tab(text: 'Users'),
             ],
@@ -41,6 +43,7 @@ class AdminPanelPage extends StatelessWidget {
         body: TabBarView(
           children: [
             AnalyticsTab(token: token),
+            SecurityTab(token: token),
             _ReportsTab(token: token),
             _UsersTab(token: token),
           ],
