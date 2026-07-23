@@ -518,28 +518,24 @@ class _HomePageState extends State<HomePage> {
         _compose.clear();
         popped = true;
         Navigator.of(context).pop();
-        // Show the city feed (tab 0) where the new post lands, and refresh it.
-        if (mounted) setState(() => _selectedTab = 0);
-        await _load();
-        if (!mounted) return;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
+        if (mounted) {
           setState(() {
             _composeMedia.clear();
             _composePollActive = false;
             for (final c in _composePollControllers) { c.dispose(); }
             _composePollControllers.clear();
+            // Switch to profile tab and force a reload so the new post appears.
+            _nav = 4;
+            _visitedTabs.add(4);
+            _inlineProfileUsername = widget.session.user.username;
+            _inlinePostId = null;
+            _showInlineProfile = true;
+            _profileRefreshKey++;
           });
-          // The feed is newest-first, so the just-created post is at the very
-          // top — scroll there so the user sees their post in the feed.
-          if (_cityScroll.hasClients) {
-            _cityScroll.animateTo(
-              0,
-              duration: const Duration(milliseconds: 450),
-              curve: Curves.easeOut,
-            );
-          }
-        });
+          if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 4);
+          // Refresh the home feed so the profile picks up the new post.
+          _load();
+        }
       } else if (res.statusCode == 413) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('File too large. Try a shorter video or smaller photos.')),
@@ -1375,6 +1371,8 @@ class _HomePageState extends State<HomePage> {
                                           controller: _compose,
                                           autofocus: true,
                                           maxLines: null,
+                                          maxLength: 280,
+                                          maxLengthEnforcement: MaxLengthEnforcement.enforced,
                                           style: TextStyle(
                                             color: dimColor,
                                             fontSize: 17,
@@ -1390,6 +1388,7 @@ class _HomePageState extends State<HomePage> {
                                             ),
                                             border: InputBorder.none,
                                             contentPadding: EdgeInsets.zero,
+                                            counterText: '',
                                           ),
                                         ),
                                         MentionSuggestions(
@@ -1577,47 +1576,38 @@ class _HomePageState extends State<HomePage> {
                                               builder: (_, value, _) {
                                                 final count =
                                                     value.text.length;
-                                                return AnimatedContainer(
-                                                  duration: const Duration(
-                                                      milliseconds: 180),
+                                                return Container(
                                                   padding: const EdgeInsets
                                                       .symmetric(
-                                                      horizontal: 12,
-                                                      vertical: 8),
+                                                      horizontal: 8,
+                                                      vertical: 6),
                                                   decoration: BoxDecoration(
-                                                    color: count > 240
+                                                    color: isLight
                                                         ? const Color(
-                                                            0xff301818)
-                                                        : (isLight
-                                                            ? const Color(
-                                                                0xffeef1f5)
-                                                            : const Color(
-                                                                0xff1a1a1a)),
+                                                            0xffeef1f5)
+                                                        : const Color(
+                                                            0xff1a1a1a),
                                                     borderRadius:
                                                         BorderRadius
                                                             .circular(999),
                                                     border: Border.all(
-                                                      color: count > 240
+                                                      color: isLight
                                                           ? const Color(
-                                                              0xff7a2f2f)
-                                                          : (isLight
-                                                              ? const Color(
-                                                                  0xffd9dee6)
-                                                              : const Color(
-                                                                  0xff2c2c2c)),
+                                                              0xffd9dee6)
+                                                          : const Color(
+                                                              0xff2c2c2c),
                                                     ),
                                                   ),
                                                   child: Text(
                                                     '$count/280',
+                                                    softWrap: false,
                                                     style: TextStyle(
-                                                      color: count > 240
+                                                      fontSize: 11,
+                                                      color: isLight
                                                           ? const Color(
-                                                              0xffff9a9a)
-                                                          : (isLight
-                                                              ? const Color(
-                                                                  0xff616161)
-                                                              : const Color(
-                                                                  0xff9a9a9a)),
+                                                              0xff616161)
+                                                          : const Color(
+                                                              0xff9a9a9a),
                                                       fontWeight:
                                                           FontWeight.w600,
                                                     ),
@@ -2639,7 +2629,7 @@ class _ViralViewState extends State<_ViralView> {
   // ranked posts the server returns — ranking/filtering itself happens
   // server-side now (see viral_posts in posts/views.py), instead of
   // downloading the whole city feed and sorting it locally on every load.
-  double _score(FeedPost p) => (p.likes * 0.45 + p.commentCount * 0.55) * 100;
+  double _score(FeedPost p) => (p.likes * 0.33 + p.commentCount * 0.33 + p.shares * 0.33) * 100;
 
   String get _periodParam => switch (_period) {
         _ViralPeriod.daily => 'daily',
@@ -3002,13 +2992,18 @@ class _ViralViewState extends State<_ViralView> {
         ),
       );
     }
+    final sortedPosts = [..._viralPosts]..sort((a, b) {
+        final diff = _score(b).compareTo(_score(a));
+        if (diff != 0) return diff;
+        return a.minutesAgo.compareTo(b.minutesAgo);
+      });
     return RefreshIndicator(
       onRefresh: _loadViral,
       child: ListView.builder(
         padding: const EdgeInsets.only(bottom: 40),
-        itemCount: _viralPosts.length,
+        itemCount: sortedPosts.length,
         itemBuilder: (_, i) {
-          final post = _viralPosts[i];
+          final post = sortedPosts[i];
           final rank = i + 1;
           final score = _score(post);
           final isTop3 = rank <= 3;
@@ -3028,7 +3023,7 @@ class _ViralViewState extends State<_ViralView> {
                     children: [
                       Text('#$rank', style: TextStyle(color: mc, fontSize: 19, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
                       const Spacer(),
-                      Opacity(opacity: 0, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: mc.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)), child: Text(scoreStr, style: TextStyle(color: mc, fontSize: 12, fontWeight: FontWeight.w700)))),
+                      Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: mc.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)), child: Text(scoreStr, style: TextStyle(color: mc, fontSize: 12, fontWeight: FontWeight.w700))),
                     ],
                   ),
                 )
@@ -3039,7 +3034,7 @@ class _ViralViewState extends State<_ViralView> {
                     children: [
                       Text('#$rank', style: TextStyle(color: isLight ? const Color(0xffb8c0cc) : const Color(0xff4a5568), fontSize: 13, fontWeight: FontWeight.w800)),
                       const Spacer(),
-                      Opacity(opacity: 0, child: Text(scoreStr, style: TextStyle(color: isLight ? const Color(0xffb8c0cc) : const Color(0xff4a5568), fontSize: 12))),
+                      Text(scoreStr, style: TextStyle(color: isLight ? const Color(0xffb8c0cc) : const Color(0xff4a5568), fontSize: 12)),
                     ],
                   ),
                 ),

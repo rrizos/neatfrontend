@@ -102,6 +102,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   final Set<String> _followingAuthors = {};
   List<FeedPost>? _otherCityPosts;
   bool _otherCityPostsLoading = false;
+  final Set<int> _deletedPostIds = {};
 
   @override
   void initState() {
@@ -646,6 +647,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       headers: authGetHeaders(widget.token),
     );
     if (res.statusCode == 200) {
+      if (mounted) setState(() => _deletedPostIds.add(post.id));
       await _load();
     }
   }
@@ -820,8 +822,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       return const Scaffold(body: NeatLoader());
     }
     final isOwn = profile.username == widget.currentUser.username;
-    final feedPosts = widget.posts.where((p) => p.author == profile.username).toList();
-    final fetched = _otherCityPosts;
+    final feedPosts = widget.posts.where((p) => p.author == profile.username && !_deletedPostIds.contains(p.id)).toList();
+    final fetched = _otherCityPosts?.where((p) => !_deletedPostIds.contains(p.id)).toList();
     final userPosts = widget.followEnabled
         ? feedPosts
         : ((fetched != null && fetched.isNotEmpty) ? fetched : feedPosts);
