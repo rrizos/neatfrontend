@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'http_client.dart' as http;
 
+import '../../l10n/app_localizations.dart';
 import 'api.dart';
 
 class _ReportReason {
@@ -17,101 +18,101 @@ class _ReportReason {
   });
 }
 
-const _kReasons = [
-  _ReportReason(key: 'spam', label: "It's spam"),
+List<_ReportReason> _buildReasons(AppLocalizations l10n) => [
+  _ReportReason(key: 'spam', label: l10n.reportSpam),
   _ReportReason(
     key: 'nudity',
-    label: 'Nudity or sexual activity',
+    label: l10n.reportNudity,
     subReasons: [
-      'Sexual acts',
-      'Genitals',
-      'Buttocks or underwear',
-      'Sexual services',
-      'Suggestive account',
+      l10n.reportSubSexualActs,
+      l10n.reportSubGenitals,
+      l10n.reportSubButtocks,
+      l10n.reportSubSexualServices,
+      l10n.reportSubSuggestiveAccount,
     ],
   ),
   _ReportReason(
     key: 'hate_speech',
-    label: 'Hate speech or symbols',
+    label: l10n.reportHateSpeech,
     subReasons: [
-      'Race or ethnicity',
-      'National origin',
-      'Religion',
-      'Gender',
-      'Sexual orientation',
-      'Disability or disease',
-      'Caste',
+      l10n.reportSubRace,
+      l10n.reportSubNationalOrigin,
+      l10n.reportSubReligion,
+      l10n.reportSubGender,
+      l10n.reportSubSexualOrientation,
+      l10n.reportSubDisability,
+      l10n.reportSubCaste,
     ],
   ),
   _ReportReason(
     key: 'violence',
-    label: 'Violence or dangerous organizations',
+    label: l10n.reportViolence,
     subReasons: [
-      'Violence',
-      'Weapons',
-      'Dangerous individuals or organizations',
-      'Child exploitation',
-      'Animal abuse',
+      l10n.reportSubViolence,
+      l10n.reportSubWeapons,
+      l10n.reportSubDangerousOrgs,
+      l10n.reportSubChildExploitation,
+      l10n.reportSubAnimalAbuse,
     ],
   ),
   _ReportReason(
     key: 'illegal_goods',
-    label: 'Sale of illegal or regulated goods',
+    label: l10n.reportIllegalGoods,
     subReasons: [
-      'Drugs',
-      'Weapons',
-      'Endangered wildlife products',
-      'Counterfeit goods',
-      'Sexual services',
+      l10n.reportSubDrugs,
+      l10n.reportSubWeapons,
+      l10n.reportSubWildlife,
+      l10n.reportSubCounterfeit,
+      l10n.reportSubSexualServices,
     ],
   ),
   _ReportReason(
     key: 'bullying',
-    label: 'Bullying or harassment',
+    label: l10n.reportBullying,
     subReasons: [
-      'Me',
-      'Someone I know',
-      'A celebrity or public figure',
+      l10n.reportSubMe,
+      l10n.reportSubSomeoneIKnow,
+      l10n.reportSubPublicFigure,
     ],
   ),
   _ReportReason(
     key: 'intellectual_property',
-    label: 'Intellectual property violation',
+    label: l10n.reportIntellectualProperty,
     subReasons: [
-      'Copyright',
-      'Trademark',
+      l10n.reportSubCopyright,
+      l10n.reportSubTrademark,
     ],
   ),
   _ReportReason(
     key: 'self_injury',
-    label: 'Suicide or self-injury',
+    label: l10n.reportSelfInjury,
     subReasons: [
-      'Suicide or self-harm',
-      'Dangerous activities',
+      l10n.reportSubSelfHarm,
+      l10n.reportSubDangerousActivities,
     ],
   ),
-  _ReportReason(key: 'eating_disorders', label: 'Eating disorders'),
+  _ReportReason(key: 'eating_disorders', label: l10n.reportEatingDisorders),
   _ReportReason(
     key: 'scam',
-    label: 'Scam or fraud',
+    label: l10n.reportScam,
     subReasons: [
-      'Phishing or hacked account',
-      'Romance scam',
-      'Financial scam',
-      'Purchased followers or likes',
+      l10n.reportSubPhishing,
+      l10n.reportSubRomanceScam,
+      l10n.reportSubFinancialScam,
+      l10n.reportSubPurchasedFollowers,
     ],
   ),
   _ReportReason(
     key: 'false_information',
-    label: 'False information',
+    label: l10n.reportFalseInformation,
     subReasons: [
-      'Health',
-      'Politics',
-      'Social issue',
-      'Something else',
+      l10n.reportSubHealth,
+      l10n.reportSubPolitics,
+      l10n.reportSubSocialIssue,
+      l10n.reportSubSomethingElse,
     ],
   ),
-  _ReportReason(key: 'dislike', label: "I just don't like it"),
+  _ReportReason(key: 'dislike', label: l10n.reportDislike),
 ];
 
 enum _Step { reason, subReason, submitting, done }
@@ -292,6 +293,8 @@ class _ReasonPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final reasons = _buildReasons(l10n);
     return SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -303,7 +306,7 @@ class _ReasonPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Report',
+                  l10n.reportTitle,
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -312,7 +315,7 @@ class _ReasonPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Why are you reporting this post?',
+                  l10n.reportWhyPost,
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
@@ -321,7 +324,7 @@ class _ReasonPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Your report is anonymous, except if you\'re reporting an intellectual property infringement.',
+                  l10n.reportAnonymousNote,
                   style: TextStyle(fontSize: 12, color: subtitleColor, height: 1.4),
                 ),
               ],
@@ -334,10 +337,10 @@ class _ReasonPage extends StatelessWidget {
             ),
             child: ListView.separated(
               shrinkWrap: true,
-              itemCount: _kReasons.length,
+              itemCount: reasons.length,
               separatorBuilder: (_, _) => Divider(height: 1, color: dividerColor),
               itemBuilder: (_, i) {
-                final r = _kReasons[i];
+                final r = reasons[i];
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                   title: Text(
@@ -407,7 +410,7 @@ class _SubReasonPage extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Text(
-              'Select a more specific issue',
+              AppLocalizations.of(context).reportSelectSpecific,
               style: TextStyle(fontSize: 13, color: subtitleColor),
             ),
           ),
@@ -465,6 +468,7 @@ class _DonePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
@@ -482,7 +486,7 @@ class _DonePage extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              'Thanks for letting us know',
+              l10n.reportThanks,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
@@ -492,7 +496,7 @@ class _DonePage extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'We use these reports to show fewer of these things in the future. If someone is in immediate danger, call local emergency services.',
+              l10n.reportThanksBody,
               style: TextStyle(fontSize: 13, color: subtitleColor, height: 1.5),
               textAlign: TextAlign.center,
             ),
@@ -510,9 +514,9 @@ class _DonePage extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 onPressed: onDone,
-                child: const Text(
-                  'Done',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                child: Text(
+                  l10n.done,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
             ),

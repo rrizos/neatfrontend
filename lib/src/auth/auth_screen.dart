@@ -1,15 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import '../core/http_client.dart' as http;
 
+import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/models.dart';
 import '../legal/legal_page.dart';
 import '../map/city_map_view.dart';
+import 'city_setup_page.dart';
 import 'forgot_password_screen.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -118,9 +119,14 @@ jsonDecode(res.body) as Map<String, dynamic>,
 );
 if (mounted) {
 if (_signup) {
+// Account created — the city setup screen is the last mandatory step
+// before the map, and only returns once a city has been chosen.
 final selectedCity = await Navigator.of(context).push<String>(
 MaterialPageRoute(
-builder: (_) => _CityPickPage(token: session.token),
+builder: (_) => CitySetupPage(
+token: session.token,
+themeMode: widget.themeMode,
+),
 ),
 );
 if (!mounted) return;
@@ -160,6 +166,7 @@ setState(() => _loading = false);
 
 @override
 Widget build(BuildContext context) {
+final l10n = AppLocalizations.of(context);
 final isLight = widget.themeMode == ThemeMode.light;
 return Scaffold(
 backgroundColor: isLight ? Colors.white : const Color(0xff121212),
@@ -183,7 +190,7 @@ TextField(
 controller: _username,
 style: TextStyle(color: isLight ? Colors.black : Colors.white),
 cursorColor: isLight ? Colors.black : Colors.white,
-decoration: _fieldDecoration('Username', isLight),
+decoration: _fieldDecoration(l10n.username, isLight),
 ),
 if (_signup) ...[
 const SizedBox(height: 12),
@@ -191,14 +198,14 @@ TextField(
 controller: _email,
 style: TextStyle(color: isLight ? Colors.black : Colors.white),
 cursorColor: isLight ? Colors.black : Colors.white,
-decoration: _fieldDecoration('Email', isLight),
+decoration: _fieldDecoration(l10n.email, isLight),
 ),
 const SizedBox(height: 12),
 TextField(
 controller: _fullName,
 style: TextStyle(color: isLight ? Colors.black : Colors.white),
 cursorColor: isLight ? Colors.black : Colors.white,
-decoration: _fieldDecoration('Full name', isLight),
+decoration: _fieldDecoration(l10n.fullName, isLight),
 ),
 ],
 const SizedBox(height: 12),
@@ -207,7 +214,7 @@ controller: _password,
 obscureText: true,
 style: TextStyle(color: isLight ? Colors.black : Colors.white),
 cursorColor: isLight ? Colors.black : Colors.white,
-decoration: _fieldDecoration('Password', isLight),
+decoration: _fieldDecoration(l10n.password, isLight),
 ),
 if (_error != null) ...[
 const SizedBox(height: 12),
@@ -219,7 +226,7 @@ style: const TextStyle(color: Colors.redAccent),
 const SizedBox(height: 16),
 FilledButton(
 onPressed: _loading ? null : _submit,
-child: Text(_signup ? 'Sign up' : 'Sign in'),
+child: Text(_signup ? l10n.signUp : l10n.signIn),
 ),
 if (_signup) ...[
   const SizedBox(height: 12),
@@ -231,19 +238,19 @@ if (_signup) ...[
         height: 1.4,
       ),
       children: [
-        const TextSpan(text: 'By signing up you agree to our '),
+        TextSpan(text: l10n.authAgreePrefix),
         TextSpan(
-          text: 'Terms of Service',
+          text: l10n.termsOfService,
           style: const TextStyle(color: Color(0xff1479ff), fontWeight: FontWeight.w600),
           recognizer: _termsRecognizer,
         ),
-        const TextSpan(text: ' and '),
+        TextSpan(text: l10n.authAnd),
         TextSpan(
-          text: 'Privacy Policy',
+          text: l10n.privacyPolicy,
           style: const TextStyle(color: Color(0xff1479ff), fontWeight: FontWeight.w600),
           recognizer: _privacyRecognizer,
         ),
-        const TextSpan(text: '.'),
+        TextSpan(text: l10n.authAgreeSuffix),
       ],
     ),
     textAlign: TextAlign.center,
@@ -260,9 +267,9 @@ if (!_signup) ...[
         ),
       ),
     ),
-    child: const Text(
-      'Forgot password?',
-      style: TextStyle(color: Color(0xff1479ff), fontWeight: FontWeight.w600),
+    child: Text(
+      l10n.forgotPassword,
+      style: const TextStyle(color: Color(0xff1479ff), fontWeight: FontWeight.w600),
     ),
   ),
 ],
@@ -278,8 +285,8 @@ unawaited(prewarmCityMap(homeCity: '', isDark: Theme.of(context).brightness == B
 },
 child: Text(
 _signup
-? 'Already have an account? Sign in'
-: 'New here? Create an account',
+? l10n.authSwitchToSignIn
+: l10n.authSwitchToSignUp,
 ),
 ),
 ],
@@ -313,80 +320,3 @@ focusedBorder: OutlineInputBorder(
 }
 
 }
-
-class _CityPickPage extends StatelessWidget {
-const _CityPickPage({required this.token});
-
-final String token;
-
-@override
-Widget build(BuildContext context) {
-final isLight = Theme.of(context).brightness == Brightness.light;
-return Scaffold(
-backgroundColor: isLight ? Colors.white : const Color(0xff121212),
-body: SafeArea(
-child: Stack(
-children: [
-CityMapView(
-token: token,
-homeCity: '',
-isSignUp: true,
-onOpenUserProfile: (_) {},
-onCitySelected: (city) {
-Navigator.of(context).pop(city);
-},
-),
-Positioned(
-bottom: 56,
-left: 20,
-right: 20,
-child: ClipRRect(
-borderRadius: BorderRadius.circular(18),
-child: BackdropFilter(
-filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-child: Container(
-padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-decoration: BoxDecoration(
-color: Colors.black.withValues(alpha: 0.52),
-borderRadius: BorderRadius.circular(18),
-border: Border.all(
-color: Colors.white.withValues(alpha: 0.12),
-width: 0.8,
-),
-),
-child: Row(
-crossAxisAlignment: CrossAxisAlignment.center,
-children: [
-Container(
-padding: const EdgeInsets.all(7),
-decoration: BoxDecoration(
-color: Colors.white.withValues(alpha: 0.12),
-shape: BoxShape.circle,
-),
-child: const Icon(Icons.location_on_rounded, color: Color(0xffff4a4a), size: 20),
-),
-const SizedBox(width: 12),
-const Expanded(
-child: Text(
-'Συνδεθείτε στο For You της περιοχής σας, πατώντας την πινέζα της.',
-style: TextStyle(
-color: Colors.white,
-fontSize: 14,
-height: 1.45,
-fontWeight: FontWeight.w500,
-letterSpacing: 0.1,
-),
-),
-),
-],
-),
-),
-),
-),
-),
-],
-),
-),
-);
-}
-} 

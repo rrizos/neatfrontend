@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/http_client.dart' as http;
 import '../core/neat_loader.dart';
@@ -72,7 +73,7 @@ class _AnalyticsTabState extends State<AnalyticsTab>
         });
       } else if (res.statusCode == 403) {
         setState(() {
-          _error = 'Admin access required';
+          _error = AppLocalizations.of(context).adminAccessRequired;
           _loading = false;
         });
       } else {
@@ -84,7 +85,7 @@ class _AnalyticsTabState extends State<AnalyticsTab>
     } catch (_) {
       if (mounted) {
         setState(() {
-          _error = 'Network error';
+          _error = AppLocalizations.of(context).networkErrorShort;
           _loading = false;
         });
       }
@@ -109,7 +110,7 @@ class _AnalyticsTabState extends State<AnalyticsTab>
           children: [
             Text(_error!, style: TextStyle(color: _inkMuted(isLight))),
             const SizedBox(height: 8),
-            TextButton(onPressed: _load, child: const Text('Retry')),
+            TextButton(onPressed: _load, child: Text(AppLocalizations.of(context).retry)),
           ],
         ),
       );
@@ -146,7 +147,7 @@ class _AnalyticsTabState extends State<AnalyticsTab>
             children: [
               Expanded(
                 child: _HeroTile(
-                  label: 'Total users',
+                  label: AppLocalizations.of(context).statTotalUsers,
                   value: _int(totals, 'users'),
                   sub: '+${_int(growth, 'new_users_7d')} this week',
                   isLight: isLight,
@@ -155,7 +156,7 @@ class _AnalyticsTabState extends State<AnalyticsTab>
               const SizedBox(width: 12),
               Expanded(
                 child: _HeroTile(
-                  label: 'Total posts',
+                  label: AppLocalizations.of(context).statTotalPosts,
                   value: _int(totals, 'posts'),
                   sub: '+${_int(growth, 'new_posts_7d')} this week',
                   isLight: isLight,
@@ -165,75 +166,75 @@ class _AnalyticsTabState extends State<AnalyticsTab>
           ),
           const SizedBox(height: 24),
 
-          _Section(label: 'Active users', isLight: isLight),
+          _Section(label: AppLocalizations.of(context).secActiveUsers, isLight: isLight),
           _TileGrid(isLight: isLight, tiles: [
-            _Stat('Daily', _compact(_int(active, 'dau'))),
-            _Stat('Weekly', _compact(_int(active, 'wau'))),
-            _Stat('Monthly', _compact(_int(active, 'mau'))),
-            _Stat('Stickiness', '${_dbl(active, 'stickiness')}%'),
+            _Stat(AppLocalizations.of(context).statDaily, _compact(_int(active, 'dau'))),
+            _Stat(AppLocalizations.of(context).statWeekly, _compact(_int(active, 'wau'))),
+            _Stat(AppLocalizations.of(context).statMonthly, _compact(_int(active, 'mau'))),
+            _Stat(AppLocalizations.of(context).statStickiness, '${_dbl(active, 'stickiness')}%'),
           ]),
           const SizedBox(height: 24),
 
-          _Section(label: 'Growth', isLight: isLight),
+          _Section(label: AppLocalizations.of(context).secGrowth, isLight: isLight),
           _TileGrid(isLight: isLight, tiles: [
-            _Stat('Users today', _compact(_int(growth, 'new_users_today'))),
+            _Stat(AppLocalizations.of(context).statUsersToday, _compact(_int(growth, 'new_users_today'))),
             _Stat('Users 30d', _compact(_int(growth, 'new_users_30d'))),
-            _Stat('Posts today', _compact(_int(growth, 'new_posts_today'))),
+            _Stat(AppLocalizations.of(context).statPostsToday, _compact(_int(growth, 'new_posts_today'))),
             _Stat('Posts 30d', _compact(_int(growth, 'new_posts_30d'))),
           ]),
           const SizedBox(height: 24),
 
           // Two measures on different scales — two charts, never one dual axis.
-          _Section(label: 'Last 30 days', isLight: isLight),
+          _Section(label: AppLocalizations.of(context).secLast30Days, isLight: isLight),
           _TrendCard(
-            title: 'New users per day',
+            title: AppLocalizations.of(context).chartNewUsersPerDay,
             values: signups,
             isLight: isLight,
           ),
           const SizedBox(height: 12),
           _TrendCard(
-            title: 'New posts per day',
+            title: AppLocalizations.of(context).chartNewPostsPerDay,
             values: posts30,
             isLight: isLight,
           ),
           const SizedBox(height: 24),
 
-          _Section(label: 'Engagement', isLight: isLight),
+          _Section(label: AppLocalizations.of(context).secEngagement, isLight: isLight),
           _TileGrid(isLight: isLight, tiles: [
-            _Stat('Likes / post', _dbl(engagement, 'avg_likes_per_post').toString()),
-            _Stat('Comments / post',
+            _Stat(AppLocalizations.of(context).statLikesPerPost, _dbl(engagement, 'avg_likes_per_post').toString()),
+            _Stat(AppLocalizations.of(context).statCommentsPerPost,
                 _dbl(engagement, 'avg_comments_per_post').toString()),
-            _Stat('Posts / user', _dbl(engagement, 'posts_per_user').toString()),
-            _Stat('Comments', _compact(_int(totals, 'comments'))),
+            _Stat(AppLocalizations.of(context).statPostsPerUser, _dbl(engagement, 'posts_per_user').toString()),
+            _Stat(AppLocalizations.of(context).statCommentsTotal, _compact(_int(totals, 'comments'))),
           ]),
           const SizedBox(height: 24),
 
           if (cities.isNotEmpty) ...[
-            _Section(label: 'Top cities', isLight: isLight),
+            _Section(label: AppLocalizations.of(context).secTopCities, isLight: isLight),
             _CityBars(cities: cities, isLight: isLight),
             const SizedBox(height: 24),
           ],
 
-          _Section(label: 'Content & social', isLight: isLight),
+          _Section(label: AppLocalizations.of(context).secContentSocial, isLight: isLight),
           _TileGrid(isLight: isLight, tiles: [
-            _Stat('Likes', _compact(_int(totals, 'likes'))),
-            _Stat('Saves', _compact(_int(totals, 'saves'))),
-            _Stat('Follows', _compact(_int(totals, 'follows'))),
+            _Stat(AppLocalizations.of(context).statLikes, _compact(_int(totals, 'likes'))),
+            _Stat(AppLocalizations.of(context).statSaves, _compact(_int(totals, 'saves'))),
+            _Stat(AppLocalizations.of(context).statFollows, _compact(_int(totals, 'follows'))),
             _Stat('Events', _compact(_int(totals, 'events'))),
-            _Stat('Attending', _compact(_int(totals, 'event_attendances'))),
-            _Stat('Conversations', _compact(_int(totals, 'conversations'))),
-            _Stat('Messages', _compact(_int(totals, 'messages'))),
-            _Stat('Polls', _compact(_int(totals, 'polls'))),
-            _Stat('Poll votes', _compact(_int(totals, 'poll_votes'))),
-            _Stat('Push devices', _compact(_int(totals, 'push_devices'))),
-            _Stat('Verified', _compact(_int(totals, 'verified_users'))),
-            _Stat('Blocks', _compact(_int(totals, 'blocks'))),
+            _Stat(AppLocalizations.of(context).statAttending, _compact(_int(totals, 'event_attendances'))),
+            _Stat(AppLocalizations.of(context).statConversations, _compact(_int(totals, 'conversations'))),
+            _Stat(AppLocalizations.of(context).statMessages, _compact(_int(totals, 'messages'))),
+            _Stat(AppLocalizations.of(context).statPolls, _compact(_int(totals, 'polls'))),
+            _Stat(AppLocalizations.of(context).statPollVotes, _compact(_int(totals, 'poll_votes'))),
+            _Stat(AppLocalizations.of(context).statPushDevices, _compact(_int(totals, 'push_devices'))),
+            _Stat(AppLocalizations.of(context).statVerified, _compact(_int(totals, 'verified_users'))),
+            _Stat(AppLocalizations.of(context).statBlocks, _compact(_int(totals, 'blocks'))),
           ]),
           const SizedBox(height: 24),
 
-          _Section(label: 'Moderation', isLight: isLight),
+          _Section(label: AppLocalizations.of(context).secModeration, isLight: isLight),
           _StatusTile(
-            label: 'Open reports',
+            label: AppLocalizations.of(context).statOpenReports,
             value: pending,
             // Status color only when it actually means "needs attention",
             // and never color-alone — the label and icon carry it too.
@@ -443,7 +444,7 @@ class _StatusTile extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(
-            attention ? 'to review' : 'clear',
+            attention ? AppLocalizations.of(context).reviewNeeded : AppLocalizations.of(context).reviewClear,
             style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
@@ -628,8 +629,10 @@ class _CityBars extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '${(c['users'] as num?)?.toInt() ?? 0} users · '
-                        '${(c['posts'] as num?)?.toInt() ?? 0} posts',
+                        AppLocalizations.of(context).cityUsersPosts(
+                          (c['users'] as num?)?.toInt() ?? 0,
+                          (c['posts'] as num?)?.toInt() ?? 0,
+                        ),
                         style: TextStyle(color: _inkMuted(isLight), fontSize: 11.5),
                       ),
                     ],

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 import '../core/http_client.dart' as http;
 
 import '../core/api.dart';
@@ -22,7 +23,7 @@ class AdminPanelPage extends StatelessWidget {
         appBar: AppBar(
           backgroundColor: isLight ? Colors.white : const Color(0xff121212),
           title: Text(
-            'Admin Panel',
+            AppLocalizations.of(context).adminPanel,
             style: TextStyle(
               fontWeight: FontWeight.w800,
               color: isLight ? Colors.black : Colors.white,
@@ -32,11 +33,11 @@ class AdminPanelPage extends StatelessWidget {
             labelColor: const Color(0xff0095f6),
             unselectedLabelColor: isLight ? const Color(0xff737373) : const Color(0xffa8a8a8),
             indicatorColor: const Color(0xff0095f6),
-            tabs: const [
-              Tab(text: 'Analytics'),
-              Tab(text: 'Security'),
-              Tab(text: 'Reports'),
-              Tab(text: 'Users'),
+            tabs: [
+              Tab(text: AppLocalizations.of(context).analyticsTab),
+              Tab(text: AppLocalizations.of(context).securityTab),
+              Tab(text: AppLocalizations.of(context).reportsTab),
+              Tab(text: AppLocalizations.of(context).usersTab),
             ],
           ),
         ),
@@ -89,10 +90,10 @@ class _ReportsTabState extends State<_ReportsTab> with AutomaticKeepAliveClientM
           _loading = false;
         });
       } else {
-        setState(() { _error = 'Failed to load reports'; _loading = false; });
+        setState(() { _error = AppLocalizations.of(context).failedLoadReports; _loading = false; });
       }
     } catch (_) {
-      setState(() { _error = 'Network error'; _loading = false; });
+      setState(() { _error = AppLocalizations.of(context).networkErrorShort; _loading = false; });
     }
   }
 
@@ -107,30 +108,30 @@ class _ReportsTabState extends State<_ReportsTab> with AutomaticKeepAliveClientM
       _ => null,
     };
     if (endpoint == null) {
-      _showSnack('No admin delete available for a ${report.type}');
+      _showSnack(AppLocalizations.of(context).adminNoDelete(report.type));
       return;
     }
     try {
       final res = await http.delete(endpoint, headers: authGetHeaders(widget.token));
       if (!mounted) return;
       if (res.statusCode != 200 && res.statusCode != 204) {
-        _showSnack('Delete failed (${res.statusCode})');
+        _showSnack(AppLocalizations.of(context).deleteFailed(res.statusCode));
         return;
       }
       // Clear every report against that same content, not just this one.
       setState(() => _reports.removeWhere(
             (r) => r.type == report.type && r.postId == report.postId,
           ));
-      _showSnack('${report.type[0].toUpperCase()}${report.type.substring(1)} deleted');
+      _showSnack(AppLocalizations.of(context).contentDeleted);
     } catch (_) {
-      if (mounted) _showSnack('Network error');
+      if (mounted) _showSnack(AppLocalizations.of(context).networkErrorShort);
     }
   }
 
   Future<void> _dismissReport(int reportId) async {
     await http.delete(adminDismissReportEndpoint(reportId), headers: authGetHeaders(widget.token));
     setState(() => _reports.removeWhere((r) => r.id == reportId));
-    if (mounted) _showSnack('Report dismissed');
+    if (mounted) _showSnack(AppLocalizations.of(context).reportDismissed);
   }
 
   void _showSnack(String msg) =>
@@ -149,7 +150,7 @@ class _ReportsTabState extends State<_ReportsTab> with AutomaticKeepAliveClientM
           children: [
             Text(_error!, style: const TextStyle(color: Color(0xfff66c6c))),
             const SizedBox(height: 12),
-            TextButton(onPressed: _load, child: const Text('Retry')),
+            TextButton(onPressed: _load, child: Text(AppLocalizations.of(context).retry)),
           ],
         ),
       );
@@ -162,7 +163,7 @@ class _ReportsTabState extends State<_ReportsTab> with AutomaticKeepAliveClientM
             Icon(Icons.flag_outlined, size: 48,
                 color: isLight ? const Color(0xffb0b0b0) : const Color(0xff444444)),
             const SizedBox(height: 12),
-            Text('No reports', style: TextStyle(
+            Text(AppLocalizations.of(context).noReports, style: TextStyle(
               color: isLight ? const Color(0xff737373) : const Color(0xffa8a8a8),
               fontSize: 16,
             )),
@@ -318,7 +319,7 @@ class _ReportCard extends StatelessWidget {
                           height: 60,
                           color: divColor,
                           alignment: Alignment.center,
-                          child: Text('media unavailable',
+                          child: Text(AppLocalizations.of(context).mediaUnavailable,
                               style: TextStyle(fontSize: 11, color: subColor)),
                         ),
                       ),
@@ -349,7 +350,7 @@ class _ReportCard extends StatelessWidget {
                 child: TextButton.icon(
                   onPressed: onDismiss,
                   icon: const Icon(Icons.check_circle_outline, size: 16),
-                  label: const Text('Dismiss'),
+                  label: Text(AppLocalizations.of(context).dismiss),
                   style: TextButton.styleFrom(
                     foregroundColor: subColor,
                     padding: const EdgeInsets.symmetric(vertical: 12),
@@ -362,7 +363,7 @@ class _ReportCard extends StatelessWidget {
                   child: TextButton.icon(
                     onPressed: () => _confirmDeletePost(context),
                     icon: const Icon(Icons.delete_outline, size: 16),
-                    label: Text('Delete ${report.type}'),
+                    label: Text(AppLocalizations.of(context).deleteTyped(report.type)),
                     style: TextButton.styleFrom(
                       foregroundColor: const Color(0xfff66c6c),
                       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -381,16 +382,15 @@ class _ReportCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Delete ${report.type}?'),
+        title: Text(AppLocalizations.of(context).deleteTypedTitle(report.type)),
         content: Text(
-          'This permanently deletes the ${report.type} by '
-          '@${report.postAuthor.isEmpty ? "unknown" : report.postAuthor} and all of its reports.',
+          AppLocalizations.of(context).deleteContentConfirm(report.type, report.postAuthor.isEmpty ? 'unknown' : report.postAuthor),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(AppLocalizations.of(context).cancel)),
           TextButton(
             onPressed: () { Navigator.pop(context); onDeletePost(); },
-            child: const Text('Delete', style: TextStyle(color: Color(0xfff66c6c))),
+            child: Text(AppLocalizations.of(context).delete, style: const TextStyle(color: Color(0xfff66c6c))),
           ),
         ],
       ),
@@ -399,10 +399,10 @@ class _ReportCard extends StatelessWidget {
 
   String _timeAgo(DateTime dt) {
     final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+    if (diff.inMinutes < 1) return 'τώρα';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}λ πριν';
+    if (diff.inHours < 24) return '${diff.inHours}ω πριν';
+    return '${diff.inDays}η πριν';
   }
 }
 
@@ -470,7 +470,7 @@ class _UsersTabState extends State<_UsersTab> with AutomaticKeepAliveClientMixin
         setState(() { _error = 'Failed to load users'; _loading = false; });
       }
     } catch (_) {
-      setState(() { _error = 'Network error'; _loading = false; });
+      setState(() { _error = AppLocalizations.of(context).networkErrorShort; _loading = false; });
     }
   }
 
@@ -508,13 +508,13 @@ class _UsersTabState extends State<_UsersTab> with AutomaticKeepAliveClientMixin
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Delete user?'),
-        content: Text('This will permanently delete @${user.username} and all their data.'),
+        title: Text(AppLocalizations.of(context).deleteUserTitle),
+        content: Text(AppLocalizations.of(context).deleteUserConfirm(user.username)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppLocalizations.of(context).cancel)),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete', style: TextStyle(color: Color(0xfff66c6c))),
+            child: Text(AppLocalizations.of(context).delete, style: const TextStyle(color: Color(0xfff66c6c))),
           ),
         ],
       ),
@@ -545,7 +545,7 @@ class _UsersTabState extends State<_UsersTab> with AutomaticKeepAliveClientMixin
             controller: _ctrl,
             onChanged: (q) => _search(q),
             decoration: InputDecoration(
-              hintText: 'Search users...',
+              hintText: AppLocalizations.of(context).searchUsersHint,
               hintStyle: TextStyle(color: subColor),
               prefixIcon: Icon(Icons.search, color: subColor),
               filled: true,
@@ -564,7 +564,7 @@ class _UsersTabState extends State<_UsersTab> with AutomaticKeepAliveClientMixin
               : _error != null
                   ? Center(child: Text(_error!, style: const TextStyle(color: Color(0xfff66c6c))))
                   : _users.isEmpty
-                      ? Center(child: Text('No users found', style: TextStyle(color: subColor)))
+                      ? Center(child: Text(AppLocalizations.of(context).noUsersFound, style: TextStyle(color: subColor)))
                       : ListView.separated(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                           itemCount: _users.length,
@@ -664,7 +664,7 @@ class _UserCard extends StatelessWidget {
             ),
             // Actions
             IconButton(
-              tooltip: user.isVerified ? 'Remove verification' : 'Verify user',
+              tooltip: user.isVerified ? AppLocalizations.of(context).removeVerification : AppLocalizations.of(context).verifyUser,
               icon: Icon(
                 user.isVerified ? Icons.verified_rounded : Icons.verified_outlined,
                 color: user.isVerified ? const Color(0xff0095f6) : subColor,
@@ -674,8 +674,8 @@ class _UserCard extends StatelessWidget {
             ),
             IconButton(
               tooltip: user.canCreateOfficialEvents
-                  ? 'Revoke official event badge'
-                  : 'Grant official event badge',
+                  ? AppLocalizations.of(context).revokeOfficialBadge
+                  : AppLocalizations.of(context).grantOfficialBadge,
               icon: Icon(
                 user.canCreateOfficialEvents
                     ? Icons.event_available_rounded
@@ -686,7 +686,7 @@ class _UserCard extends StatelessWidget {
               onPressed: onToggleOfficialEligibility,
             ),
             IconButton(
-              tooltip: 'Delete user',
+              tooltip: AppLocalizations.of(context).deleteUserTooltip,
               icon: const Icon(Icons.delete_outline, color: Color(0xfff66c6c), size: 22),
               onPressed: onDelete,
             ),

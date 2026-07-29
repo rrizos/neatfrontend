@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../core/media_cache.dart';
 import '../core/neat_loader.dart';
 import 'greece_cities.dart';
@@ -533,12 +534,12 @@ class _MapLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (kIsWeb) {
-      return const ColoredBox(
-        color: Color(0xff050505),
+      return ColoredBox(
+        color: const Color(0xff050505),
         child: Center(
           child: Text(
-            'Map is available on mobile only.',
-            style: TextStyle(color: Color(0xffd0d0d0)),
+            AppLocalizations.of(context).mapMobileOnly,
+            style: const TextStyle(color: Color(0xffd0d0d0)),
           ),
         ),
       );

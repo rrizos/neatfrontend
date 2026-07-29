@@ -34,6 +34,7 @@ import UIKit
         GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
         replayLaunchNotificationForFirebaseMessaging(engineBridge.pluginRegistry)
         registerNativeCityMap(with: engineBridge.pluginRegistry)
+        MapSnapshot.register(with: engineBridge.pluginRegistry)
         registerShareChannel(with: engineBridge.pluginRegistry)
 
         if #available(iOS 26, *) {

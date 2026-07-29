@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'http_client.dart' as http;
 
+import '../../l10n/app_localizations.dart';
 import 'api.dart';
 import 'models.dart';
 import 'post_card.dart' show decodeAvatarUrl;
@@ -163,7 +164,7 @@ class _MentionSuggestionsState extends State<MentionSuggestions> {
     } else if (_results.isEmpty) {
       body = Padding(
         padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Center(child: Text('No matches in your town', style: TextStyle(fontSize: 12, color: subColor))),
+        child: Center(child: Text(AppLocalizations.of(context).noMatchesInTown, style: TextStyle(fontSize: 12, color: subColor))),
       );
     } else {
       body = ListView.builder(

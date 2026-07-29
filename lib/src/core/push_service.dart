@@ -137,16 +137,16 @@ class PushService {
             AndroidFlutterLocalNotificationsPlugin>();
     await androidImpl?.createNotificationChannel(const AndroidNotificationChannel(
       _softChannelId,
-      'Activity',
-      description: 'Likes, follows, comments and other activity',
+      'Δραστηριότητα',
+      description: 'Μου αρέσει, ακόλουθοι, σχόλια και άλλη δραστηριότητα',
       importance: Importance.defaultImportance,
       playSound: false,
       enableVibration: false,
     ));
     await androidImpl?.createNotificationChannel(const AndroidNotificationChannel(
       _messagesChannelId,
-      'Messages',
-      description: 'New direct messages',
+      'Μηνύματα',
+      description: 'Νέα προσωπικά μηνύματα',
       importance: Importance.high,
       playSound: true,
       enableVibration: true,

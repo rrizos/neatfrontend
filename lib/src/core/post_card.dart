@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
+import '../../l10n/app_localizations.dart';
 import 'api.dart';
 import 'icons.dart';
 import 'media_cache.dart';
@@ -36,14 +37,14 @@ Uint8List? decodeAvatarUrl(String value) {
   return result;
 }
 
-String postAge(int minutesAgo) {
-  if (minutesAgo < 1) return 'just now';
-  if (minutesAgo < 60) return '${minutesAgo}m';
-  if (minutesAgo < 1440) return '${minutesAgo ~/ 60}h';
-  if (minutesAgo < 10080) return '${minutesAgo ~/ 1440}d';
-  if (minutesAgo < 43200) return '${minutesAgo ~/ 10080}w';
-  if (minutesAgo < 525600) return '${minutesAgo ~/ 43200}mo';
-  return '${minutesAgo ~/ 525600}y';
+String postAge(int minutesAgo, AppLocalizations l10n) {
+  if (minutesAgo < 1) return l10n.justNow;
+  if (minutesAgo < 60) return l10n.timeMinutes(minutesAgo);
+  if (minutesAgo < 1440) return l10n.timeHours(minutesAgo ~/ 60);
+  if (minutesAgo < 10080) return l10n.timeDays(minutesAgo ~/ 1440);
+  if (minutesAgo < 43200) return l10n.timeWeeks(minutesAgo ~/ 10080);
+  if (minutesAgo < 525600) return l10n.timeMonths(minutesAgo ~/ 43200);
+  return l10n.timeYears(minutesAgo ~/ 525600);
 }
 
 // ── PostShareIcon ─────────────────────────────────────────────────────────────
@@ -899,14 +900,15 @@ class _LikersSheetState extends State<_LikersSheet> {
     final textColor = isLight ? Colors.black : Colors.white;
     final users = _users;
 
+    final l10n = AppLocalizations.of(context);
     Widget body;
     if (_error) {
-      body = const Center(child: Text('Could not load likes.'));
+      body = Center(child: Text(l10n.likesLoadError));
     } else if (users == null) {
       body = const Center(child: CircularProgressIndicator());
     } else if (users.isEmpty) {
-      body = const Center(
-        child: Text('No likes yet.', style: TextStyle(color: Color(0xffb3b3b3))),
+      body = Center(
+        child: Text(l10n.noLikesYet, style: const TextStyle(color: Color(0xffb3b3b3))),
       );
     } else {
       body = ListView.builder(
@@ -965,7 +967,7 @@ class _LikersSheetState extends State<_LikersSheet> {
                             : textColor,
                         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                       ),
-                      child: Text(isFollowing ? 'Following' : widget.followerAuthors.contains(u.username) ? 'Follow Back' : 'Follow'),
+                      child: Text(isFollowing ? l10n.following : widget.followerAuthors.contains(u.username) ? l10n.followBack : l10n.follow),
                     ),
                   ),
           );
@@ -984,7 +986,7 @@ class _LikersSheetState extends State<_LikersSheet> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
-          'Likes',
+          l10n.likesTitle,
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: textColor),
         ),
         centerTitle: true,
@@ -1025,19 +1027,20 @@ class _LikedByText extends StatelessWidget {
       fontSize: 13,
       color: isLight ? const Color(0xff444444) : const Color(0xffb3b3b3),
     );
+    final l10n = AppLocalizations.of(context);
     final others = totalLikes - likedByFollowing.length;
-    final spans = <InlineSpan>[TextSpan(text: 'Liked by ', style: normalStyle)];
+    final spans = <InlineSpan>[TextSpan(text: l10n.likedByPrefix, style: normalStyle)];
     for (int i = 0; i < likedByFollowing.length; i++) {
       if (i > 0) {
         final isLast = i == likedByFollowing.length - 1 && others <= 0;
-        spans.add(TextSpan(text: isLast ? ' and ' : ', ', style: normalStyle));
+        spans.add(TextSpan(text: isLast ? l10n.listAnd : ', ', style: normalStyle));
       }
       spans.add(TextSpan(text: likedByFollowing[i], style: boldStyle));
     }
     if (others > 0) {
-      spans.add(TextSpan(text: ' and ', style: normalStyle));
+      spans.add(TextSpan(text: l10n.listAnd, style: normalStyle));
       spans.add(TextSpan(
-        text: '$others ${others == 1 ? "other" : "others"}',
+        text: l10n.likedByOthers(others),
         style: boldStyle,
       ));
     }
@@ -1320,7 +1323,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                             ],
                           ),
                           Text(
-                            postAge(widget.post.minutesAgo),
+                            postAge(widget.post.minutesAgo, AppLocalizations.of(context)),
                             style: TextStyle(
                               fontSize: 12,
                               color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
@@ -1346,10 +1349,10 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                       ),
                       child: Text(
                         widget.isFollowing
-                            ? 'Following'
+                            ? AppLocalizations.of(context).following
                             : widget.followerAuthors.contains(widget.post.author)
-                                ? 'Follow Back'
-                                : 'Follow',
+                                ? AppLocalizations.of(context).followBack
+                                : AppLocalizations.of(context).follow,
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -1619,7 +1622,7 @@ class _PollWidget extends StatelessWidget {
             ),
           ),
         Text(
-          total == 1 ? '1 vote' : '$total votes',
+          AppLocalizations.of(context).pollVotes(total),
           style: TextStyle(fontSize: 13, color: muted),
         ),
       ],

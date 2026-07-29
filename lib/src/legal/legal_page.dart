@@ -24,13 +24,16 @@ class LegalPage extends StatefulWidget {
 }
 
 class _LegalPageState extends State<LegalPage> {
-  var _greek = false;
+  bool? _greek;
 
   @override
   Widget build(BuildContext context) {
+    // Default to the app's active language (Greek), while still letting the
+    // user flip to English via the EN/ΕΛ switch.
+    _greek ??= Localizations.localeOf(context).languageCode == 'el';
     final isLight = widget.themeMode == ThemeMode.light;
     final hasGreek = widget.bodyEl != null;
-    final showGreek = hasGreek && _greek;
+    final showGreek = hasGreek && _greek!;
     final title = showGreek ? (widget.titleEl ?? widget.title) : widget.title;
     final body = showGreek ? widget.bodyEl! : widget.body;
 

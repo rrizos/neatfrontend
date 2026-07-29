@@ -31,12 +31,19 @@ Uri postsEndpoint({bool fresh = false, String? city}) {
   return uri.replace(queryParameters: params);
 }
 
-Uri viralPostsEndpoint({required String city, required String period}) {
+Uri viralPostsEndpoint({
+  String city = '',
+  String excludeCity = '',
+  required String period,
+}) {
   final uri = Uri.parse('$apiBaseUrl/api/posts/viral/');
   // light=1 opts into the compact charts payload (comment counts instead of
   // full comment threads); the comment sheet lazy-loads threads on open.
   final params = <String, String>{'period': period, 'light': '1'};
   if (city.isNotEmpty) params['city'] = city;
+  // Charts for "everywhere but home": an exclusion, not an empty city filter,
+  // which would fold the viewer's own city back in.
+  if (excludeCity.isNotEmpty) params['exclude_city'] = excludeCity;
   return uri.replace(queryParameters: params);
 }
 
@@ -197,7 +204,7 @@ Map<String, String> authGetHeaders(String token) => {
 };
 
 const _kNoConnection =
-    'No internet connection. Please check your connection and try again.';
+    'Δεν υπάρχει σύνδεση στο διαδίκτυο. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά.';
 
 // Transport failures, matched by text so this works on every platform (dart:io
 // types aren't available on web, so we can't type-check SocketException here).
@@ -227,11 +234,11 @@ bool _looksLikeNetworkFailure(String text) {
 /// `uri=...` tail, or a bare address — from a message before it reaches a user.
 String _scrubEndpoints(String message) {
   var out = message;
-  if (apiBaseUrl.isNotEmpty) out = out.replaceAll(apiBaseUrl, 'the server');
+  if (apiBaseUrl.isNotEmpty) out = out.replaceAll(apiBaseUrl, 'τον διακομιστή');
   out = out.replaceAll(RegExp(r',?\s*uri=\S+'), '');
-  out = out.replaceAll(RegExp(r'https?://\S+'), 'the server');
+  out = out.replaceAll(RegExp(r'https?://\S+'), 'τον διακομιστή');
   // Bare IPv4, with or without a port.
-  out = out.replaceAll(RegExp(r'\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b'), 'the server');
+  out = out.replaceAll(RegExp(r'\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b'), 'τον διακομιστή');
   return out.trim();
 }
 
@@ -246,10 +253,10 @@ String friendlyError(Object error) {
   final raw = error.toString();
   if (_looksLikeNetworkFailure(raw)) return _kNoConnection;
   if (raw.toLowerCase().contains('timeoutexception')) {
-    return 'The connection timed out. Please try again.';
+    return 'Έληξε ο χρόνος σύνδεσης. Δοκίμασε ξανά.';
   }
   final message = _scrubEndpoints(raw.replaceFirst('Exception: ', ''));
-  if (message.isEmpty) return 'Something went wrong. Please try again.';
+  if (message.isEmpty) return 'Κάτι πήγε στραβά. Δοκίμασε ξανά.';
   return message;
 }
 
@@ -258,8 +265,8 @@ String friendlyHttpError(http.Response response) {
   try {
     final decoded = jsonDecode(body);
     if (decoded is Map<String, dynamic>) {
-      return decoded['error']?.toString() ?? 'Request failed';
+      return decoded['error']?.toString() ?? 'Το αίτημα απέτυχε';
     }
   } catch (_) {}
-  return 'Request failed (${response.statusCode})';
+  return 'Το αίτημα απέτυχε (${response.statusCode})';
 }

@@ -8,6 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'http_client.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../l10n/app_localizations.dart';
 import 'api.dart';
 import 'media_cache.dart';
 import 'models.dart';
@@ -336,6 +337,7 @@ class _ShareSheetState extends State<_ShareSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final isLight = Theme.of(context).brightness == Brightness.light;
     final bg = isLight ? Colors.white : const Color(0xff111111);
     final surface = isLight ? const Color(0xfff3f4f6) : const Color(0xff1c1c1e);
@@ -376,7 +378,7 @@ class _ShareSheetState extends State<_ShareSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Send to', style: TextStyle(color: textColor, fontWeight: FontWeight.w800, fontSize: 15)),
+                  Text(l10n.shareSendTo, style: TextStyle(color: textColor, fontWeight: FontWeight.w800, fontSize: 15)),
                   const SizedBox(height: 10),
                   SizedBox(
                     height: 38,
@@ -401,7 +403,7 @@ class _ShareSheetState extends State<_ShareSheet> {
                                     child: Icon(Icons.close_rounded, size: 16, color: muted),
                                   )
                                 : null,
-                        hintText: 'Search people in your city…',
+                        hintText: l10n.shareSearchHint,
                         hintStyle: TextStyle(color: muted, fontSize: 13.5),
                         filled: true,
                         fillColor: surface,
@@ -428,7 +430,7 @@ class _ShareSheetState extends State<_ShareSheet> {
                               Icon(Icons.person_search_rounded, size: 40, color: muted),
                               const SizedBox(height: 10),
                               Text(
-                                _query.isEmpty ? 'No contacts yet' : 'No one found in your city',
+                                _query.isEmpty ? l10n.shareNoContacts : l10n.shareNoOneFound,
                                 style: TextStyle(color: muted, fontSize: 14),
                               ),
                             ],
@@ -523,7 +525,7 @@ class _ShareSheetState extends State<_ShareSheet> {
                     const SizedBox(width: 16),
                     _ExtBtn(label: 'Facebook', onTap: () async { await _launch('https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(_shareLink)}'); widget.onShared?.call(); }, child: const _FbIcon()),
                     const SizedBox(width: 16),
-                    _ExtBtn(label: 'Copy link', onTap: _linkCopied ? null : _copyLink, child: _linkCopied ? _CheckIcon(isLight: isLight) : _LinkIcon(isLight: isLight)),
+                    _ExtBtn(label: l10n.copyLink, onTap: _linkCopied ? null : _copyLink, child: _linkCopied ? _CheckIcon(isLight: isLight) : _LinkIcon(isLight: isLight)),
                   ],
                 ),
               ),
@@ -613,11 +615,12 @@ class _SendBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     if (isSent) {
-      return Row(mainAxisSize: MainAxisSize.min, children: const [
-        Icon(Icons.check_circle_rounded, color: Color(0xff22c55e), size: 15),
-        SizedBox(width: 4),
-        Text('Sent', style: TextStyle(color: Color(0xff22c55e), fontWeight: FontWeight.w700, fontSize: 13)),
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.check_circle_rounded, color: Color(0xff22c55e), size: 15),
+        const SizedBox(width: 4),
+        Text(l10n.sent, style: const TextStyle(color: Color(0xff22c55e), fontWeight: FontWeight.w700, fontSize: 13)),
       ]);
     }
     if (isSending) {
@@ -628,7 +631,7 @@ class _SendBtn extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(color: const Color(0xff3897f0), borderRadius: BorderRadius.circular(8)),
-        child: const Text('Send', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+        child: Text(l10n.send, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
       ),
     );
   }

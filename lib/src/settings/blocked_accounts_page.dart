@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../core/http_client.dart' as http;
 
+import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
@@ -63,6 +64,7 @@ class _BlockedAccountsPageState extends State<BlockedAccountsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final isLight = Theme.of(context).brightness == Brightness.light;
     final bg = isLight ? Colors.white : const Color(0xff121212);
     return Scaffold(
@@ -71,14 +73,14 @@ class _BlockedAccountsPageState extends State<BlockedAccountsPage> {
         backgroundColor: bg,
         foregroundColor: isLight ? Colors.black : Colors.white,
         elevation: 0,
-        title: const Text('Blocked Accounts'),
+        title: Text(l10n.blockedAccounts),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _users.isEmpty
               ? Center(
                   child: Text(
-                    "You haven't blocked anyone.",
+                    l10n.blockedEmpty,
                     style: TextStyle(
                       color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
                     ),
@@ -123,7 +125,7 @@ class _BlockedAccountsPageState extends State<BlockedAccountsPage> {
                                 height: 16,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : const Text('Unblock'),
+                            : Text(l10n.unblock),
                       ),
                     );
                   },

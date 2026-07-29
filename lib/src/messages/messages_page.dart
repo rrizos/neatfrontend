@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:record/record.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
@@ -118,10 +119,10 @@ BorderRadius _bubbleRadius(bool mine, bool isLast) {
 
 String _inboxTime(DateTime t) {
   final d = DateTime.now().difference(t);
-  if (d.inMinutes < 1) return 'now';
-  if (d.inHours   < 1) return '${d.inMinutes}m';
-  if (d.inDays    < 1) return '${d.inHours}h';
-  if (d.inDays    < 7) return '${d.inDays}d';
+  if (d.inMinutes < 1) return 'τώρα';
+  if (d.inHours   < 1) return '${d.inMinutes}λ';
+  if (d.inDays    < 1) return '${d.inHours}ω';
+  if (d.inDays    < 7) return '${d.inDays}η';
   return '${t.day}/${t.month}';
 }
 
@@ -135,10 +136,10 @@ const _kActiveNowThreshold = Duration(minutes: 5);
 String? _presenceLabel(DateTime? lastActive) {
   if (lastActive == null) return null;
   final d = DateTime.now().toUtc().difference(lastActive.toUtc());
-  if (d < _kActiveNowThreshold) return 'Active now';
-  if (d.inMinutes < 60) return 'Active ${d.inMinutes}m ago';
-  if (d.inHours   < 24) return 'Active ${d.inHours}h ago';
-  if (d.inDays    < 7)  return 'Active ${d.inDays}d ago';
+  if (d < _kActiveNowThreshold) return 'Ενεργός/ή τώρα';
+  if (d.inMinutes < 60) return 'Ενεργός/ή πριν ${d.inMinutes}λ';
+  if (d.inHours   < 24) return 'Ενεργός/ή πριν ${d.inHours}ω';
+  if (d.inDays    < 7)  return 'Ενεργός/ή πριν ${d.inDays}η';
   return null;
 }
 
@@ -152,7 +153,7 @@ String _chatTime(DateTime t) {
   final hh = t.hour.toString().padLeft(2, '0');
   final mm = t.minute.toString().padLeft(2, '0');
   if (d.inDays == 0) return '$hh:$mm';
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const days = ['Δευ', 'Τρί', 'Τετ', 'Πέμ', 'Παρ', 'Σάβ', 'Κυρ'];
   if (d.inDays < 7) return '${days[t.weekday - 1]} $hh:$mm';
   return '${t.day}/${t.month}/${t.year}';
 }
@@ -367,7 +368,7 @@ class _MessagesPageState extends State<MessagesPage> {
     if (res.statusCode != 200 && res.statusCode != 201) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_extractError(res.body) ?? 'Could not start chat')),
+        SnackBar(content: Text(_extractError(res.body) ?? AppLocalizations.of(context).couldNotStartChat)),
       );
       return;
     }
@@ -436,7 +437,7 @@ class _MessagesPageState extends State<MessagesPage> {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: IconButton(
-              tooltip: 'New message',
+              tooltip: AppLocalizations.of(context).newMessage,
               icon: Icon(Icons.edit_square, color: isLight ? Colors.black : Colors.white, size: 26),
               onPressed: _compose,
             ),
@@ -470,7 +471,7 @@ class _MessagesPageState extends State<MessagesPage> {
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(16, 10, 0, 6),
                       child: Text(
-                        'Active Now',
+                        AppLocalizations.of(context).activeNowHeader,
                         style: TextStyle(
                           color: isLight ? Colors.black : Colors.white,
                           fontSize: 13,
@@ -556,12 +557,12 @@ class _InboxRow extends StatelessWidget {
   String get _preview {
     final msg = summary.lastMessage;
     final me  = summary.lastSender == currentUsername;
-    if (msg.isEmpty) return 'Tap to start chatting';
-    if (msg.startsWith(_kPostPrefix))  return me ? 'You sent a post'          : 'Sent a post';
-    if (msg.startsWith(_kImagePrefix)) return me ? 'You sent a photo'         : 'Sent a photo';
-    if (msg.startsWith(_kVoicePrefix)) return me ? 'You sent a voice message' : 'Sent a voice message';
-    if (msg.startsWith(_kReplyPrefix)) return me ? 'You replied'              : 'Replied';
-    return me ? 'You: $msg' : msg;
+    if (msg.isEmpty) return 'Πάτησε για να ξεκινήσεις συνομιλία';
+    if (msg.startsWith(_kPostPrefix))  return me ? 'Έστειλες μια δημοσίευση'    : 'Έστειλε μια δημοσίευση';
+    if (msg.startsWith(_kImagePrefix)) return me ? 'Έστειλες μια φωτογραφία'    : 'Έστειλε μια φωτογραφία';
+    if (msg.startsWith(_kVoicePrefix)) return me ? 'Έστειλες ένα ηχητικό μήνυμα' : 'Έστειλε ένα ηχητικό μήνυμα';
+    if (msg.startsWith(_kReplyPrefix)) return me ? 'Απάντησες'                  : 'Απάντησε';
+    return me ? 'Εσύ: $msg' : msg;
   }
 
   // Instagram-style "Sent Xh"/"Read Xh" — only meaningful for the last message
@@ -572,7 +573,7 @@ class _InboxRow extends StatelessWidget {
     if (summary.lastMessage.isEmpty) return '';
     final otherRead = summary.otherLastReadAt != null &&
         !summary.otherLastReadAt!.isBefore(summary.updated);
-    return otherRead ? 'Read' : 'Sent';
+    return otherRead ? 'Αναγνώστηκε' : 'Στάλθηκε';
   }
 
   @override
@@ -587,9 +588,9 @@ class _InboxRow extends StatelessWidget {
 
     // Typing takes priority; then 2+ unread → count; else preview · time
     final previewText = summary.isTyping
-        ? 'Typing...'
+        ? 'Πληκτρολογεί...'
         : (unread && count >= 2)
-            ? '$count new messages · $timeStr'
+            ? '$count νέα μηνύματα · $timeStr'
             : '$_preview · $timeLabel';
     final previewColor = summary.isTyping
         ? (isLight ? const Color(0xff3880f4) : const Color(0xff5b9cf6))
@@ -919,7 +920,7 @@ class _SearchField extends StatelessWidget {
       decoration: InputDecoration(
         filled: true,
         fillColor: isLight ? const Color(0xffefefef) : const Color(0xff1c1c1e),
-        hintText: 'Search',
+        hintText: AppLocalizations.of(context).navSearch,
         hintStyle: TextStyle(color: isLight ? _kSubLgt : _kSubDark, fontSize: 15),
         prefixIcon: Icon(Icons.search_rounded, color: isLight ? _kSubLgt : _kSubDark, size: 20),
         contentPadding: const EdgeInsets.symmetric(vertical: 9),
@@ -972,7 +973,7 @@ class _NewMessageSheetState extends State<_NewMessageSheet> {
             child: Stack(
               alignment: Alignment.center,
               children: [
-                Text('New message', style: TextStyle(color: textClr, fontWeight: FontWeight.w700, fontSize: 16)),
+                Text(AppLocalizations.of(context).newMessage, style: TextStyle(color: textClr, fontWeight: FontWeight.w700, fontSize: 16)),
                 Align(
                   alignment: Alignment.centerRight,
                   child: GestureDetector(
@@ -989,7 +990,7 @@ class _NewMessageSheetState extends State<_NewMessageSheet> {
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
             child: Row(
               children: [
-                Text('To: ', style: TextStyle(color: textClr, fontWeight: FontWeight.w700, fontSize: 16)),
+                Text(AppLocalizations.of(context).toLabel, style: TextStyle(color: textClr, fontWeight: FontWeight.w700, fontSize: 16)),
                 Expanded(
                   child: TextField(
                     controller: _ctrl,
@@ -1002,7 +1003,7 @@ class _NewMessageSheetState extends State<_NewMessageSheet> {
                     style: TextStyle(color: textClr, fontSize: 16),
                     cursorColor: _kBlue,
                     decoration: InputDecoration(
-                      hintText: 'Search...',
+                      hintText: '${AppLocalizations.of(context).navSearch}...',
                       hintStyle: TextStyle(color: subClr, fontSize: 16),
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.zero,
@@ -1017,7 +1018,7 @@ class _NewMessageSheetState extends State<_NewMessageSheet> {
           if (widget.suggestedUsers.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-              child: Text('Suggested', style: TextStyle(color: textClr, fontWeight: FontWeight.w700, fontSize: 15)),
+              child: Text(AppLocalizations.of(context).suggested, style: TextStyle(color: textClr, fontWeight: FontWeight.w700, fontSize: 15)),
             ),
           Expanded(
             child: ListView.builder(
@@ -1057,18 +1058,19 @@ class _EmptyInbox extends StatelessWidget {
     final String title;
     final String subtitle;
 
+    final l10n = AppLocalizations.of(context);
     if (isOffline && !hasSearch) {
       icon = Icons.wifi_off_rounded;
-      title = 'No connection';
-      subtitle = 'Your conversations will appear here once you\'re back online.';
+      title = l10n.noConnectionTitle;
+      subtitle = l10n.noConnectionSubtitle;
     } else if (hasSearch) {
       icon = Icons.chat_bubble_outline_rounded;
-      title = 'No results';
-      subtitle = 'No conversations match your search.';
+      title = l10n.noResultsTitle;
+      subtitle = l10n.noResultsSubtitle;
     } else {
       icon = Icons.chat_bubble_outline_rounded;
-      title = 'Your messages';
-      subtitle = 'Send a private message to someone in your city.';
+      title = l10n.yourMessagesTitle;
+      subtitle = l10n.yourMessagesSubtitle;
     }
 
     return Center(
@@ -1307,24 +1309,24 @@ class _ConversationPageState extends State<ConversationPage>
             // ── Actions ───────────────────────────────────────────────
             ListTile(
               leading: Icon(Icons.reply_rounded, color: fgClr),
-              title: Text('Reply', style: TextStyle(color: fgClr)),
+              title: Text(AppLocalizations.of(context).reply, style: TextStyle(color: fgClr)),
               onTap: () { Navigator.of(sheetCtx).pop(); _setReplyTo(msg); },
             ),
             if (mine && _isPlainText(msg.text))
               ListTile(
                 leading: Icon(Icons.edit_outlined, color: fgClr),
-                title: Text('Edit', style: TextStyle(color: fgClr)),
+                title: Text(AppLocalizations.of(context).edit, style: TextStyle(color: fgClr)),
                 onTap: () { Navigator.of(sheetCtx).pop(); _startEdit(msg); },
               ),
             if (mine)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
-                title: const Text('Delete message', style: TextStyle(color: Color(0xfff66c6c))),
+                title: Text(AppLocalizations.of(context).deleteMessage, style: const TextStyle(color: Color(0xfff66c6c))),
                 onTap: () async { Navigator.of(sheetCtx).pop(); await _deleteMessage(msg); },
               ),
             ListTile(
               leading: Icon(Icons.flag_outlined, color: fgClr),
-              title: Text('Report', style: TextStyle(color: fgClr)),
+              title: Text(AppLocalizations.of(context).report, style: TextStyle(color: fgClr)),
               onTap: () {
                 Navigator.of(sheetCtx).pop();
                 showReportMessageSheet(
@@ -1346,16 +1348,16 @@ class _ConversationPageState extends State<ConversationPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Message?'),
-        content: const Text('This can\'t be undone.'),
+        title: Text(AppLocalizations.of(context).deleteMessageTitle),
+        content: Text(AppLocalizations.of(context).cantBeUndone),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(context).cancel),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Delete', style: TextStyle(color: Color(0xfff66c6c))),
+            child: Text(AppLocalizations.of(context).delete, style: const TextStyle(color: Color(0xfff66c6c))),
           ),
         ],
       ),
@@ -1746,7 +1748,7 @@ class _ConversationPageState extends State<ConversationPage>
         if (mounted) {
           setState(() => _messages.removeWhere((m) => m.id == opt.id));
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Message failed to send')),
+            SnackBar(content: Text(AppLocalizations.of(context).messageFailedToSend)),
           );
         }
       }
@@ -1911,7 +1913,7 @@ class _ConversationPageState extends State<ConversationPage>
                 color: _blocked ? (isLight ? Colors.black : Colors.white) : const Color(0xfff66c6c),
               ),
               title: Text(
-                _blocked ? 'Unblock User' : 'Block User',
+                _blocked ? AppLocalizations.of(context).unblockUser : AppLocalizations.of(context).blockUser,
                 style: TextStyle(
                   color: _blocked ? (isLight ? Colors.black : Colors.white) : const Color(0xfff66c6c),
                   fontWeight: FontWeight.w600,
@@ -1933,30 +1935,28 @@ class _ConversationPageState extends State<ConversationPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Block User'),
+        title: Text(AppLocalizations.of(context).blockUser),
         content: Text(
-          'Block @$name? They won\'t be able to message you or find your '
-          'profile or posts, and this conversation will be removed from '
-          'your inbox.',
+          AppLocalizations.of(context).blockUserConfirmMsg(name),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(context).cancel),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Block', style: TextStyle(color: Color(0xfff66c6c))),
+            child: Text(AppLocalizations.of(context).block, style: const TextStyle(color: Color(0xfff66c6c))),
           ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
-    await _toggleBlock(blockedMessage: 'User blocked');
+    await _toggleBlock(blockedMessage: AppLocalizations.of(context).userBlocked);
   }
 
   Future<void> _confirmUnblock() async {
-    await _toggleBlock(blockedMessage: 'User unblocked');
+    await _toggleBlock(blockedMessage: AppLocalizations.of(context).userUnblocked);
   }
 
   Future<void> _toggleBlock({required String blockedMessage}) async {
@@ -1968,7 +1968,7 @@ class _ConversationPageState extends State<ConversationPage>
       if (!mounted) return;
       if (res.statusCode != 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_extractError(res.body) ?? 'Something went wrong')),
+          SnackBar(content: Text(_extractError(res.body) ?? AppLocalizations.of(context).somethingWentWrong)),
         );
         return;
       }
@@ -1979,7 +1979,7 @@ class _ConversationPageState extends State<ConversationPage>
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Something went wrong')),
+        SnackBar(content: Text(AppLocalizations.of(context).somethingWentWrong)),
       );
     }
   }
@@ -2206,9 +2206,9 @@ class _ConversationPageState extends State<ConversationPage>
           ),
           if (_isOffline) _ConvOfflineBanner(isLight: isLight),
           if (_unavailable)
-            _BlockedBanner(isLight: isLight, message: 'This conversation is no longer available')
+            _BlockedBanner(isLight: isLight, message: AppLocalizations.of(context).conversationUnavailable)
           else if (_blocked)
-            _BlockedBanner(isLight: isLight, message: 'User blocked')
+            _BlockedBanner(isLight: isLight, message: AppLocalizations.of(context).userBlocked)
           else
             _Composer(
               controller: _composer,
@@ -2363,7 +2363,7 @@ class _MessageRow extends StatelessWidget {
             if (showRead)
               Padding(
                 padding: const EdgeInsets.only(right: 6, top: 2),
-                child: Text('Read', style: TextStyle(fontSize: 11, color: readColor)),
+                child: Text(AppLocalizations.of(context).readLabel, style: TextStyle(fontSize: 11, color: readColor)),
               ),
           ],
         ),
@@ -2431,7 +2431,7 @@ class _Bubble extends StatelessWidget {
           Text(text, style: TextStyle(color: textColor, fontSize: 15, height: 1.35)),
           if (edited) ...[
             const SizedBox(height: 3),
-            Text('Edited', style: TextStyle(fontSize: 10, color: editedColor)),
+            Text(AppLocalizations.of(context).editedLabel, style: TextStyle(fontSize: 10, color: editedColor)),
           ],
         ],
       ),
@@ -2718,7 +2718,7 @@ class _TypingBubbleState extends State<_TypingBubble> with SingleTickerProviderS
 }
 
 class _BlockedBanner extends StatelessWidget {
-  const _BlockedBanner({required this.isLight, this.message = 'User blocked'});
+  const _BlockedBanner({required this.isLight, this.message = 'Ο χρήστης αποκλείστηκε'});
 
   final bool isLight;
   final String message;
@@ -2943,7 +2943,7 @@ class _ComposerState extends State<_Composer> {
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  'Recording...',
+                  AppLocalizations.of(context).recording,
                   style: TextStyle(color: widget.isLight ? _kSubLgt : _kSubDark, fontSize: 13),
                 ),
               ],
@@ -3174,7 +3174,7 @@ class _EmptyConversation extends StatelessWidget {
           Text('@$username', style: TextStyle(color: isLight ? _kSubLgt : _kSubDark, fontSize: 14)),
           const SizedBox(height: 20),
           Text(
-            'Say hi to start the conversation!',
+            AppLocalizations.of(context).sayHi,
             style: TextStyle(color: isLight ? _kSubLgt : _kSubDark, fontSize: 14),
           ),
         ],
@@ -3370,9 +3370,9 @@ class _SharedPollGraphic extends StatelessWidget {
             children: [
               const Icon(Icons.poll_rounded, size: 13, color: _kAccent),
               const SizedBox(width: 5),
-              const Text(
-                'POLL',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _kAccent, letterSpacing: 0.6),
+              Text(
+                AppLocalizations.of(context).pollLabel,
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _kAccent, letterSpacing: 0.6),
               ),
             ],
           ),
@@ -3700,7 +3700,7 @@ class _ReplyPreviewBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Replying to @${replyTo.sender}',
+                Text(AppLocalizations.of(context).replyingToUser(replyTo.sender),
                     style: const TextStyle(
                         color: _kBlue, fontSize: 12, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
@@ -3756,9 +3756,9 @@ class _EditPreviewBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  'Editing message',
-                  style: TextStyle(color: Color(0xffffb800), fontSize: 12, fontWeight: FontWeight.w700),
+                Text(
+                  AppLocalizations.of(context).editingMessage,
+                  style: const TextStyle(color: Color(0xffffb800), fontSize: 12, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 2),
                 Text(preview, style: TextStyle(color: subClr, fontSize: 12),
@@ -3991,9 +3991,9 @@ class _InboxOfflineBanner extends StatelessWidget {
         children: [
           const Icon(Icons.wifi_off_rounded, size: 13, color: Color(0xff8e8e8e)),
           const SizedBox(width: 6),
-          const Text(
-            'No internet connection',
-            style: TextStyle(color: Color(0xff8e8e8e), fontSize: 12, fontWeight: FontWeight.w500),
+          Text(
+            AppLocalizations.of(context).noInternet,
+            style: const TextStyle(color: Color(0xff8e8e8e), fontSize: 12, fontWeight: FontWeight.w500),
           ),
         ],
       ),
@@ -4018,7 +4018,7 @@ class _ConvOfflineBanner extends StatelessWidget {
           const SizedBox(width: 6),
           Expanded(
             child: Text(
-              'No internet connection',
+              AppLocalizations.of(context).noInternet,
               style: TextStyle(color: subClr, fontSize: 12, fontWeight: FontWeight.w500),
             ),
           ),
@@ -4039,9 +4039,9 @@ class _FullEmojiPicker extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text('Emojis', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(AppLocalizations.of(context).emojis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
           ),
           Flexible(
             child: GridView.builder(

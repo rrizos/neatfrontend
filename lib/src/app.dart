@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../l10n/app_localizations.dart';
 import 'auth/auth_gate.dart';
 import 'core/neat_loader.dart';
 import 'core/post_deep_link_page.dart';
@@ -14,11 +16,32 @@ class NeatApp extends StatefulWidget {
 
   static final navigatorKey = GlobalKey<NavigatorState>();
 
+  // The app's active language. Defaults to Greek; the user can switch it from
+  // Settings. The chosen locale is persisted and restored on launch, and the
+  // notifier lets Settings flip the whole app without threading a callback
+  // through every screen.
+  static const _localeKey = 'neat_locale';
+  static final ValueNotifier<Locale> localeNotifier =
+      ValueNotifier<Locale>(const Locale('el'));
+
+  static Future<void> setLocale(Locale locale) async {
+    localeNotifier.value = locale;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_localeKey, locale.languageCode);
+  }
+
   @override
   State<NeatApp> createState() => _NeatAppState();
 }
 
 class _NeatAppState extends State<NeatApp> {
+  static const _localizationsDelegates = <LocalizationsDelegate<dynamic>>[
+    AppLocalizations.delegate,
+    GlobalMaterialLocalizations.delegate,
+    GlobalWidgetsLocalizations.delegate,
+    GlobalCupertinoLocalizations.delegate,
+  ];
+
   static const _themeKey = 'neat_theme_mode';
   ThemeMode _themeMode = ThemeMode.dark;
   bool _loading = true;
@@ -69,6 +92,10 @@ class _NeatAppState extends State<NeatApp> {
   Future<void> _restoreTheme() async {
     final prefs = await SharedPreferences.getInstance();
     final value = prefs.getString(_themeKey);
+    final localeCode = prefs.getString(NeatApp._localeKey);
+    if (localeCode != null && localeCode.isNotEmpty) {
+      NeatApp.localeNotifier.value = Locale(localeCode);
+    }
     if (!mounted) return;
     setState(() {
       _themeMode = value == 'light' ? ThemeMode.light : ThemeMode.dark;
@@ -134,29 +161,40 @@ class _NeatAppState extends State<NeatApp> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return MaterialApp(
-        theme: _lightTheme(),
-        darkTheme: _darkTheme(),
-        themeMode: _themeMode,
-        home: const Scaffold(
-          body: NeatLoader(),
-        ),
-      );
-    }
-    return MaterialApp(
-      title: 'neat',
-      navigatorKey: NeatApp.navigatorKey,
-      debugShowCheckedModeBanner: false,
-      theme: _lightTheme(),
-      darkTheme: _darkTheme(),
-      themeMode: _themeMode,
-      home: _deepLinkPostId != null
-          ? PostDeepLinkPage(postId: _deepLinkPostId!, themeMode: _themeMode)
-          : AuthGate(
-              themeMode: _themeMode,
-              onThemeModeChanged: _setTheme,
+    return ValueListenableBuilder<Locale>(
+      valueListenable: NeatApp.localeNotifier,
+      builder: (context, locale, _) {
+        if (_loading) {
+          return MaterialApp(
+            locale: locale,
+            localizationsDelegates: _localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            theme: _lightTheme(),
+            darkTheme: _darkTheme(),
+            themeMode: _themeMode,
+            home: const Scaffold(
+              body: NeatLoader(),
             ),
+          );
+        }
+        return MaterialApp(
+          title: 'neat',
+          locale: locale,
+          localizationsDelegates: _localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          navigatorKey: NeatApp.navigatorKey,
+          debugShowCheckedModeBanner: false,
+          theme: _lightTheme(),
+          darkTheme: _darkTheme(),
+          themeMode: _themeMode,
+          home: _deepLinkPostId != null
+              ? PostDeepLinkPage(postId: _deepLinkPostId!, themeMode: _themeMode)
+              : AuthGate(
+                  themeMode: _themeMode,
+                  onThemeModeChanged: _setTheme,
+                ),
+        );
+      },
     );
   }
 }

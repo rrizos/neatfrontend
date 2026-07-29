@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../core/models.dart';
+import 'app_intro_page.dart';
 import 'auth_screen.dart';
 
 class LandingPage extends StatefulWidget {
@@ -20,7 +22,7 @@ class LandingPage extends StatefulWidget {
 }
 
 class _LandingPageState extends State<LandingPage> {
-  static const _slogan = 'Μια εφαρμογή, τα πάντα για την πόλη σου.';
+  String _slogan = '';
 
   int _visibleChars = 0;
   Timer? _timer;
@@ -29,6 +31,12 @@ class _LandingPageState extends State<LandingPage> {
   void initState() {
     super.initState();
     Future.delayed(const Duration(milliseconds: 600), _startTyping);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _slogan = AppLocalizations.of(context).landingSlogan;
   }
 
   void _startTyping() {
@@ -48,14 +56,20 @@ class _LandingPageState extends State<LandingPage> {
     super.dispose();
   }
 
+  // Sign-up goes through the intro screen first ("here's what Neat is"), and
+  // only then to the credentials form; sign-in jumps straight to the form.
   void _go({required bool signup}) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => AuthScreen(
-          onAuthenticated: widget.onAuthenticated,
-          themeMode: widget.themeMode,
-          initialSignup: signup,
-        ),
+        builder: (_) => signup
+            ? AppIntroPage(
+                onAuthenticated: widget.onAuthenticated,
+                themeMode: widget.themeMode,
+              )
+            : AuthScreen(
+                onAuthenticated: widget.onAuthenticated,
+                themeMode: widget.themeMode,
+              ),
       ),
     );
   }
@@ -102,9 +116,9 @@ class _LandingPageState extends State<LandingPage> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text(
-                  'Εγγραφή',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                child: Text(
+                  AppLocalizations.of(context).signUp,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
               const SizedBox(height: 12),
@@ -120,9 +134,9 @@ class _LandingPageState extends State<LandingPage> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text(
-                  'Σύνδεση',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                child: Text(
+                  AppLocalizations.of(context).signIn,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
               const SizedBox(height: 28),

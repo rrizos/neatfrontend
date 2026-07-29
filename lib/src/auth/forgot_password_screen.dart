@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/http_client.dart' as http;
 
+import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/models.dart';
 
@@ -89,7 +90,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Future<void> _sendCode() async {
     final email = _emailCtrl.text.trim();
     if (email.isEmpty) {
-      setState(() => _error = 'Please enter your email or username');
+      setState(() => _error = AppLocalizations.of(context).forgotEnterEmailError);
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -123,7 +124,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   void _confirmCode() {
     if (_otpCode.length < 6) {
-      setState(() => _error = 'Please enter all 6 digits');
+      setState(() => _error = AppLocalizations.of(context).forgotEnterAllDigits);
       return;
     }
     setState(() { _step = 2; _error = null; });
@@ -133,11 +134,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final pass = _passCtrl.text;
     final confirm = _confirmCtrl.text;
     if (pass.length < 8) {
-      setState(() => _error = 'Password must be at least 8 characters');
+      setState(() => _error = AppLocalizations.of(context).passwordMinLength);
       return;
     }
     if (pass != confirm) {
-      setState(() => _error = "Passwords don't match");
+      setState(() => _error = AppLocalizations.of(context).passwordsDontMatch);
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -305,6 +306,7 @@ class _EmailStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -317,7 +319,7 @@ class _EmailStep extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         Text(
-          'Forgot password?',
+          l10n.forgotPassword,
           textAlign: TextAlign.center,
           style: TextStyle(
             color: textColor,
@@ -328,7 +330,7 @@ class _EmailStep extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          "Enter your email or username and we'll\nsend a code to your email.",
+          l10n.forgotEmailSubtitle,
           textAlign: TextAlign.center,
           style: TextStyle(color: subColor, fontSize: 14, height: 1.55),
         ),
@@ -341,11 +343,11 @@ class _EmailStep extends StatelessWidget {
           style: TextStyle(color: textColor),
           cursorColor: const Color(0xff1479ff),
           onSubmitted: (_) => loading ? null : onSend(),
-          decoration: _deco('Email or username', surface, border),
+          decoration: _deco(l10n.emailOrUsername, surface, border),
         ),
         if (error != null) _errorWidget(error!),
         const SizedBox(height: 20),
-        _PrimaryBtn(label: 'Send code', loading: loading, onPressed: onSend),
+        _PrimaryBtn(label: l10n.sendCode, loading: loading, onPressed: onSend),
       ],
     );
   }
@@ -385,6 +387,7 @@ class _CodeStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -402,7 +405,7 @@ class _CodeStep extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         Text(
-          'Check your email',
+          l10n.checkYourEmail,
           textAlign: TextAlign.center,
           style: TextStyle(
             color: textColor,
@@ -414,7 +417,7 @@ class _CodeStep extends StatelessWidget {
         const SizedBox(height: 10),
         Text.rich(
           TextSpan(
-            text: "We sent a 6-digit code to\n",
+            text: l10n.forgotCodeSentPrefix,
             style: TextStyle(color: subColor, fontSize: 14, height: 1.55),
             children: [
               TextSpan(
@@ -442,19 +445,19 @@ class _CodeStep extends StatelessWidget {
         ),
         if (error != null) _errorWidget(error!),
         const SizedBox(height: 20),
-        _PrimaryBtn(label: 'Verify', loading: loading, onPressed: onVerify),
+        _PrimaryBtn(label: l10n.verify, loading: loading, onPressed: onVerify),
         const SizedBox(height: 18),
         Center(
           child: resendSeconds > 0
               ? Text(
-                  'Resend code in ${resendSeconds}s',
+                  l10n.resendCodeIn(resendSeconds),
                   style: TextStyle(color: subColor, fontSize: 13),
                 )
               : GestureDetector(
                   onTap: loading ? null : onResend,
-                  child: const Text(
-                    'Resend code',
-                    style: TextStyle(
+                  child: Text(
+                    l10n.resendCode,
+                    style: const TextStyle(
                       color: Color(0xff1479ff),
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -581,6 +584,7 @@ class _PasswordStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -598,7 +602,7 @@ class _PasswordStep extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         Text(
-          'Create new password',
+          l10n.createNewPassword,
           textAlign: TextAlign.center,
           style: TextStyle(
             color: textColor,
@@ -609,7 +613,7 @@ class _PasswordStep extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'Must be at least 8 characters.',
+          l10n.passwordMinHint,
           textAlign: TextAlign.center,
           style: TextStyle(color: subColor, fontSize: 14, height: 1.55),
         ),
@@ -620,7 +624,7 @@ class _PasswordStep extends StatelessWidget {
           textInputAction: TextInputAction.next,
           style: TextStyle(color: textColor),
           cursorColor: const Color(0xff1479ff),
-          decoration: _deco('New password', surface, border).copyWith(
+          decoration: _deco(l10n.newPassword, surface, border).copyWith(
             suffixIcon: IconButton(
               icon: Icon(
                 obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
@@ -639,7 +643,7 @@ class _PasswordStep extends StatelessWidget {
           style: TextStyle(color: textColor),
           cursorColor: const Color(0xff1479ff),
           onSubmitted: (_) => loading ? null : onSubmit(),
-          decoration: _deco('Confirm password', surface, border).copyWith(
+          decoration: _deco(l10n.confirmPassword, surface, border).copyWith(
             suffixIcon: IconButton(
               icon: Icon(
                 obscureConfirm ? Icons.visibility_off_outlined : Icons.visibility_outlined,
@@ -652,7 +656,7 @@ class _PasswordStep extends StatelessWidget {
         ),
         if (error != null) _errorWidget(error!),
         const SizedBox(height: 20),
-        _PrimaryBtn(label: 'Reset password', loading: loading, onPressed: onSubmit),
+        _PrimaryBtn(label: l10n.resetPassword, loading: loading, onPressed: onSubmit),
       ],
     );
   }

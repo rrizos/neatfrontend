@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../core/http_client.dart' as http;
 
+import '../../l10n/app_localizations.dart';
+import '../app.dart';
 import '../core/api.dart';
 import '../legal/legal_page.dart';
 import 'blocked_accounts_page.dart';
@@ -21,6 +23,7 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final isLight = themeMode == ThemeMode.light;
     final bg = isLight ? Colors.white : const Color(0xff121212);
     final divider = isLight ? const Color(0xffd9dee6) : const Color(0xff242424);
@@ -32,12 +35,12 @@ class SettingsPage extends StatelessWidget {
         backgroundColor: bg,
         foregroundColor: isLight ? Colors.black : Colors.white,
         elevation: 0,
-        title: const Text('Settings'),
+        title: Text(l10n.settings),
       ),
       body: SafeArea(
         child: ListView(
           children: [
-            _SectionHeader(label: 'Appearance', color: sectionColor),
+            _SectionHeader(label: l10n.appearance, color: sectionColor),
             SwitchListTile(
               value: isLight,
               onChanged: (value) =>
@@ -47,7 +50,7 @@ class SettingsPage extends StatelessWidget {
                 color: isLight ? Colors.black : Colors.white,
               ),
               title: Text(
-                'Light mode',
+                l10n.lightMode,
                 style: TextStyle(
                   color: isLight ? Colors.black : Colors.white,
                   fontWeight: FontWeight.w500,
@@ -55,10 +58,25 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 28),
-            _SectionHeader(label: 'Legal', color: sectionColor),
+            _SectionHeader(label: l10n.language, color: sectionColor),
+            _LanguageRow(
+              label: 'Ελληνικά',
+              selected: Localizations.localeOf(context).languageCode == 'el',
+              isLight: isLight,
+              onTap: () => NeatApp.setLocale(const Locale('el')),
+            ),
+            Divider(height: 1, color: divider),
+            _LanguageRow(
+              label: 'English',
+              selected: Localizations.localeOf(context).languageCode == 'en',
+              isLight: isLight,
+              onTap: () => NeatApp.setLocale(const Locale('en')),
+            ),
+            const SizedBox(height: 28),
+            _SectionHeader(label: l10n.legal, color: sectionColor),
             _SettingsRow(
               icon: Icons.description_outlined,
-              label: 'Terms of Service',
+              label: l10n.termsOfService,
               isLight: isLight,
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
@@ -75,7 +93,7 @@ class SettingsPage extends StatelessWidget {
             Divider(height: 1, color: divider),
             _SettingsRow(
               icon: Icons.privacy_tip_outlined,
-              label: 'Privacy Policy',
+              label: l10n.privacyPolicy,
               isLight: isLight,
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
@@ -90,10 +108,10 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 28),
-            _SectionHeader(label: 'Account', color: sectionColor),
+            _SectionHeader(label: l10n.account, color: sectionColor),
             _SettingsRow(
               icon: Icons.block,
-              label: 'Blocked Accounts',
+              label: l10n.blockedAccounts,
               isLight: isLight,
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
@@ -104,7 +122,7 @@ class SettingsPage extends StatelessWidget {
             Divider(height: 1, color: divider),
             _SettingsRow(
               icon: Icons.logout,
-              label: 'Log Out',
+              label: l10n.logOut,
               isLight: isLight,
               showChevron: false,
               onTap: () => _confirmLogout(context),
@@ -112,7 +130,7 @@ class SettingsPage extends StatelessWidget {
             Divider(height: 1, color: divider),
             _SettingsRow(
               icon: Icons.delete_outline,
-              label: 'Delete Account',
+              label: l10n.deleteAccount,
               isLight: isLight,
               destructive: true,
               showChevron: false,
@@ -125,19 +143,20 @@ class SettingsPage extends StatelessWidget {
   }
 
   Future<void> _confirmLogout(BuildContext context) async {
+    final l10n = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Log Out'),
-        content: const Text('Are you sure you want to log out?'),
+        title: Text(l10n.logOut),
+        content: Text(l10n.logoutConfirm),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Log Out'),
+            child: Text(l10n.logOut),
           ),
         ],
       ),
@@ -148,30 +167,76 @@ class SettingsPage extends StatelessWidget {
   }
 
   Future<void> _confirmDeleteAccount(BuildContext context) async {
+    final l10n = AppLocalizations.of(context);
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    // Deleting is irreversible and the row sits one tap away in a list people
+    // scroll through, so the confirmation asks for a typed word rather than a
+    // second button — a mis-tap can't produce it.
+    final word = l10n.deleteAccountTypeWord;
+    final controller = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Account'),
-        content: const Text(
-          'This will permanently delete your account and everything in it — '
-          'your profile, posts, events, and messages. This action cannot be '
-          'undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: Color(0xfff66c6c)),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final matches = controller.text.trim().toUpperCase() == word.toUpperCase();
+          return AlertDialog(
+            title: Text(l10n.deleteAccount),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(l10n.deleteAccountConfirm),
+                const SizedBox(height: 18),
+                Text(
+                  l10n.deleteAccountTypePrompt(word),
+                  style: TextStyle(
+                    color: isLight ? const Color(0xff6b7280) : const Color(0xffb7b7b7),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: controller,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  textCapitalization: TextCapitalization.characters,
+                  onChanged: (_) => setDialogState(() {}),
+                  decoration: InputDecoration(
+                    hintText: word,
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text(l10n.cancel),
+              ),
+              TextButton(
+                onPressed: matches
+                    ? () => Navigator.of(dialogContext).pop(true)
+                    : null,
+                child: Text(
+                  l10n.delete,
+                  style: TextStyle(
+                    color: matches
+                        ? const Color(0xfff66c6c)
+                        : (isLight
+                            ? const Color(0xffb0b4bb)
+                            : const Color(0xff5c5c5c)),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
+    controller.dispose();
     if (confirmed != true || !context.mounted) return;
 
     try {
@@ -182,14 +247,14 @@ class SettingsPage extends StatelessWidget {
       if (!context.mounted) return;
       if (res.statusCode != 200 && res.statusCode != 204) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed (${res.statusCode}): ${res.body}')),
+          SnackBar(content: Text(l10n.actionFailedStatus(res.statusCode, res.body))),
         );
         return;
       }
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(content: Text(l10n.genericErrorMessage('$e'))),
       );
       return;
     }
@@ -197,6 +262,36 @@ class SettingsPage extends StatelessWidget {
     if (!context.mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
     await onLogout();
+  }
+}
+
+class _LanguageRow extends StatelessWidget {
+  const _LanguageRow({
+    required this.label,
+    required this.selected,
+    required this.isLight,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final bool isLight;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isLight ? Colors.black : Colors.white;
+    return ListTile(
+      onTap: selected ? null : onTap,
+      leading: Icon(Icons.language, color: color),
+      title: Text(
+        label,
+        style: TextStyle(color: color, fontWeight: FontWeight.w500),
+      ),
+      trailing: selected
+          ? const Icon(Icons.check_rounded, color: Color(0xff1479ff))
+          : null,
+    );
   }
 }
 

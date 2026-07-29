@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/http_client.dart' as http;
 import '../core/neat_loader.dart';
@@ -100,11 +101,11 @@ class _SecurityTabState extends State<SecurityTab>
       final sRes = results[0];
       final lRes = results[1];
       if (sRes.statusCode == 403 || lRes.statusCode == 403) {
-        setState(() { _error = 'Admin access required'; _loading = false; });
+        setState(() { _error = AppLocalizations.of(context).adminAccessRequired; _loading = false; });
         return;
       }
       if (sRes.statusCode != 200 || lRes.statusCode != 200) {
-        setState(() { _error = 'Failed to load security data'; _loading = false; });
+        setState(() { _error = AppLocalizations.of(context).failedLoadSecurity; _loading = false; });
         return;
       }
       final logs = ((jsonDecode(lRes.body) as Map)['logs'] as List? ?? const [])
@@ -119,7 +120,7 @@ class _SecurityTabState extends State<SecurityTab>
       });
     } catch (_) {
       if (mounted && !silent) {
-        setState(() { _error = 'Network error'; _loading = false; });
+        setState(() { _error = AppLocalizations.of(context).networkErrorShort; _loading = false; });
       }
     }
   }
@@ -130,20 +131,21 @@ class _SecurityTabState extends State<SecurityTab>
   }
 
   Future<void> _action(String action, String username) async {
+    final l10n = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(_actionTitle(action)),
-        content: Text(_actionBody(action, username)),
+        title: Text(_actionTitle(action, l10n)),
+        content: Text(_actionBody(action, username, l10n)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             child: Text(
-              _actionConfirm(action),
+              _actionConfirm(action, l10n),
               style: const TextStyle(color: _kCritical),
             ),
           ),
@@ -161,12 +163,12 @@ class _SecurityTabState extends State<SecurityTab>
       final ok = res.statusCode == 200;
       String msg;
       if (ok) {
-        msg = '${_actionTitle(action)} — done';
+        msg = l10n.actionDone(_actionTitle(action, l10n));
       } else {
         try {
-          msg = (jsonDecode(res.body) as Map)['error']?.toString() ?? 'Action failed';
+          msg = (jsonDecode(res.body) as Map)['error']?.toString() ?? l10n.actionFailed;
         } catch (_) {
-          msg = 'Action failed (${res.statusCode})';
+          msg = l10n.actionFailedStatusShort(res.statusCode);
         }
       }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -174,32 +176,30 @@ class _SecurityTabState extends State<SecurityTab>
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Network error')));
+            .showSnackBar(SnackBar(content: Text(AppLocalizations.of(context).networkErrorShort)));
       }
     }
   }
 
-  String _actionTitle(String a) => switch (a) {
-        'lock_account' => 'Lock account',
-        'unlock_account' => 'Unlock account',
-        'revoke_sessions' => 'Revoke sessions',
-        _ => 'Action',
+  String _actionTitle(String a, AppLocalizations l10n) => switch (a) {
+        'lock_account' => l10n.secLockAccount,
+        'unlock_account' => l10n.secUnlockAccount,
+        'revoke_sessions' => l10n.secRevokeSessions,
+        _ => l10n.secActionGeneric,
       };
 
-  String _actionConfirm(String a) => switch (a) {
-        'lock_account' => 'Lock',
-        'unlock_account' => 'Unlock',
-        'revoke_sessions' => 'Revoke',
-        _ => 'Confirm',
+  String _actionConfirm(String a, AppLocalizations l10n) => switch (a) {
+        'lock_account' => l10n.secLock,
+        'unlock_account' => l10n.secUnlock,
+        'revoke_sessions' => l10n.secRevoke,
+        _ => l10n.confirm,
       };
 
-  String _actionBody(String a, String u) => switch (a) {
-        'lock_account' =>
-          'Disable "$u" and revoke every session/API token. They will be signed out immediately and cannot sign in until unlocked.',
-        'unlock_account' => 'Re-enable "$u" so they can sign in again.',
-        'revoke_sessions' =>
-          'Sign "$u" out of all devices by revoking every session/API token. The account stays active.',
-        _ => 'Proceed?',
+  String _actionBody(String a, String u, AppLocalizations l10n) => switch (a) {
+        'lock_account' => l10n.secLockBody(u),
+        'unlock_account' => l10n.secUnlockBody(u),
+        'revoke_sessions' => l10n.secRevokeBody(u),
+        _ => l10n.proceed,
       };
 
   @override
@@ -215,7 +215,7 @@ class _SecurityTabState extends State<SecurityTab>
           children: [
             Text(_error!, style: TextStyle(color: _muted(isLight))),
             const SizedBox(height: 8),
-            TextButton(onPressed: _load, child: const Text('Retry')),
+            TextButton(onPressed: _load, child: Text(AppLocalizations.of(context).retry)),
           ],
         ),
       );
@@ -263,7 +263,7 @@ class _SecurityTabState extends State<SecurityTab>
             onChanged: _onSearchChanged,
             style: TextStyle(color: _ink(isLight), fontSize: 14),
             decoration: InputDecoration(
-              hintText: 'Search actor, IP, path, message…',
+              hintText: AppLocalizations.of(context).searchSecurityHint,
               hintStyle: TextStyle(color: _muted(isLight), fontSize: 14),
               prefixIcon: Icon(Icons.search, size: 18, color: _muted(isLight)),
               isDense: true,
@@ -306,7 +306,7 @@ class _SecurityTabState extends State<SecurityTab>
               padding: const EdgeInsets.symmetric(vertical: 40),
               child: Center(
                 child: Text(
-                  'No events match these filters.',
+                  AppLocalizations.of(context).noEventsMatchFilters,
                   style: TextStyle(color: _muted(isLight)),
                 ),
               ),
@@ -388,8 +388,7 @@ class _IntegrityBanner extends StatelessWidget {
           const SizedBox(width: 9),
           Expanded(
             child: Text(
-              'Audit chain broken from entry #${firstBadId ?? '?'} — a record was '
-              'altered or removed outside the application.',
+              AppLocalizations.of(context).auditChainBroken('${firstBadId ?? '?'}'),
               style: TextStyle(
                 color: _ink(isLight),
                 fontWeight: FontWeight.w600,
@@ -516,7 +515,7 @@ class _MetaRow extends StatelessWidget {
         ),
         const SizedBox(width: 5),
         Text(
-          chainOk ? 'Chain verified ($checked)' : 'Chain broken',
+          chainOk ? AppLocalizations.of(context).chainVerified(checked) : AppLocalizations.of(context).chainBroken,
           style: TextStyle(
             color: chainOk ? _kGood : _kCritical,
             fontSize: 11.5,
@@ -669,19 +668,19 @@ class _LogRow extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   _ActionButton(
-                    label: 'Revoke sessions',
+                    label: AppLocalizations.of(context).secRevokeSessions,
                     icon: Icons.logout_rounded,
                     color: _kHigh,
                     onTap: () => onAction('revoke_sessions', actor),
                   ),
                   _ActionButton(
-                    label: 'Lock account',
+                    label: AppLocalizations.of(context).secLockAccount,
                     icon: Icons.lock_outline_rounded,
                     color: _kCritical,
                     onTap: () => onAction('lock_account', actor),
                   ),
                   _ActionButton(
-                    label: 'Unlock',
+                    label: AppLocalizations.of(context).secUnlock,
                     icon: Icons.lock_open_rounded,
                     color: _kGood,
                     onTap: () => onAction('unlock_account', actor),

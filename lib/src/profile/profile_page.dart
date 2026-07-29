@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../core/http_client.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/neat_loader.dart';
 import '../core/legacy_nav_bar.dart';
@@ -380,7 +381,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     if (res.statusCode != 200) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Something went wrong')),
+        SnackBar(content: Text(AppLocalizations.of(context).somethingWentWrong)),
       );
       return;
     }
@@ -395,7 +396,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       ),
     );
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(updated.isBlocked ? 'User blocked' : 'User unblocked')),
+      SnackBar(content: Text(updated.isBlocked ? AppLocalizations.of(context).userBlocked : AppLocalizations.of(context).userUnblocked)),
     );
   }
 
@@ -434,19 +435,18 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 final confirmed = await showDialog<bool>(
                   context: context,
                   builder: (dialogContext) => AlertDialog(
-                    title: const Text('Block User'),
+                    title: Text(AppLocalizations.of(dialogContext).blockUser),
                     content: Text(
-                      'Block @${profile.username}? They won\'t be able to '
-                      'find your profile, see your posts, or message you.',
+                      AppLocalizations.of(dialogContext).blockUserConfirm(profile.username),
                     ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.of(dialogContext).pop(false),
-                        child: const Text('Cancel'),
+                        child: Text(AppLocalizations.of(dialogContext).cancel),
                       ),
                       TextButton(
                         onPressed: () => Navigator.of(dialogContext).pop(true),
-                        child: const Text('Block', style: TextStyle(color: Color(0xfff66c6c))),
+                        child: Text(AppLocalizations.of(dialogContext).block, style: const TextStyle(color: Color(0xfff66c6c))),
                       ),
                     ],
                   ),
@@ -579,7 +579,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             if (post.author == widget.currentUser.username || widget.currentUser.isAdmin)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
-                title: const Text('Delete post', style: TextStyle(color: Color(0xfff66c6c))),
+                title: Text(AppLocalizations.of(context).deletePost, style: const TextStyle(color: Color(0xfff66c6c))),
                 onTap: () async {
                   Navigator.of(context).pop();
                   await _deletePost(post);
@@ -587,7 +587,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ),
             ListTile(
               leading: const Icon(Icons.flag_outlined),
-              title: const Text('Report post'),
+              title: Text(AppLocalizations.of(context).reportPost),
               onTap: () {
                 Navigator.of(context).pop();
                 widget.onHideNavBar?.call();
@@ -853,7 +853,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         actions: [
           if (profile.username == widget.currentUser.username && widget.currentUser.isAdmin)
             IconButton(
-              tooltip: 'Admin Panel',
+              tooltip: AppLocalizations.of(context).adminPanel,
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => AdminPanelPage(token: widget.token),
@@ -863,7 +863,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ),
           if (profile.username == widget.currentUser.username)
             IconButton(
-              tooltip: 'Settings',
+              tooltip: AppLocalizations.of(context).settings,
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => SettingsPage(
@@ -878,7 +878,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ),
           if (!isOwn)
             IconButton(
-              tooltip: 'More options',
+              tooltip: AppLocalizations.of(context).moreOptions,
               onPressed: _openProfileMoreSheet,
               icon: Icon(Icons.more_vert, color: isLight ? Colors.black : Colors.white),
             ),
@@ -940,14 +940,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                _Metric(label: 'posts', value: '${userPosts.length}', onTap: null),
+                                _Metric(label: AppLocalizations.of(context).metricPosts, value: '${userPosts.length}', onTap: null),
                                 _Metric(
-                                  label: 'followers',
+                                  label: AppLocalizations.of(context).metricFollowers,
                                   value: '${profile.followers}',
                                   onTap: () => _openUserList(initialTab: 0),
                                 ),
                                 _Metric(
-                                  label: 'following',
+                                  label: AppLocalizations.of(context).metricFollowing,
                                   value: '${profile.following}',
                                   onTap: () => _openUserList(initialTab: 1),
                                 ),
@@ -987,7 +987,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                   child: profile.username == widget.currentUser.username
-                      ? OutlinedButton(onPressed: _openEditProfile, child: const Text('Edit profile'))
+                      ? OutlinedButton(onPressed: _openEditProfile, child: Text(AppLocalizations.of(context).editProfile))
                       : profile.isBlocked
                           ? SizedBox(
                               width: double.infinity,
@@ -997,7 +997,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                   side: const BorderSide(color: Color(0xfff66c6c)),
                                   foregroundColor: const Color(0xfff66c6c),
                                 ),
-                                child: const Text('Unblock', style: TextStyle(fontWeight: FontWeight.w600)),
+                                child: Text(AppLocalizations.of(context).unblock, style: const TextStyle(fontWeight: FontWeight.w600)),
                               ),
                             )
                           : profile.hasBlockedYou
@@ -1013,9 +1013,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                                 foregroundColor: isLight ? Colors.black : Colors.white,
                                               ),
-                                              child: const Text('Following', style: TextStyle(fontWeight: FontWeight.w600)),
+                                              child: Text(AppLocalizations.of(context).following, style: const TextStyle(fontWeight: FontWeight.w600)),
                                             )
-                                          : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? 'Follow Back' : 'Follow')),
+                                          : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? AppLocalizations.of(context).followBack : AppLocalizations.of(context).follow)),
                                     ),
                                     if (widget.followEnabled) ...[
                                     const SizedBox(width: 12),
@@ -1065,7 +1065,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             (!widget.followEnabled && _otherCityPostsLoading)
                 ? const Center(child: CircularProgressIndicator())
                 : userPosts.isEmpty
-                ? const CustomScrollView(slivers: [SliverFillRemaining(hasScrollBody: false, child: Center(child: Text('No posts yet.', style: TextStyle(color: Color(0xffb3b3b3)))))])
+                ? CustomScrollView(slivers: [SliverFillRemaining(hasScrollBody: false, child: Center(child: Text(AppLocalizations.of(context).noPostsYet, style: const TextStyle(color: Color(0xffb3b3b3)))))])
                 : ListView.builder(
                     key: const PageStorageKey('posts'),
                     // ignore: deprecated_member_use
@@ -1099,7 +1099,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final liked = _likedPosts;
     if (liked == null) return const SizedBox.shrink();
     if (liked.isEmpty) {
-      return const Center(child: Text('No liked posts yet.', style: TextStyle(color: Color(0xffb3b3b3))));
+      return Center(child: Text(AppLocalizations.of(context).noLikedPosts, style: const TextStyle(color: Color(0xffb3b3b3))));
     }
     return ListView.builder(
       key: const PageStorageKey('liked'),
@@ -1116,7 +1116,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final saved = _savedPosts;
     if (saved == null) return const SizedBox.shrink();
     if (saved.isEmpty) {
-      return const Center(child: Text('No saved posts yet.', style: TextStyle(color: Color(0xffb3b3b3))));
+      return Center(child: Text(AppLocalizations.of(context).noSavedPosts, style: const TextStyle(color: Color(0xffb3b3b3))));
     }
     return ListView.builder(
       key: const PageStorageKey('saved'),
@@ -1242,7 +1242,7 @@ class _AvatarFullscreenPageState extends State<_AvatarFullscreenPage> {
                                     ),
                                   )
                                 : Text(
-                                    _following ? 'Following' : 'Follow',
+                                    _following ? AppLocalizations.of(context).following : AppLocalizations.of(context).follow,
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 16,
@@ -1364,8 +1364,9 @@ class _MutualsRow extends StatelessWidget {
     final preview = mutuals.take(3).toList();
     final extra = mutualsCount - preview.length;
 
+    final l10n = AppLocalizations.of(context);
     final spans = <InlineSpan>[
-      TextSpan(text: 'Followed by ', style: TextStyle(color: subClr, fontSize: 13)),
+      TextSpan(text: l10n.followedByPrefix, style: TextStyle(color: subClr, fontSize: 13)),
     ];
     for (var i = 0; i < preview.length; i++) {
       spans.add(
@@ -1386,14 +1387,14 @@ class _MutualsRow extends StatelessWidget {
       );
       if (i < preview.length - 1 || extra > 0) {
         final isLastPreview = i == preview.length - 1;
-        final sep = isLastPreview ? ' and ' : ', ';
+        final sep = isLastPreview ? l10n.listAnd : ', ';
         spans.add(TextSpan(text: sep, style: TextStyle(color: subClr, fontSize: 13)));
       }
     }
     if (extra > 0) {
       spans.add(
         TextSpan(
-          text: '$extra ${extra == 1 ? 'other' : 'others'}',
+          text: l10n.likedByOthers(extra),
           style: TextStyle(color: boldClr, fontWeight: FontWeight.w700, fontSize: 13),
         ),
       );
@@ -1674,11 +1675,11 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
               children: [
                 TextButton(
                   onPressed: _saving ? null : () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+                  child: Text(AppLocalizations.of(context).cancel),
                 ),
                 const Spacer(),
                 Text(
-                  'Edit profile',
+                  AppLocalizations.of(context).editProfile,
                   style: TextStyle(
                     color: Theme.of(context).brightness == Brightness.light
                         ? Colors.black
@@ -1690,7 +1691,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                 const Spacer(),
                 TextButton(
                   onPressed: _saving ? null : _save,
-                  child: const Text('Save'),
+                  child: Text(AppLocalizations.of(context).save),
                 ),
               ],
             ),
@@ -1742,23 +1743,23 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
             const SizedBox(height: 16),
             _EditorField(
               controller: _usernameController,
-              label: 'Username',
+              label: AppLocalizations.of(context).username,
             ),
             const SizedBox(height: 12),
             _EditorField(
               controller: _nameController,
-              label: 'Name',
+              label: AppLocalizations.of(context).fieldName,
             ),
             const SizedBox(height: 12),
             _EditorField(
               controller: _cityController,
-              label: 'City',
+              label: AppLocalizations.of(context).city,
               readOnly: true,
             ),
             const SizedBox(height: 12),
             _EditorField(
               controller: _bioController,
-              label: 'Bio',
+              label: AppLocalizations.of(context).fieldBio,
               maxLines: 4,
               maxLength: 150,
             ),
@@ -1766,7 +1767,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
             Row(
               children: [
                 Text(
-                  'Allow profile picture zoom',
+                  AppLocalizations.of(context).allowAvatarZoom,
                   style: TextStyle(
                     color: Theme.of(context).brightness == Brightness.light
                         ? Colors.black
@@ -1834,7 +1835,7 @@ class _SavedPostsPageState extends State<_SavedPostsPage> {
         backgroundColor: isLight ? Colors.white : const Color(0xff121212),
         iconTheme: IconThemeData(color: isLight ? Colors.black : Colors.white),
         title: Text(
-          'Saved',
+          AppLocalizations.of(context).savedTitle,
           style: TextStyle(
             fontWeight: FontWeight.w800,
             color: isLight ? Colors.black : Colors.white,
@@ -1858,7 +1859,7 @@ class _SavedPostsPageState extends State<_SavedPostsPage> {
                       ? const Color(0xff8b95a3)
                       : const Color(0xffa6a6a6),
                 ),
-                hintText: 'Search saved posts',
+                hintText: AppLocalizations.of(context).searchSavedPosts,
                 hintStyle: TextStyle(
                   color: isLight
                       ? const Color(0xff8b95a3)
@@ -1895,7 +1896,7 @@ class _SavedPostsPageState extends State<_SavedPostsPage> {
             child: _filtered.isEmpty
                 ? Center(
                     child: Text(
-                      _query.isEmpty ? 'No saved posts yet.' : 'No results.',
+                      _query.isEmpty ? AppLocalizations.of(context).noSavedPosts : AppLocalizations.of(context).noResultsShort,
                       style: TextStyle(
                         color: isLight
                             ? const Color(0xff616161)
@@ -2169,7 +2170,7 @@ class _UserListPageState extends State<_UserListPage>
             for (final mode in _SortMode.values)
               ListTile(
                 title: Text(
-                  _sortLabel(mode),
+                  _sortLabel(mode, AppLocalizations.of(context)),
                   style: TextStyle(
                     color: isLight ? Colors.black : Colors.white,
                     fontWeight: _sortMode == mode
@@ -2194,10 +2195,10 @@ class _UserListPageState extends State<_UserListPage>
     );
   }
 
-  String _sortLabel(_SortMode mode) => switch (mode) {
-        _SortMode.defaultOrder => 'Default',
-        _SortMode.newestFirst => 'Newest first',
-        _SortMode.oldestFirst => 'Oldest first',
+  String _sortLabel(_SortMode mode, AppLocalizations l10n) => switch (mode) {
+        _SortMode.defaultOrder => l10n.sortDefault,
+        _SortMode.newestFirst => l10n.sortNewest,
+        _SortMode.oldestFirst => l10n.sortOldest,
       };
 
   @override
@@ -2242,8 +2243,8 @@ class _UserListPageState extends State<_UserListPage>
             indicatorSize: TabBarIndicatorSize.tab,
             dividerColor: Colors.transparent,
             tabs: [
-              Tab(text: '${widget.followerCount} Followers'),
-              Tab(text: '${widget.followingCount} Following'),
+              Tab(text: AppLocalizations.of(context).followersTitle(widget.followerCount)),
+              Tab(text: AppLocalizations.of(context).followingTitle(widget.followingCount)),
             ],
           ),
           Expanded(
@@ -2297,7 +2298,7 @@ class _UserListPageState extends State<_UserListPage>
               fillColor: isLight
                   ? const Color(0xffefefef)
                   : const Color(0xff1c1c1e),
-              hintText: 'Search',
+              hintText: AppLocalizations.of(context).navSearch,
               hintStyle: TextStyle(
                   color: isLight
                       ? const Color(0xff737373)
@@ -2328,7 +2329,7 @@ class _UserListPageState extends State<_UserListPage>
             child: Row(
               children: [
                 Text(
-                  'Sort by ',
+                  AppLocalizations.of(context).sortByLabel,
                   style: TextStyle(
                     color: isLight ? Colors.black : Colors.white,
                     fontSize: 13,
@@ -2336,7 +2337,7 @@ class _UserListPageState extends State<_UserListPage>
                   ),
                 ),
                 Text(
-                  _sortLabel(_sortMode),
+                  _sortLabel(_sortMode, AppLocalizations.of(context)),
                   style: TextStyle(
                     color: isLight ? Colors.black : Colors.white,
                     fontSize: 13,
@@ -2357,7 +2358,7 @@ class _UserListPageState extends State<_UserListPage>
               : users.isEmpty
                   ? Center(
                       child: Text(
-                        query.isEmpty ? 'No users yet.' : 'No results.',
+                        query.isEmpty ? AppLocalizations.of(context).noUsersYet : AppLocalizations.of(context).noResultsShort,
                         style: TextStyle(
                             color: isLight
                                 ? const Color(0xff8b95a3)
@@ -2433,7 +2434,7 @@ class _UserListPageState extends State<_UserListPage>
                   if (user.followsYou && !widget.isOwn) ...[
                     const SizedBox(height: 2),
                     Text(
-                      'Follows you',
+                      AppLocalizations.of(context).followsYou,
                       style: TextStyle(
                         color: isLight
                             ? const Color(0xff8b95a3)
@@ -2462,8 +2463,8 @@ class _UserListPageState extends State<_UserListPage>
                   ),
                   child: Text(
                     isFollowing
-                        ? 'Following'
-                        : (user.followsYou ? 'Follow Back' : 'Follow'),
+                        ? AppLocalizations.of(context).following
+                        : (user.followsYou ? AppLocalizations.of(context).followBack : AppLocalizations.of(context).follow),
                     style: TextStyle(
                       color: isFollowing
                           ? (isLight ? Colors.black : Colors.white)

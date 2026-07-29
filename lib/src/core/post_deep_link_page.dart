@@ -7,6 +7,7 @@ import 'http_client.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../l10n/app_localizations.dart';
 import 'api.dart';
 import 'media_cache.dart';
 import 'models.dart';
@@ -54,16 +55,17 @@ class _PostDeepLinkPageState extends State<PostDeepLinkPage> {
     try {
       final res = await http.get(postDetailEndpoint(widget.postId));
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       if (res.statusCode == 404) {
-        setState(() { _error = 'Post not found'; _loading = false; }); return;
+        setState(() { _error = l10n.postNotFound; _loading = false; }); return;
       }
       if (res.statusCode != 200) {
-        setState(() { _error = 'Could not load post'; _loading = false; }); return;
+        setState(() { _error = l10n.couldNotLoadPost; _loading = false; }); return;
       }
       final json = jsonDecode(res.body) as Map<String, dynamic>;
       setState(() { _post = FeedPost.fromJson(json); _loading = false; });
     } catch (_) {
-      if (mounted) setState(() { _error = 'Could not load post'; _loading = false; });
+      if (mounted) setState(() { _error = AppLocalizations.of(context).couldNotLoadPost; _loading = false; });
     }
   }
 
@@ -161,14 +163,14 @@ class _OpenInAppBtn extends StatelessWidget {
           color: const Color(0xff1479ff),
           borderRadius: BorderRadius.circular(22),
         ),
-        child: const Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.open_in_new_rounded, color: Colors.white, size: 14),
-            SizedBox(width: 6),
+            const Icon(Icons.open_in_new_rounded, color: Colors.white, size: 14),
+            const SizedBox(width: 6),
             Text(
-              'Open in app',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+              AppLocalizations.of(context).openInApp,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ],
         ),
@@ -428,7 +430,7 @@ class _CommentsSheet extends StatelessWidget {
               child: Row(
                 children: [
                   Text(
-                    '${comments.length} ${comments.length == 1 ? 'comment' : 'comments'}',
+                    AppLocalizations.of(ctx).commentsCount(comments.length),
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
                   ),
                   const Spacer(),
@@ -443,7 +445,7 @@ class _CommentsSheet extends StatelessWidget {
             // Comments list
             Expanded(
               child: comments.isEmpty
-                  ? const Center(child: Text('No comments yet', style: TextStyle(color: Colors.white38, fontSize: 14)))
+                  ? Center(child: Text(AppLocalizations.of(ctx).noCommentsYet, style: const TextStyle(color: Colors.white38, fontSize: 14)))
                   : ListView.separated(
                       controller: scrollCtrl,
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),

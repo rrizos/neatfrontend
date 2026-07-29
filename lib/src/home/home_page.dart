@@ -18,6 +18,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/mentions.dart';
@@ -30,7 +31,7 @@ import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../events/events_page.dart';
 import '../map/city_map_view.dart';
-import '../map/greece_cities.dart';
+import '../map/spectator_intro_page.dart';
 import '../messages/messages_page.dart';
 import '../profile/profile_page.dart';
 
@@ -63,6 +64,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
+const _kSpectatorIntroSeenKey = 'neat_spectator_intro_seen';
+
 class _HomePageState extends State<HomePage> {
   static final _kTabChannel = const MethodChannel('com.neat/tabbar');
 
@@ -76,6 +79,9 @@ class _HomePageState extends State<HomePage> {
   final _cityScroll = ScrollController();
   final _followingScroll = ScrollController();
   int _nav = 0;
+  // Null until SharedPreferences has been read; the map tab simply behaves as
+  // "already seen" during that window rather than risking a late intro.
+  bool _spectatorIntroSeen = true;
   int _selectedTab = 0;
   final Set<int> _visitedTabs = <int>{0};
   final _viralViewKey = GlobalKey<_ViralViewState>();
@@ -116,6 +122,7 @@ class _HomePageState extends State<HomePage> {
     // Paint last-known posts instantly instead of a blank spinner while the
     // network round-trip for fresh ones is still in flight.
     unawaited(_loadCachedPosts());
+    unawaited(_restoreSpectatorIntroSeen());
     _load();
     _loadNotifications(silent: true);
     PushService.instance.onDmTap = _openConversationById;
@@ -538,7 +545,7 @@ class _HomePageState extends State<HomePage> {
         }
       } else if (res.statusCode == 413) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File too large. Try a shorter video or smaller photos.')),
+          SnackBar(content: Text(AppLocalizations.of(context).fileTooLarge)),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -548,8 +555,8 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       if (mounted) {
         final msg = e.toString().contains('TimeoutException')
-            ? 'Upload timed out. Please try again.'
-            : 'Network error. Please try again.';
+            ? AppLocalizations.of(context).uploadTimedOut
+            : AppLocalizations.of(context).networkError;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     } finally {
@@ -592,9 +599,7 @@ class _HomePageState extends State<HomePage> {
     if (skipped > 0 && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            '$skipped photo${skipped > 1 ? 's were' : ' was'} too large and skipped. Try selecting a different photo.',
-          ),
+          content: Text(AppLocalizations.of(context).photosSkipped(skipped)),
         ),
       );
     }
@@ -615,7 +620,7 @@ class _HomePageState extends State<HomePage> {
       setState(() => _composeMediaLoading = false);
       setPageState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Photo is too large. Try again.')),
+        SnackBar(content: Text(AppLocalizations.of(context).photoTooLarge)),
       );
       return;
     }
@@ -1279,11 +1284,11 @@ class _HomePageState extends State<HomePage> {
                                 padding: EdgeInsets.zero,
                                 textStyle: const TextStyle(fontSize: 16),
                               ),
-                              child: const Text('Cancel'),
+                              child: Text(AppLocalizations.of(context).cancel),
                             ),
                             const Spacer(),
                             Text(
-                              'New post',
+                              AppLocalizations.of(context).newPost,
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
@@ -1330,7 +1335,7 @@ class _HomePageState extends State<HomePage> {
                                             ),
                                           ),
                                         )
-                                      : const Text('Post'),
+                                      : Text(AppLocalizations.of(context).post),
                                 );
                               },
                             ),
@@ -1710,7 +1715,7 @@ class _HomePageState extends State<HomePage> {
               hasScrollBody: false,
               child: Center(
                 child: Text(
-                  'No posts yet.',
+                  AppLocalizations.of(context).noPostsYet,
                   style: TextStyle(
                     color: isLight
                         ? const Color(0xff888888)
@@ -1761,7 +1766,7 @@ class _HomePageState extends State<HomePage> {
                               Icons.delete_outline,
                               color: Color(0xfff66c6c),
                             ),
-                            title: const Text('Delete post'),
+                            title: Text(AppLocalizations.of(context).deletePost),
                             onTap: () async {
                               Navigator.of(context).pop();
                               await _deletePost(post);
@@ -1770,7 +1775,7 @@ class _HomePageState extends State<HomePage> {
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.flag_outlined),
-                          title: const Text('Report post'),
+                          title: Text(AppLocalizations.of(context).reportPost),
                           onTap: () {
                             Navigator.of(context).pop();
                             _hideNativeBar();
@@ -1840,7 +1845,7 @@ class _HomePageState extends State<HomePage> {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
-                title: const Text('Delete post'),
+                title: Text(AppLocalizations.of(context).deletePost),
                 onTap: () async {
                   Navigator.of(context).pop();
                   await _deletePost(post);
@@ -1849,7 +1854,7 @@ class _HomePageState extends State<HomePage> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.flag_outlined),
-              title: const Text('Report post'),
+              title: Text(AppLocalizations.of(context).reportPost),
               onTap: () {
                 Navigator.of(context).pop();
                 _hideNativeBar();
@@ -2128,30 +2133,30 @@ class _HomePageState extends State<HomePage> {
           unselectedFontSize: 0,
           onTap: _onNavTap,
           items: [
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home_rounded),
-              label: 'Home',
+            BottomNavigationBarItem(
+              icon: const Icon(Icons.home_outlined),
+              activeIcon: const Icon(Icons.home_rounded),
+              label: AppLocalizations.of(context).navHome,
             ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.search_outlined),
-              activeIcon: Icon(Icons.search_rounded),
-              label: 'Search',
+            BottomNavigationBarItem(
+              icon: const Icon(Icons.search_outlined),
+              activeIcon: const Icon(Icons.search_rounded),
+              label: AppLocalizations.of(context).navSearch,
             ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.add_circle_outline_rounded),
-              activeIcon: Icon(Icons.add_circle_rounded),
-              label: 'Create',
+            BottomNavigationBarItem(
+              icon: const Icon(Icons.add_circle_outline_rounded),
+              activeIcon: const Icon(Icons.add_circle_rounded),
+              label: AppLocalizations.of(context).navCreate,
             ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.map_outlined),
-              activeIcon: Icon(Icons.map_rounded),
-              label: 'Map',
+            BottomNavigationBarItem(
+              icon: const Icon(Icons.map_outlined),
+              activeIcon: const Icon(Icons.map_rounded),
+              label: AppLocalizations.of(context).navMap,
             ),
             BottomNavigationBarItem(
               icon: profileIcon(active: false),
               activeIcon: profileIcon(active: true),
-              label: 'Profile',
+              label: AppLocalizations.of(context).navProfile,
             ),
           ],
         ),
@@ -2172,6 +2177,10 @@ class _HomePageState extends State<HomePage> {
     }
     if (i == 2) {
       _openCreatePost();
+      return;
+    }
+    if (i == 3 && !_spectatorIntroSeen) {
+      _showSpectatorIntro();
       return;
     }
     if (i == 4) {
@@ -2215,6 +2224,52 @@ class _HomePageState extends State<HomePage> {
       _showInlineProfile = false;
     });
     if (_isIOS26) _kTabChannel.invokeMethod('syncTab', i);
+  }
+
+  Future<void> _restoreSpectatorIntroSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _spectatorIntroSeen = prefs.getBool(_kSpectatorIntroSeenKey) ?? false;
+    });
+  }
+
+  /// Explains Spectator Mode before the map opens for the first time.
+  ///
+  /// Deliberately shown *instead of* switching tabs, not on top of the map:
+  /// the live map is a platform view, and anything of ours composited over it
+  /// has a history of leaving it unable to pan. The map is warmed in the
+  /// background meanwhile, so it is ready the moment the sheet is dismissed.
+  Future<void> _showSpectatorIntro() async {
+    unawaited(prewarmCityMap(
+      homeCity: widget.session.user.city,
+      isDark: Theme.of(context).brightness == Brightness.dark,
+    ));
+    // Marked seen up front: whether they read it or swiped it away, they have
+    // been told, and a second showing would only be noise.
+    _spectatorIntroSeen = true;
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setBool(_kSpectatorIntroSeenKey, true)),
+    );
+    // The iOS 26 tab bar is a native view outside Flutter's hierarchy, so it
+    // survives pushed routes and would sit on top of this screen's button.
+    _hideNativeBar();
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => SpectatorIntroPage(themeMode: widget.themeMode),
+      ),
+    );
+    _showNativeBar();
+    if (!mounted) return;
+    // Dismissed by the button or by a back swipe — either way they asked for
+    // the map, so land there.
+    setState(() {
+      _nav = 3;
+      _visitedTabs.add(3);
+      _showInlineProfile = false;
+    });
+    if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 3);
   }
 }
 
@@ -2271,7 +2326,7 @@ class _TopBar extends StatelessWidget {
                       Text(
                         (homeCity != null && homeCity!.isNotEmpty)
                             ? homeCity!
-                            : 'Home',
+                            : AppLocalizations.of(context).navHome,
                         style: TextStyle(
                           color: isLight ? Colors.black : Colors.white,
                           fontSize: 13,
@@ -2490,7 +2545,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
                             height: 52,
                             child: Center(
                               child: Text(
-                                'Following',
+                                AppLocalizations.of(context).feedTabFollowing,
                                 style: TextStyle(
                                   color: followingClr,
                                   fontSize: 17,
@@ -2574,9 +2629,14 @@ class _ViralView extends StatefulWidget {
 
 enum _ViralPeriod { daily, weekly, monthly }
 
+/// The charts are scoped to one of two places, never to an arbitrary city:
+/// home, where the viewer can actually take part, or everywhere else, which is
+/// read-only (see the spectator-mode introduction).
+enum _ViralScope { myCity, otherCities }
+
 class _ViralViewState extends State<_ViralView> {
   // ── Viral ──────────────────────────────────────────────────────────────────
-  String _city = '';
+  _ViralScope _scope = _ViralScope.myCity;
   List<FeedPost> _viralPosts = [];
   bool _loadingViral = true;
   _ViralPeriod _period = _ViralPeriod.weekly;
@@ -2608,7 +2668,6 @@ class _ViralViewState extends State<_ViralView> {
   @override
   void initState() {
     super.initState();
-    _city = widget.currentUser.city;
     _loadViral();
     _loadSuggestions();
     _loadTopUsers();
@@ -2631,6 +2690,8 @@ class _ViralViewState extends State<_ViralView> {
   // downloading the whole city feed and sorting it locally on every load.
   double _score(FeedPost p) => (p.likes * 0.33 + p.commentCount * 0.33 + p.shares * 0.33) * 100;
 
+  String get _homeCity => widget.currentUser.city;
+
   String get _periodParam => switch (_period) {
         _ViralPeriod.daily => 'daily',
         _ViralPeriod.weekly => 'weekly',
@@ -2641,7 +2702,9 @@ class _ViralViewState extends State<_ViralView> {
     if (mounted) setState(() => _loadingViral = true);
     try {
       final res = await http.get(
-        viralPostsEndpoint(city: _city, period: _periodParam),
+        _scope == _ViralScope.myCity
+            ? viralPostsEndpoint(city: _homeCity, period: _periodParam)
+            : viralPostsEndpoint(excludeCity: _homeCity, period: _periodParam),
         headers: authGetHeaders(widget.token),
       );
       if (!mounted) return;
@@ -2663,85 +2726,6 @@ class _ViralViewState extends State<_ViralView> {
   void refresh() {
     if (_searchActive) _cancelSearch();
     _loadViral();
-  }
-
-  Future<void> _selectCity(BuildContext context) async {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-    widget.onHideNavBar();
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.55,
-        maxChildSize: 0.9,
-        builder: (ctx, sc) => Column(
-          children: [
-            Container(
-              width: 36, height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: isLight ? const Color(0xffd1d5db) : const Color(0xff3a3a3a),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Text(
-                'Select City',
-                style: TextStyle(
-                  color: isLight ? Colors.black : Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            Builder(builder: (ctx) {
-              final userCity = widget.currentUser.city;
-              final sorted = [
-                ...greeceCities.where((c) => c.name == userCity),
-                ...greeceCities.where((c) => c.name != userCity),
-              ];
-              return Expanded(
-              child: ListView.builder(
-                controller: sc,
-                itemCount: sorted.length,
-                itemBuilder: (_, i) {
-                  final city = sorted[i];
-                  final selected = city.name == _city;
-                  return ListTile(
-                    title: Text(
-                      city.name,
-                      style: TextStyle(
-                        color: isLight ? Colors.black : Colors.white,
-                        fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
-                      ),
-                    ),
-                    trailing: selected
-                        ? const Icon(Icons.check_rounded, color: Color(0xff1d9bf0))
-                        : null,
-                    onTap: () {
-                      Navigator.of(ctx).pop();
-                      if (city.name != _city) {
-                        setState(() => _city = city.name);
-                        _loadViral();
-                      }
-                    },
-                  );
-                },
-              ),
-            );
-            }),
-          ],
-        ),
-      ),
-    );
-    widget.onShowNavBar();
   }
 
   // ── Search activation ─────────────────────────────────────────────────────
@@ -2783,6 +2767,31 @@ class _ViralViewState extends State<_ViralView> {
       case _ViralPeriod.weekly:  return 'Εβδομαδιαίο';
       case _ViralPeriod.monthly: return 'Μηνιαίο';
     }
+  }
+
+  String _scopeLabel(BuildContext context) => _scope == _ViralScope.myCity
+      ? _homeCity
+      : AppLocalizations.of(context).viralOtherCities;
+
+  PopupMenuItem<_ViralScope> _scopeMenuItem(String label, _ViralScope scope, bool isLight) {
+    final sel = _scope == scope;
+    return PopupMenuItem<_ViralScope>(
+      value: scope,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: isLight ? Colors.black : Colors.white,
+                fontWeight: sel ? FontWeight.w700 : FontWeight.w400,
+              ),
+            ),
+          ),
+          if (sel) const Icon(Icons.check_rounded, size: 18, color: Color(0xff1d9bf0)),
+        ],
+      ),
+    );
   }
 
   PopupMenuItem<_ViralPeriod> _periodMenuItem(String label, _ViralPeriod period, bool isLight) {
@@ -2838,9 +2847,9 @@ class _ViralViewState extends State<_ViralView> {
                             padding: const EdgeInsets.only(left: 10),
                             child: GestureDetector(
                               onTap: _cancelSearch,
-                              child: const Text(
-                                'Cancel',
-                                style: TextStyle(
+                              child: Text(
+                                AppLocalizations.of(context).cancel,
+                                style: const TextStyle(
                                   color: Color(0xff1d9bf0),
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,
@@ -2862,8 +2871,23 @@ class _ViralViewState extends State<_ViralView> {
                         padding: const EdgeInsets.only(top: 10),
                         child: Row(
                           children: [
-                            GestureDetector(
-                              onTap: () => _selectCity(context),
+                            PopupMenuButton<_ViralScope>(
+                              onSelected: (scope) {
+                                if (_scope == scope) return;
+                                setState(() => _scope = scope);
+                                _loadViral();
+                              },
+                              offset: const Offset(0, 32),
+                              color: isLight ? Colors.white : const Color(0xff1e1e1e),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              itemBuilder: (_) => [
+                                _scopeMenuItem(_homeCity, _ViralScope.myCity, isLight),
+                                _scopeMenuItem(
+                                  AppLocalizations.of(context).viralOtherCities,
+                                  _ViralScope.otherCities,
+                                  isLight,
+                                ),
+                              ],
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
@@ -2876,7 +2900,7 @@ class _ViralViewState extends State<_ViralView> {
                                   children: [
                                     const Icon(Icons.local_fire_department_rounded, size: 13, color: Color(0xffff6b35)),
                                     const SizedBox(width: 4),
-                                    Text(_city, style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                                    Text(_scopeLabel(context), style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
                                     const SizedBox(width: 3),
                                     Icon(Icons.expand_more_rounded, size: 15, color: muted),
                                   ],
@@ -2956,7 +2980,7 @@ class _ViralViewState extends State<_ViralView> {
                         child: Icon(Icons.close_rounded, size: 17, color: muted),
                       )
                     : null,
-                hintText: 'Search people and posts',
+                hintText: AppLocalizations.of(context).searchPeopleAndPosts,
                 hintStyle: TextStyle(color: muted, fontSize: 15),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
@@ -2969,7 +2993,7 @@ class _ViralViewState extends State<_ViralView> {
                   const SizedBox(width: 12),
                   Icon(Icons.search_rounded, color: muted, size: 18),
                   const SizedBox(width: 8),
-                  Text('Search people and posts', style: TextStyle(color: muted, fontSize: 15)),
+                  Text(AppLocalizations.of(context).searchPeopleAndPosts, style: TextStyle(color: muted, fontSize: 15)),
                 ],
               ),
             ),
@@ -2987,7 +3011,7 @@ class _ViralViewState extends State<_ViralView> {
           children: [
             Icon(Icons.local_fire_department_rounded, size: 48, color: isLight ? const Color(0xffb8c0cc) : const Color(0xff4a5568)),
             const SizedBox(height: 12),
-            Text('No posts in $_city yet', style: TextStyle(color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280), fontSize: 16, fontWeight: FontWeight.w600)),
+            Text(_scope == _ViralScope.myCity ? AppLocalizations.of(context).noPostsInCity(_homeCity) : AppLocalizations.of(context).noPostsOtherCities, style: TextStyle(color: isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280), fontSize: 16, fontWeight: FontWeight.w600)),
           ],
         ),
       );
@@ -3008,7 +3032,7 @@ class _ViralViewState extends State<_ViralView> {
           final score = _score(post);
           final isTop3 = rank <= 3;
           final mc = isTop3 ? _mc(rank) : null;
-          final scoreStr = '${score.toInt()} neat pts';
+          final scoreStr = AppLocalizations.of(context).neatPts(score.toInt());
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -3044,10 +3068,10 @@ class _ViralViewState extends State<_ViralView> {
                     color: mc!.withValues(alpha: 0.03),
                     border: Border(left: BorderSide(color: mc.withValues(alpha: 0.25), width: 3.5)),
                   ),
-                  child: widget.buildPostCard(post, interactive: _city == widget.currentUser.city),
+                  child: widget.buildPostCard(post, interactive: _scope == _ViralScope.myCity),
                 )
               else
-                widget.buildPostCard(post, interactive: _city == widget.currentUser.city),
+                widget.buildPostCard(post, interactive: _scope == _ViralScope.myCity),
               Divider(height: 1, color: isLight ? const Color(0xffe8eaed) : const Color(0xff1f1f1f)),
             ],
           );
@@ -3224,7 +3248,7 @@ class _ViralViewState extends State<_ViralView> {
               child: TextButton(
                 onPressed: () => setState(() => _historyShown += 5),
                 child: Text(
-                  'See more',
+                  AppLocalizations.of(context).seeMore,
                   style: TextStyle(
                     color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
                     fontSize: 14,
@@ -3238,7 +3262,7 @@ class _ViralViewState extends State<_ViralView> {
               child: TextButton(
                 onPressed: _clearHistory,
                 child: Text(
-                  'Clear all',
+                  AppLocalizations.of(context).clearAll,
                   style: TextStyle(
                     color: isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af),
                     fontSize: 14,
@@ -3255,7 +3279,7 @@ class _ViralViewState extends State<_ViralView> {
             children: [
               Expanded(
                 child: Text(
-                  'Who to follow',
+                  AppLocalizations.of(context).whoToFollow,
                   style: TextStyle(
                     color: isLight ? Colors.black : Colors.white,
                     fontSize: 18,
@@ -3271,7 +3295,7 @@ class _ViralViewState extends State<_ViralView> {
                   size: 22,
                 ),
                 onPressed: _loadSuggestions,
-                tooltip: 'Refresh',
+                tooltip: AppLocalizations.of(context).refresh,
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.all(8),
                 constraints: const BoxConstraints(),
@@ -3423,7 +3447,8 @@ class _ViralViewState extends State<_ViralView> {
   }
 
   Widget _buildResults(bool isLight, String query) {
-    const tabs = ['People', 'Posts'];
+    final l10n = AppLocalizations.of(context);
+    final tabs = [l10n.searchPeople, l10n.searchPosts];
     final divider = isLight ? const Color(0xffe7e7e7) : const Color(0xff2f3336);
     final textColor = isLight ? Colors.black : Colors.white;
     final muted = isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280);
@@ -3517,7 +3542,7 @@ class _ViralViewState extends State<_ViralView> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              query.isNotEmpty ? 'No results for\n"$query"' : 'Nothing here yet.',
+              query.isNotEmpty ? AppLocalizations.of(context).noResultsFor(query) : AppLocalizations.of(context).nothingHereYet,
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: isLight ? Colors.black : Colors.white,
@@ -3528,7 +3553,7 @@ class _ViralViewState extends State<_ViralView> {
             if (query.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                'Try a different search term.',
+                AppLocalizations.of(context).tryDifferentSearch,
                 style: TextStyle(
                   color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
                   fontSize: 15,
@@ -3684,10 +3709,10 @@ class _ViralViewState extends State<_ViralView> {
               ),
               child: Text(
                 _followingAuthors.contains(user.username)
-                    ? 'Following'
+                    ? AppLocalizations.of(context).following
                     : widget.followerAuthors.contains(user.username)
-                        ? 'Follow Back'
-                        : 'Follow',
+                        ? AppLocalizations.of(context).followBack
+                        : AppLocalizations.of(context).follow,
                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
               ),
             ),
@@ -3856,7 +3881,7 @@ class _ComposePollEditor extends StatelessWidget {
                       controller: controllers[i],
                       style: TextStyle(color: fg, fontSize: 15),
                       decoration: InputDecoration(
-                        hintText: 'Option ${i + 1}',
+                        hintText: AppLocalizations.of(context).pollOptionHint(i + 1),
                         hintStyle: TextStyle(color: hint),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -4043,7 +4068,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Text(
-                "Notifications",
+                AppLocalizations.of(context).notificationsTitle,
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -4054,10 +4079,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
             if (snapshot.connectionState == ConnectionState.waiting)
               const Expanded(child: Center(child: CircularProgressIndicator()))
             else if (items.isEmpty)
-              const Expanded(
+              Expanded(
                 child: Center(
                   child: Text(
-                    "No notifications yet.",
+                    AppLocalizations.of(context).noNotificationsYet,
                     style: TextStyle(color: subColor),
                   ),
                 ),
@@ -4068,23 +4093,23 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                   padding: const EdgeInsets.only(bottom: 32),
                   children: [
                     if (justNow.isNotEmpty) ...[
-                      const _NotifSectionHeader(title: "Just Now"),
+                      _NotifSectionHeader(title: AppLocalizations.of(context).notifJustNow),
                       ...justNow.map(tileFor),
                     ],
                     if (today.isNotEmpty) ...[
-                      const _NotifSectionHeader(title: "Today"),
+                      _NotifSectionHeader(title: AppLocalizations.of(context).notifToday),
                       ...today.map(tileFor),
                     ],
                     if (last7.isNotEmpty) ...[
-                      const _NotifSectionHeader(title: "Last 7 Days"),
+                      _NotifSectionHeader(title: AppLocalizations.of(context).notifLast7Days),
                       ...last7.map(tileFor),
                     ],
                     if (last30.isNotEmpty) ...[
-                      const _NotifSectionHeader(title: "Last 30 Days"),
+                      _NotifSectionHeader(title: AppLocalizations.of(context).notifLast30Days),
                       ...last30.map(tileFor),
                     ],
                     if (older.isNotEmpty) ...[
-                      const _NotifSectionHeader(title: "Older"),
+                      _NotifSectionHeader(title: AppLocalizations.of(context).notifOlder),
                       ...older.map(tileFor),
                     ],
                   ],
@@ -4206,7 +4231,7 @@ class _NotifTile extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          child: Text(isFollowing ? "Following" : followsYou ? "Follow Back" : "Follow"),
+          child: Text(isFollowing ? AppLocalizations.of(context).following : followsYou ? AppLocalizations.of(context).followBack : AppLocalizations.of(context).follow),
         ),
       );
     } else if (isEvent) {
@@ -4295,14 +4320,14 @@ class _NotifTile extends StatelessWidget {
                       text: item.actor,
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    TextSpan(text: " ${_actionLabel(item.verb)}"),
+                    TextSpan(text: " ${_actionLabel(item.verb, AppLocalizations.of(context))}"),
                     if (item.targetText.isNotEmpty)
                       TextSpan(
                         text: ": ${item.targetText}",
                         style: const TextStyle(color: subColor),
                       ),
                     TextSpan(
-                      text: "  ${_timeAgo(item.created)}",
+                      text: "  ${_timeAgo(item.created, AppLocalizations.of(context))}",
                       style: const TextStyle(color: subColor, fontSize: 13),
                     ),
                   ],
@@ -4389,11 +4414,14 @@ class _NotifVideoThumbState extends State<_NotifVideoThumb> {
   }
 }
 
-String _actionLabel(String verb) {
+String _actionLabel(String verb, AppLocalizations l10n) {
   return switch (verb) {
-    'liked your post' => 'liked your post',
-    'commented on your post' => 'commented on your post',
-    'followed you' => 'started following you',
+    'liked your post' => l10n.notifLikedPost,
+    'commented on your post' => l10n.notifCommentedPost,
+    'followed you' => l10n.notifStartedFollowing,
+    'replied to your comment' => l10n.notifRepliedComment,
+    'liked your comment' => l10n.notifLikedComment,
+    'mentioned you in a comment' => l10n.notifMentionedComment,
     _ => verb,
   };
 }
@@ -4705,7 +4733,7 @@ class _CommentSheetState extends State<_CommentSheet> {
             if ((isPostOwner || isAdmin) && !isReply)
               ListTile(
                 leading: Icon(c.pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined),
-                title: Text(c.pinned ? 'Unpin comment' : 'Pin comment'),
+                title: Text(c.pinned ? AppLocalizations.of(context).unpinComment : AppLocalizations.of(context).pinComment),
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
                   _pinComment(c);
@@ -4714,7 +4742,7 @@ class _CommentSheetState extends State<_CommentSheet> {
             if (isOwnComment || isAdmin)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
-                title: const Text('Delete comment'),
+                title: Text(AppLocalizations.of(context).deleteComment),
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
                   _deleteComment(c);
@@ -4723,7 +4751,7 @@ class _CommentSheetState extends State<_CommentSheet> {
             if (!isOwnComment)
               ListTile(
                 leading: const Icon(Icons.flag_outlined),
-                title: const Text('Report comment'),
+                title: Text(AppLocalizations.of(context).reportComment),
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
                   widget.onHideNavBar?.call();
@@ -4821,7 +4849,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        'Pinned by author',
+                        AppLocalizations.of(context).pinnedByAuthor,
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
@@ -4857,7 +4885,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                           ),
                         ),
                         TextSpan(
-                          text: 'Creator',
+                          text: AppLocalizations.of(context).creator,
                           style: TextStyle(
                             color: const Color(0xff3897f0),
                             fontWeight: FontWeight.w700,
@@ -4908,7 +4936,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                   children: [
                     if (created != null)
                       Text(
-                        _timeAgo(created),
+                        _timeAgo(created, AppLocalizations.of(context)),
                         style: TextStyle(
                           fontSize: 12,
                           color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
@@ -4918,7 +4946,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                     GestureDetector(
                       onTap: () => setState(() => _replyingTo = c),
                       child: Text(
-                        'Reply',
+                        AppLocalizations.of(context).reply,
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -4931,7 +4959,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                 if (_likedByOwner[c.id] ?? c.likedByOwner) ...[
                   const SizedBox(height: 3),
                   Text(
-                    'Liked by creator',
+                    AppLocalizations.of(context).likedByCreator,
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
@@ -5029,7 +5057,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
                   child: Text(
-                    'Comments',
+                    AppLocalizations.of(context).commentsTitle,
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
@@ -5045,7 +5073,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                         child: _hydratingComments
                             ? const CircularProgressIndicator(strokeWidth: 2)
                             : Text(
-                                widget.likingEnabled ? 'No comments yet.\nBe the first!' : 'No comments yet.',
+                                widget.likingEnabled ? AppLocalizations.of(context).noCommentsBeFirst : AppLocalizations.of(context).noCommentsYet,
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: isLight ? const Color(0xff8b95a3) : const Color(0xffb3b3b3),
@@ -5229,8 +5257,8 @@ class _CommentSheetState extends State<_CommentSheet> {
                             cursorColor: isLight ? Colors.black : Colors.white,
                             decoration: InputDecoration(
                               hintText: _replyingTo != null
-                                  ? 'Reply to @${_replyingTo!.author}...'
-                                  : 'Add a comment...',
+                                  ? AppLocalizations.of(context).replyToHint(_replyingTo!.author)
+                                  : AppLocalizations.of(context).addCommentHint,
                               hintStyle: TextStyle(
                                 color: isLight
                                     ? const Color(0xff8b95a3)
@@ -5299,12 +5327,12 @@ class _CommentSheetState extends State<_CommentSheet> {
   }
 }
 
-String _timeAgo(DateTime created) {
+String _timeAgo(DateTime created, AppLocalizations l10n) {
   final diff = DateTime.now().difference(created);
-  if (diff.inMinutes < 1) return 'just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-  if (diff.inHours < 24) return '${diff.inHours}h ago';
-  return '${diff.inDays}d ago';
+  if (diff.inMinutes < 1) return l10n.justNow;
+  if (diff.inMinutes < 60) return l10n.timeMinutesAgo(diff.inMinutes);
+  if (diff.inHours < 24) return l10n.timeHoursAgo(diff.inHours);
+  return l10n.timeDaysAgo(diff.inDays);
 }
 
 // ── GIF picker listener ───────────────────────────────────────────────────────
@@ -5360,7 +5388,7 @@ class _OfflineBanner extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(
-            'No internet connection',
+            AppLocalizations.of(context).noInternet,
             style: TextStyle(
               color: isLight ? const Color(0xff666666) : const Color(0xff999999),
               fontSize: 12.5,

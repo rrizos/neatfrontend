@@ -18,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/mentions.dart';
@@ -185,10 +186,10 @@ String _buildSharedAndroidMapHtml() {
 
 String _timeAgo(DateTime dt) {
   final d = DateTime.now().difference(dt);
-  if (d.inMinutes < 1) return 'just now';
-  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-  if (d.inHours < 24) return '${d.inHours}h ago';
-  return '${d.inDays}d ago';
+  if (d.inMinutes < 1) return 'τώρα';
+  if (d.inMinutes < 60) return '${d.inMinutes}λ πριν';
+  if (d.inHours < 24) return '${d.inHours}ω πριν';
+  return '${d.inDays}η πριν';
 }
 
 // Top-level so it can run on a background isolate via `compute`, keeping the
@@ -420,7 +421,7 @@ class _EventsPageState extends State<EventsPage> {
       final msg = body.length > 120 ? body.substring(0, 120) : body;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not create event (${res.statusCode}): $msg'),
+          content: Text(AppLocalizations.of(context).couldNotCreateEvent(res.statusCode, msg)),
           duration: const Duration(seconds: 8),
         ),
       );
@@ -529,7 +530,7 @@ class _EventsPageState extends State<EventsPage> {
       unawaited(_load());
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save event (${res.statusCode})')),
+        SnackBar(content: Text(AppLocalizations.of(context).couldNotSaveEvent(res.statusCode))),
       );
     }
   }
@@ -684,7 +685,7 @@ class _EventsPageState extends State<EventsPage> {
             child: Row(
               children: [
                 _TabPill(
-                  label: 'Official',
+                  label: AppLocalizations.of(context).eventsOfficial,
                   selected: _tab == 0,
                   onTap: () => setState(() {
                     _tab = 0;
@@ -693,7 +694,7 @@ class _EventsPageState extends State<EventsPage> {
                 ),
                 const SizedBox(width: 8),
                 _TabPill(
-                  label: 'Community',
+                  label: AppLocalizations.of(context).eventsCommunity,
                   selected: _tab == 1,
                   onTap: () => setState(() {
                     _tab = 1;
@@ -735,7 +736,7 @@ class _EventsPageState extends State<EventsPage> {
                           ),
                         ),
                         child: Text(
-                          cat,
+                          _categoryLabel(cat, AppLocalizations.of(context)),
                           style: TextStyle(
                             color: sel
                                 ? (isLight ? Colors.white : Colors.black)
@@ -785,7 +786,7 @@ class _EventsPageState extends State<EventsPage> {
                         attended.isEmpty && completed.isEmpty) {
                       return Center(
                         child: Text(
-                          'No events yet.',
+                          AppLocalizations.of(context).noEventsYet,
                           style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff9c9c9c)),
                         ),
                       );
@@ -794,11 +795,11 @@ class _EventsPageState extends State<EventsPage> {
                       controller: _outerScroll,
                       padding: const EdgeInsets.only(bottom: 24),
                       children: [
-                        if (liveToday.isNotEmpty)  _buildSection(isLight, 'Live Today',        liveToday),
-                        if (upcoming.isNotEmpty)   _buildSection(isLight, 'Upcoming Events',   upcoming),
-                        if (other.isNotEmpty)      _buildSection(isLight, 'Other Events',      other),
-                        if (attended.isNotEmpty)   _buildSection(isLight, 'Already Attended',  attended),
-                        if (completed.isNotEmpty)  _buildSection(isLight, 'Completed Events',  completed),
+                        if (liveToday.isNotEmpty)  _buildSection(isLight, AppLocalizations.of(context).sectionLiveToday, liveToday),
+                        if (upcoming.isNotEmpty)   _buildSection(isLight, AppLocalizations.of(context).sectionUpcoming, upcoming),
+                        if (other.isNotEmpty)      _buildSection(isLight, AppLocalizations.of(context).sectionOther, other),
+                        if (attended.isNotEmpty)   _buildSection(isLight, AppLocalizations.of(context).sectionAttended, attended),
+                        if (completed.isNotEmpty)  _buildSection(isLight, AppLocalizations.of(context).sectionCompleted, completed),
                       ],
                     );
                   }(),
@@ -825,7 +826,7 @@ class _EventsOfflineBanner extends StatelessWidget {
               color: isLight ? const Color(0xff888888) : const Color(0xff666666)),
           const SizedBox(width: 6),
           Text(
-            'No internet connection',
+            AppLocalizations.of(context).noInternet,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
@@ -853,14 +854,13 @@ Future<void> _openUrl(String raw) async {
 String _formatEventDate(String date) {
   final d = DateTime.tryParse(date);
   if (d == null) return date;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  final datePart = '${weekdays[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}, ${d.year}';
+  const months = ['Ιαν', 'Φεβ', 'Μαρ', 'Απρ', 'Μάι', 'Ιουν', 'Ιουλ', 'Αυγ', 'Σεπ', 'Οκτ', 'Νοε', 'Δεκ'];
+  const weekdays = ['Δευ', 'Τρί', 'Τετ', 'Πέμ', 'Παρ', 'Σάβ', 'Κυρ'];
+  final datePart = '${weekdays[d.weekday - 1]}, ${d.day} ${months[d.month - 1]} ${d.year}';
   if (d.hour != 0 || d.minute != 0) {
-    final h = d.hour > 12 ? d.hour - 12 : (d.hour == 0 ? 12 : d.hour);
+    final h = d.hour.toString().padLeft(2, '0');
     final m = d.minute.toString().padLeft(2, '0');
-    final amPm = d.hour >= 12 ? 'PM' : 'AM';
-    return '$datePart at $h:$m $amPm';
+    return '$datePart στις $h:$m';
   }
   return datePart;
 }
@@ -871,10 +871,9 @@ String _dateTimeIso(DateTime date, TimeOfDay? time) {
 }
 
 String _formatTime(TimeOfDay t) {
-  final h = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
+  final h = t.hour.toString().padLeft(2, '0');
   final m = t.minute.toString().padLeft(2, '0');
-  final amPm = t.period == DayPeriod.am ? 'AM' : 'PM';
-  return '$h:$m $amPm';
+  return '$h:$m';
 }
 
 const _kEventCategories = [
@@ -888,6 +887,21 @@ const _kEventCategories = [
   'Comedy',
   'Networking',
 ];
+
+// The category values above are the server contract (stored + filtered on),
+// so they stay in English; this maps them to a localized display label.
+String _categoryLabel(String value, AppLocalizations l10n) => switch (value) {
+      'All' => l10n.catAll,
+      'Music Concert' => l10n.catMusicConcert,
+      'Live Concert' => l10n.catLiveConcert,
+      'Sports' => l10n.catSports,
+      'Art & Culture' => l10n.catArtCulture,
+      'Food & Drinks' => l10n.catFoodDrinks,
+      'Tech' => l10n.catTech,
+      'Comedy' => l10n.catComedy,
+      'Networking' => l10n.catNetworking,
+      _ => value,
+    };
 
 class EventItem {
   const EventItem({
@@ -1118,7 +1132,7 @@ class _EventCard extends StatelessWidget {
                           children: [
                             Text(
                               event.organizer.isEmpty
-                                  ? 'Community'
+                                  ? AppLocalizations.of(context).eventsCommunity
                                   : event.organizer,
                               style: TextStyle(
                                 color: isLight ? Colors.black : Colors.white,
@@ -1216,10 +1230,10 @@ class _EventCard extends StatelessWidget {
                               ),
                             ),
                           ],
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'report',
-                            padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
-                            child: Text('Report event'),
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                            child: Text(AppLocalizations.of(context).reportEvent),
                           ),
                         ];
                       },
@@ -1243,7 +1257,7 @@ class _EventCard extends StatelessWidget {
                               side: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
                             ),
                           ),
-                          child: const Text('Buy Tickets'),
+                          child: Text(AppLocalizations.of(context).buyTickets),
                         ),
                       ),
                     if (official && event.hasTickets) const SizedBox(width: 10),
@@ -1261,7 +1275,7 @@ class _EventCard extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                               ),
-                              child: const Text("Don't Attend"),
+                              child: Text(AppLocalizations.of(context).dontAttend),
                             )
                           : FilledButton(
                               onPressed: attendEnabled ? onAttend : null,
@@ -1273,7 +1287,7 @@ class _EventCard extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                               ),
-                              child: const Text('Attend'),
+                              child: Text(AppLocalizations.of(context).attend),
                             ),
                     ),
                   ],
@@ -1493,7 +1507,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               children: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+                  child: Text(AppLocalizations.of(context).cancel),
                 ),
                 const Spacer(),
                 Text(
@@ -1550,7 +1564,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
                     });
                   },
-                  child: const Text('Publish'),
+                  child: Text(AppLocalizations.of(context).publish),
                 ),
               ],
             ),
@@ -1558,7 +1572,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
             TextField(
               controller: _title,
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
-              decoration: _dec('Title', isLight, error: _showTitleError),
+              decoration: _dec(AppLocalizations.of(context).fieldTitle, isLight, error: _showTitleError),
               onChanged: (_) { if (_showTitleError) setState(() => _showTitleError = false); },
             ),
             const SizedBox(height: 10),
@@ -1567,7 +1581,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
               maxLines: 4,
               maxLength: 500,
-              decoration: _dec('Description', isLight, error: _showDescError),
+              decoration: _dec(AppLocalizations.of(context).fieldDescription, isLight, error: _showDescError),
               onChanged: (_) { if (_showDescError) setState(() => _showDescError = false); },
             ),
             const SizedBox(height: 10),
@@ -1575,7 +1589,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               children: [
                 Expanded(
                   child: _CompactToggle(
-                    label: 'Official event',
+                    label: AppLocalizations.of(context).officialEvent,
                     value: _official,
                     enabled: widget.canCreateOfficial,
                     onChanged: (v) => setState(() {
@@ -1587,7 +1601,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: _CompactToggle(
-                    label: 'Has tickets',
+                    label: AppLocalizations.of(context).hasTicketsLabel,
                     value: _tickets,
                     enabled: _official,
                     onChanged: (v) => setState(() => _tickets = v),
@@ -1633,7 +1647,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                           ),
                         ),
                         child: Text(
-                          cat,
+                          _categoryLabel(cat, AppLocalizations.of(context)),
                           style: TextStyle(
                             color: sel
                                 ? (isLight ? Colors.white : Colors.black)
@@ -1658,7 +1672,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               },
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
               decoration: _dec(
-                _official ? 'Venue / Address (required)' : 'Venue / Address (optional)',
+                _official ? AppLocalizations.of(context).venueRequired : AppLocalizations.of(context).venueOptional,
                 isLight,
                 error: _showLocationError,
               ),
@@ -1746,7 +1760,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 style: TextStyle(color: isLight ? Colors.black : Colors.white),
                 keyboardType: TextInputType.url,
                 onChanged: (_) { if (_showTicketsUrlError) setState(() => _showTicketsUrlError = false); },
-                decoration: _dec('Tickets website URL (required)', isLight, error: _showTicketsUrlError),
+                decoration: _dec(AppLocalizations.of(context).ticketsUrlRequired, isLight, error: _showTicketsUrlError),
               ),
             ],
             const SizedBox(height: 12),
@@ -1778,7 +1792,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     const SizedBox(width: 10),
                     Text(
                       _date == null
-                          ? 'Choose date'
+                          ? AppLocalizations.of(context).chooseDate
                           : _formatEventDate(_date!.toIso8601String().substring(0, 10)),
                       style: TextStyle(
                         color: _date == null
@@ -1788,7 +1802,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     ),
                     if (_showDateError) ...[
                       const Spacer(),
-                      const Text('Required',
+                      Text(AppLocalizations.of(context).requiredLabel,
                           style: TextStyle(color: Color(0xfff66c6c), fontSize: 12, fontWeight: FontWeight.w600)),
                     ],
                   ],
@@ -1821,7 +1835,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                         color: isLight ? Colors.black : Colors.white),
                     const SizedBox(width: 10),
                     Text(
-                      _time == null ? 'Choose time' : _formatTime(_time!),
+                      _time == null ? AppLocalizations.of(context).chooseTime : _formatTime(_time!),
                       style: TextStyle(
                         color: _time == null
                             ? (isLight ? const Color(0xff616161) : const Color(0xff8f8f8f))
@@ -1830,7 +1844,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     ),
                     if (_showTimeError) ...[
                       const Spacer(),
-                      const Text('Required',
+                      Text(AppLocalizations.of(context).requiredLabel,
                           style: TextStyle(color: Color(0xfff66c6c), fontSize: 12, fontWeight: FontWeight.w600)),
                     ],
                   ],
@@ -1873,9 +1887,9 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                   children: [
                     const Icon(Icons.error_outline_rounded, size: 15, color: Color(0xfff66c6c)),
                     const SizedBox(width: 6),
-                    const Text(
-                      'Photo is required for official events',
-                      style: TextStyle(color: Color(0xfff66c6c), fontSize: 12.5, fontWeight: FontWeight.w600),
+                    Text(
+                      AppLocalizations.of(context).photoRequiredOfficial,
+                      style: const TextStyle(color: Color(0xfff66c6c), fontSize: 12.5, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -1888,7 +1902,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 ),
                 const Spacer(),
                 Text(
-                  'Photos make events feel real',
+                  AppLocalizations.of(context).photosMakeReal,
                   style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f), fontSize: 12),
                 ),
               ],
@@ -2008,7 +2022,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
               children: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+                  child: Text(AppLocalizations.of(context).cancel),
                 ),
                 const Spacer(),
                 Text(
@@ -2030,7 +2044,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                       if (_imageChanged) 'imageUrl': _imageUrl,
                     });
                   },
-                  child: const Text('Save'),
+                  child: Text(AppLocalizations.of(context).save),
                 ),
               ],
             ),
@@ -2040,7 +2054,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
               controller: _title,
               enabled: false,
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
-              decoration: _dec('Title', isLight),
+              decoration: _dec(AppLocalizations.of(context).fieldTitle, isLight),
             ),
             const SizedBox(height: 10),
             // Description — editable
@@ -2049,7 +2063,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
               style: TextStyle(color: isLight ? Colors.black : Colors.white),
               maxLines: 4,
               maxLength: 500,
-              decoration: _dec('Description', isLight),
+              decoration: _dec(AppLocalizations.of(context).fieldDescription, isLight),
             ),
             const SizedBox(height: 10),
             // Toggles — read-only
@@ -2060,7 +2074,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                   children: [
                     Expanded(
                       child: _CompactToggle(
-                        label: 'Official event',
+                        label: AppLocalizations.of(context).officialEvent,
                         value: _official,
                         onChanged: (_) {},
                       ),
@@ -2068,7 +2082,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _CompactToggle(
-                        label: 'Has tickets',
+                        label: AppLocalizations.of(context).hasTicketsLabel,
                         value: _tickets,
                         onChanged: (_) {},
                       ),
@@ -2120,7 +2134,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                                 ),
                               ),
                               child: Text(
-                                cat,
+                                _categoryLabel(cat, AppLocalizations.of(context)),
                                 style: TextStyle(
                                   color: sel
                                       ? (isLight ? Colors.white : Colors.black)
@@ -2145,7 +2159,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                   enabled: false,
                   style: TextStyle(color: isLight ? Colors.black : Colors.white),
                   keyboardType: TextInputType.url,
-                  decoration: _dec('Tickets website URL', isLight),
+                  decoration: _dec(AppLocalizations.of(context).ticketsUrl, isLight),
                 ),
               ],
             ],
@@ -2156,7 +2170,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                 controller: _location,
                 enabled: false,
                 style: TextStyle(color: isLight ? Colors.black : Colors.white),
-                decoration: _dec('Venue / Address', isLight),
+                decoration: _dec(AppLocalizations.of(context).venueAddress, isLight),
               ),
             ],
             const SizedBox(height: 12),
@@ -2186,7 +2200,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                     const SizedBox(width: 10),
                     Text(
                       _date == null
-                          ? 'Choose date'
+                          ? AppLocalizations.of(context).chooseDate
                           : _formatEventDate(_date!.toIso8601String().substring(0, 10)),
                       style: TextStyle(
                         color: _date == null
@@ -2222,7 +2236,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                         color: isLight ? Colors.black : Colors.white),
                     const SizedBox(width: 10),
                     Text(
-                      _time == null ? 'Choose time (optional)' : _formatTime(_time!),
+                      _time == null ? AppLocalizations.of(context).chooseTimeOptional : _formatTime(_time!),
                       style: TextStyle(
                         color: _time == null
                             ? (isLight ? const Color(0xff616161) : const Color(0xff8f8f8f))
@@ -2273,7 +2287,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                 ),
                 const Spacer(),
                 Text(
-                  _imageUrl.isNotEmpty ? 'Tap photo icon to replace' : 'Photos make events feel real',
+                  _imageUrl.isNotEmpty ? AppLocalizations.of(context).tapPhotoReplace : AppLocalizations.of(context).photosMakeReal,
                   style: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f), fontSize: 12),
                 ),
               ],
@@ -2712,7 +2726,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
             if ((isOwner || isAdmin) && !isReply)
               ListTile(
                 leading: Icon(c.pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined),
-                title: Text(c.pinned ? 'Unpin comment' : 'Pin comment'),
+                title: Text(c.pinned ? AppLocalizations.of(context).unpinComment : AppLocalizations.of(context).pinComment),
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
                   _pinComment(c);
@@ -2721,7 +2735,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
             if (isOwnComment || isAdmin)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Color(0xfff66c6c)),
-                title: const Text('Delete comment'),
+                title: Text(AppLocalizations.of(context).deleteComment),
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
                   _deleteComment(c);
@@ -2730,7 +2744,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
             if (!isOwnComment)
               ListTile(
                 leading: const Icon(Icons.flag_outlined),
-                title: const Text('Report comment'),
+                title: Text(AppLocalizations.of(context).reportComment),
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
                   showReportCommentSheet(
@@ -2788,7 +2802,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        'Pinned by organizer',
+                        AppLocalizations.of(context).pinnedByOrganizer,
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
@@ -2823,7 +2837,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                         ),
                       ),
                       TextSpan(
-                        text: 'Creator',
+                        text: AppLocalizations.of(context).creator,
                         style: TextStyle(
                           color: const Color(0xff3897f0),
                           fontWeight: FontWeight.w700,
@@ -2876,7 +2890,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                   GestureDetector(
                     onTap: () => setState(() => _replyingTo = c),
                     child: Text(
-                      'Reply',
+                      AppLocalizations.of(context).reply,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -2888,7 +2902,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                 if (c.likedByOwner && c.author != widget.event.creator) ...[
                   const SizedBox(height: 3),
                   Text(
-                    'Liked by creator',
+                    AppLocalizations.of(context).likedByCreator,
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
@@ -3042,11 +3056,11 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                       ],
                       _DetailRow(
                         icon: official ? Icons.verified_outlined : Icons.people_outline,
-                        text: '${event.organizer.isEmpty ? (official ? event.city : 'Community') : event.organizer} • ${official ? 'Official' : 'Community'}',
+                        text: '${event.organizer.isEmpty ? (official ? event.city : AppLocalizations.of(context).eventsCommunity) : event.organizer} • ${official ? AppLocalizations.of(context).eventsOfficial : AppLocalizations.of(context).eventsCommunity}',
                       ),
                       if (official && event.category.isNotEmpty) ...[
                         const SizedBox(height: 8),
-                        _DetailRow(icon: Icons.category_outlined, text: event.category),
+                        _DetailRow(icon: Icons.category_outlined, text: _categoryLabel(event.category, AppLocalizations.of(context))),
                       ],
                       if (event.ticketsUrl.isNotEmpty) ...[
                         const SizedBox(height: 8),
@@ -3107,7 +3121,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                     color: isLight ? Colors.black : Colors.white),
                                 const SizedBox(width: 5),
                                 Text(
-                                  'See if friends are going',
+                                  AppLocalizations.of(context).seeIfFriendsGoing,
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
@@ -3147,7 +3161,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                     side: BorderSide(color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
                                   ),
                                 ),
-                                child: const Text('Buy Tickets'),
+                                child: Text(AppLocalizations.of(context).buyTickets),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -3165,7 +3179,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                       padding: const EdgeInsets.symmetric(vertical: 14),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                     ),
-                                    child: const Text("Don't Attend"),
+                                    child: Text(AppLocalizations.of(context).dontAttend),
                                   )
                                 : FilledButton(
                                     onPressed: widget.attendEnabled ? () {
@@ -3178,7 +3192,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                       padding: const EdgeInsets.symmetric(vertical: 14),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                     ),
-                                    child: const Text('Attend'),
+                                    child: Text(AppLocalizations.of(context).attend),
                                   ),
                           ),
                         ],
@@ -3196,7 +3210,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                             ),
-                            child: const Text('Edit event'),
+                            child: Text(AppLocalizations.of(context).editEvent),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -3208,7 +3222,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                               foregroundColor: const Color(0xfff66c6c),
                               padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
-                            child: const Text('Delete event'),
+                            child: Text(AppLocalizations.of(context).deleteEvent),
                           ),
                         ),
                       ] else ...[
@@ -3221,7 +3235,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                               foregroundColor: const Color(0xfff66c6c),
                               padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
-                            child: const Text('Report event'),
+                            child: Text(AppLocalizations.of(context).reportEvent),
                           ),
                         ),
                       ],
@@ -3235,7 +3249,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                   child: Text(
                     _loadingComments
-                        ? 'Comments'
+                        ? AppLocalizations.of(context).commentsTitle
                         : 'Comments${_comments.isEmpty ? '' : ' (${_comments.length})'}',
                     style: TextStyle(
                       color: isLight ? Colors.black : Colors.white,
@@ -3253,7 +3267,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                     child: Text(
-                      widget.attendEnabled ? 'No comments yet.\nBe the first!' : 'No comments yet.',
+                      widget.attendEnabled ? AppLocalizations.of(context).noCommentsBeFirst : AppLocalizations.of(context).noCommentsYet,
                       style: TextStyle(
                         color: isLight ? const Color(0xff8b95a3) : const Color(0xffb3b3b3),
                         height: 1.6,
@@ -3433,8 +3447,8 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                             cursorColor: isLight ? Colors.black : Colors.white,
                             decoration: InputDecoration(
                               hintText: _replyingTo != null
-                                  ? 'Reply to @${_replyingTo!.author}...'
-                                  : 'Add a comment...',
+                                  ? AppLocalizations.of(context).replyToHint(_replyingTo!.author)
+                                  : AppLocalizations.of(context).addCommentHint,
                               hintStyle: TextStyle(
                                 color: isLight ? const Color(0xff8b95a3) : const Color(0xff9a9a9a),
                                 fontSize: 14,
@@ -3889,13 +3903,13 @@ class _FriendsAttendingSheetState extends State<_FriendsAttendingSheet> {
 
     Widget body;
     if (_error) {
-      body = const Center(child: Text('Could not load.', style: TextStyle(color: Color(0xffb3b3b3))));
+      body = Center(child: Text(AppLocalizations.of(context).couldNotLoad, style: const TextStyle(color: Color(0xffb3b3b3))));
     } else if (_friends == null) {
       body = const Center(child: CircularProgressIndicator());
     } else if (_friends!.isEmpty) {
-      body = const Center(
-        child: Text('None of your friends are going yet.',
-            style: TextStyle(color: Color(0xffb3b3b3))),
+      body = Center(
+        child: Text(AppLocalizations.of(context).noFriendsGoing,
+            style: const TextStyle(color: Color(0xffb3b3b3))),
       );
     } else {
       body = ListView.builder(
@@ -3942,7 +3956,7 @@ class _FriendsAttendingSheetState extends State<_FriendsAttendingSheet> {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
           child: Text(
-            'Friends going',
+            AppLocalizations.of(context).friendsGoing,
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: textColor),
           ),
         ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import 'post_card.dart' show decodeAvatarUrl;
 
 /// The Flutter-rendered bottom nav bar used on Android and pre-iOS26 devices
@@ -24,6 +25,7 @@ class LegacyNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final avatarBytes = decodeAvatarUrl(avatarUrl);
     final activeColor = isLight ? Colors.black : Colors.white;
     final imageProvider = avatarBytes != null ? MemoryImage(avatarBytes) : null;
@@ -88,30 +90,30 @@ class LegacyNavBar extends StatelessWidget {
           unselectedFontSize: 0,
           onTap: onTap,
           items: [
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home_rounded),
-              label: 'Home',
+            BottomNavigationBarItem(
+              icon: const Icon(Icons.home_outlined),
+              activeIcon: const Icon(Icons.home_rounded),
+              label: l10n.navHome,
             ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.search_outlined),
-              activeIcon: Icon(Icons.search_rounded),
-              label: 'Search',
+            BottomNavigationBarItem(
+              icon: const Icon(Icons.search_outlined),
+              activeIcon: const Icon(Icons.search_rounded),
+              label: l10n.navSearch,
             ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.add_circle_outline_rounded),
-              activeIcon: Icon(Icons.add_circle_rounded),
-              label: 'Create',
+            BottomNavigationBarItem(
+              icon: const Icon(Icons.add_circle_outline_rounded),
+              activeIcon: const Icon(Icons.add_circle_rounded),
+              label: l10n.navCreate,
             ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.map_outlined),
-              activeIcon: Icon(Icons.map_rounded),
-              label: 'Map',
+            BottomNavigationBarItem(
+              icon: const Icon(Icons.map_outlined),
+              activeIcon: const Icon(Icons.map_rounded),
+              label: l10n.navMap,
             ),
             BottomNavigationBarItem(
               icon: profileIcon(active: false),
               activeIcon: profileIcon(active: true),
-              label: 'Profile',
+              label: l10n.navProfile,
             ),
           ],
         ),
