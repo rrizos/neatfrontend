@@ -241,9 +241,6 @@ class AppLocalizationsEl extends AppLocalizations {
       'Αυτό θα διαγράψει οριστικά τον λογαριασμό σου και όλα όσα περιέχει — το προφίλ, τις δημοσιεύσεις, τα events και τα μηνύματά σου. Η ενέργεια δεν μπορεί να αναιρεθεί.';
 
   @override
-  String get feedTabFollowing => 'Ακολουθείτε';
-
-  @override
   String get viralOtherCities => 'Άλλες πόλεις';
 
   @override
@@ -508,7 +505,7 @@ class AppLocalizationsEl extends AppLocalizations {
   String get likesTitle => 'Μου αρέσει';
 
   @override
-  String get following => 'Ακολουθείς';
+  String get following => 'Ακολουθείτε';
 
   @override
   String get followBack => 'Ακολούθησε κι εσύ';
@@ -658,11 +655,6 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get tryDifferentSearch => 'Δοκίμασε διαφορετικό όρο αναζήτησης.';
-
-  @override
-  String neatPts(int score) {
-    return '$score πόντοι neat';
-  }
 
   @override
   String get notificationsTitle => 'Ειδοποιήσεις';
@@ -857,7 +849,7 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String followingTitle(int count) {
-    return '$count Ακολουθείς';
+    return '$count Ακολουθείτε';
   }
 
   @override

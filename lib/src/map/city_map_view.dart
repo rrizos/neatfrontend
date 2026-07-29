@@ -722,7 +722,7 @@ class _CityCard extends StatelessWidget {
   Widget _placeholder() {
     return const ColoredBox(
       color: Color(0xff1e1f21),
-      child: NeatLoader(size: 52),
+      child: NeatLoader(size: 52, color: Colors.white),
     );
   }
 

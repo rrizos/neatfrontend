@@ -390,7 +390,11 @@ class _MessagesPageState extends State<MessagesPage> {
       ),
       builder: (_) => FractionallySizedBox(
         heightFactor: 0.92,
-        child: _NewMessageSheet(suggestedUsers: widget.suggestedUsers),
+        child: _NewMessageSheet(
+          suggestedUsers: widget.suggestedUsers,
+          token: widget.token,
+          currentUsername: widget.currentUsername,
+        ),
       ),
     );
     if (username == null || username.isEmpty) return;
@@ -934,8 +938,14 @@ class _SearchField extends StatelessWidget {
 // ─── New message sheet ────────────────────────────────────────────────────────
 
 class _NewMessageSheet extends StatefulWidget {
-  const _NewMessageSheet({required this.suggestedUsers});
+  const _NewMessageSheet({
+    required this.suggestedUsers,
+    required this.token,
+    required this.currentUsername,
+  });
   final List<UserProfile> suggestedUsers;
+  final String token;
+  final String currentUsername;
 
   @override
   State<_NewMessageSheet> createState() => _NewMessageSheetState();
@@ -943,9 +953,82 @@ class _NewMessageSheet extends StatefulWidget {
 
 class _NewMessageSheetState extends State<_NewMessageSheet> {
   final _ctrl = TextEditingController();
+  Timer? _debounce;
+  String _query = '';
+  List<UserProfile> _remote = [];
+  bool _loading = false;
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _debounce?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String value) {
+    final query = value.trim();
+    _debounce?.cancel();
+    setState(() {
+      _query = query;
+      if (query.isEmpty) {
+        _remote = [];
+        _loading = false;
+      } else {
+        _loading = true;
+      }
+    });
+    if (query.isEmpty) return;
+    // Short enough to feel live, long enough not to fire a request per
+    // keystroke. Matches already-known people show instantly meanwhile.
+    _debounce = Timer(const Duration(milliseconds: 250), () => _search(query));
+  }
+
+  Future<void> _search(String query) async {
+    try {
+      final res = await http.get(
+        searchUsersEndpoint(query),
+        headers: authGetHeaders(widget.token),
+      );
+      // A slower earlier request must not overwrite a newer query's results.
+      if (!mounted || _query != query) return;
+      if (res.statusCode != 200) {
+        setState(() => _loading = false);
+        return;
+      }
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final users = (decoded['users'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(UserProfile.fromJson)
+          .toList();
+      setState(() {
+        _remote = users;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted && _query == query) setState(() => _loading = false);
+    }
+  }
+
+  /// People already known to the client first — they appear the instant a
+  /// character is typed — then whatever the server turns up, minus duplicates
+  /// and minus yourself.
+  List<UserProfile> get _results {
+    if (_query.isEmpty) return widget.suggestedUsers;
+    final query = _query.toLowerCase();
+    final me = widget.currentUsername.toLowerCase();
+    final local = widget.suggestedUsers.where((u) {
+      // Yourself is never a search result — you can't message yourself, and
+      // the exclusion has to happen here too, not only on the remote leg.
+      if (u.username.toLowerCase() == me) return false;
+      return u.username.toLowerCase().contains(query) ||
+          u.fullName.toLowerCase().contains(query);
+    }).toList();
+    final seen = {me, ...local.map((u) => u.username.toLowerCase())};
+    return [
+      ...local,
+      ..._remote.where((u) => seen.add(u.username.toLowerCase())),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -953,6 +1036,7 @@ class _NewMessageSheetState extends State<_NewMessageSheet> {
     final textClr  = isLight ? Colors.black : Colors.white;
     final subClr   = isLight ? _kSubLgt : _kSubDark;
     final divClr   = isLight ? _kDivLgt : _kDivDark;
+    final results  = _results;
 
     return SafeArea(
       child: Column(
@@ -999,7 +1083,7 @@ class _NewMessageSheetState extends State<_NewMessageSheet> {
                       final u = _ctrl.text.trim();
                       if (u.isNotEmpty) Navigator.of(context).pop(u);
                     },
-                    onChanged: (_) => setState(() {}),
+                    onChanged: _onChanged,
                     style: TextStyle(color: textClr, fontSize: 16),
                     cursorColor: _kBlue,
                     decoration: InputDecoration(
@@ -1015,16 +1099,32 @@ class _NewMessageSheetState extends State<_NewMessageSheet> {
             ),
           ),
           Divider(height: 1, color: divClr),
-          if (widget.suggestedUsers.isNotEmpty)
+          if (_query.isEmpty && widget.suggestedUsers.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
               child: Text(AppLocalizations.of(context).suggested, style: TextStyle(color: textClr, fontWeight: FontWeight.w700, fontSize: 15)),
             ),
+          if (_query.isNotEmpty && results.isEmpty)
+            Expanded(
+              child: Center(
+                child: _loading
+                    ? const CircularProgressIndicator(strokeWidth: 2)
+                    : Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                          AppLocalizations.of(context).noResultsFor(_query),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: subClr, fontSize: 15, height: 1.4),
+                        ),
+                      ),
+              ),
+            )
+          else
           Expanded(
             child: ListView.builder(
-              itemCount: widget.suggestedUsers.length,
+              itemCount: results.length,
               itemBuilder: (_, i) {
-                final u = widget.suggestedUsers[i];
+                final u = results[i];
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                   leading: _avatar(username: u.username, url: u.avatarUrl, radius: 22, isLight: isLight),

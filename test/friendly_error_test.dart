@@ -9,7 +9,7 @@ void main() {
           "(OS Error: nodename nor servname provided, or not known, errno = 8), "
           "uri=https://63.181.201.175/api/auth/login/";
       final msg = friendlyError(Exception(raw));
-      expect(msg, 'No internet connection. Please check your connection and try again.');
+      expect(msg, 'Δεν υπάρχει σύνδεση στο διαδίκτυο. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά.');
       expect(msg.contains('63.181.201.175'), isFalse);
       expect(msg.contains('api/auth'), isFalse);
     });
@@ -19,17 +19,17 @@ void main() {
           'SocketException: Connection refused (OS Error: Connection refused, errno = 61), '
           'address = 63.181.201.175, port = 443';
       expect(friendlyError(Exception(raw)),
-          'No internet connection. Please check your connection and try again.');
+          'Δεν υπάρχει σύνδεση στο διαδίκτυο. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά.');
     });
 
     test('web XMLHttpRequest failure reads as offline', () {
       expect(friendlyError(Exception('ClientException: XMLHttpRequest error.')),
-          'No internet connection. Please check your connection and try again.');
+          'Δεν υπάρχει σύνδεση στο διαδίκτυο. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά.');
     });
 
     test('timeout gets its own message', () {
       expect(friendlyError(Exception('TimeoutException after 0:00:30.000000')),
-          'The connection timed out. Please try again.');
+          'Έληξε ο χρόνος σύνδεσης. Δοκίμασε ξανά.');
     });
 
     test('server wording still reaches the user', () {
@@ -42,7 +42,7 @@ void main() {
           Exception('Something broke at https://63.181.201.175/api/posts/ for 10.0.0.5:8000'));
       expect(msg.contains('63.181.201.175'), isFalse);
       expect(msg.contains('10.0.0.5'), isFalse);
-      expect(msg.contains('the server'), isTrue);
+      expect(msg.contains('τον διακομιστή'), isTrue);
     });
   });
 }

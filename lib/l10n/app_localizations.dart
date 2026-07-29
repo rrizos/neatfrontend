@@ -524,12 +524,6 @@ abstract class AppLocalizations {
   /// **'This will permanently delete your account and everything in it — your profile, posts, events, and messages. This action cannot be undone.'**
   String get deleteAccountConfirm;
 
-  /// No description provided for @feedTabFollowing.
-  ///
-  /// In en, this message translates to:
-  /// **'Following'**
-  String get feedTabFollowing;
-
   /// No description provided for @viralOtherCities.
   ///
   /// In en, this message translates to:
@@ -1243,12 +1237,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Try a different search term.'**
   String get tryDifferentSearch;
-
-  /// No description provided for @neatPts.
-  ///
-  /// In en, this message translates to:
-  /// **'{score} neat pts'**
-  String neatPts(int score);
 
   /// No description provided for @notificationsTitle.
   ///

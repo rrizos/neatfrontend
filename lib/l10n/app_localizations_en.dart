@@ -238,9 +238,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'This will permanently delete your account and everything in it — your profile, posts, events, and messages. This action cannot be undone.';
 
   @override
-  String get feedTabFollowing => 'Following';
-
-  @override
   String get viralOtherCities => 'Other cities';
 
   @override
@@ -655,11 +652,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tryDifferentSearch => 'Try a different search term.';
-
-  @override
-  String neatPts(int score) {
-    return '$score neat pts';
-  }
 
   @override
   String get notificationsTitle => 'Notifications';

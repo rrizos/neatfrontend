@@ -77,7 +77,7 @@ const List<GreeceCity> greeceCities = [
     name: 'Καλαμάτα',
     latitude: 37.0389,
     longitude: 22.1142,
-    imageUrl: 'https://www.visitgreece.gr/files/s_1213403827_kalamata_1310x769.jpg',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/63/Kalamata.png/1280px-Kalamata.png',
   ),
   GreeceCity(
     name: 'Τρίκαλα',
@@ -113,7 +113,7 @@ const List<GreeceCity> greeceCities = [
     name: 'Λαμία',
     latitude: 38.8970,
     longitude: 22.4340,
-    imageUrl: 'https://desellada.gr/img/sight/lamia-square-parkou.jpg',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Eleftherias_square_in_Lamia.jpg/1280px-Eleftherias_square_in_Lamia.jpg',
   ),
   GreeceCity(
     name: 'Ξάνθη',
@@ -137,13 +137,13 @@ const List<GreeceCity> greeceCities = [
     name: 'Χαλκίδα',
     latitude: 38.4630,
     longitude: 23.6030,
-    imageUrl: 'https://www.discovergreece.com/sites/default/files/styles/og_image/public/2019-11/1_below-the-old-bridge-linking-chalkida-with-the-mainland-youll-witness-something-that-happens-nowhere-else-in-the-world.jpg',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/42/%CE%A7%CE%B1%CE%BB%CE%BA%CE%AF%CE%B4%CE%B1_0067.jpg/1280px-%CE%A7%CE%B1%CE%BB%CE%BA%CE%AF%CE%B4%CE%B1_0067.jpg',
   ),
   GreeceCity(
     name: 'Πύργος',
     latitude: 37.6751,
     longitude: 21.4414,
-    imageUrl: 'https://youingreece.com/img/destination/pyrgos.jpg',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/11/Dimotiki_agora_Pyrgos01.jpg/1280px-Dimotiki_agora_Pyrgos01.jpg',
   ),
   GreeceCity(
     name: 'Τρίπολη',
@@ -173,7 +173,7 @@ const List<GreeceCity> greeceCities = [
     name: 'Φλώρινα',
     latitude: 40.7812,
     longitude: 21.4099,
-    imageUrl: 'https://www.visitgreece.gr/files/s_1554872486_florina_767x738.jpg',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/db/%CE%97_%CF%80%CF%8C%CE%BB%CE%B7_%CF%84%CE%B7%CF%82_%CE%A6%CE%BB%CF%8E%CF%81%CE%B9%CE%BD%CE%B1%CF%82.jpg/1280px-%CE%97_%CF%80%CF%8C%CE%BB%CE%B7_%CF%84%CE%B7%CF%82_%CE%A6%CE%BB%CF%8E%CF%81%CE%B9%CE%BD%CE%B1%CF%82.jpg',
   ),
   GreeceCity(
     name: 'Έδεσσα',
@@ -197,7 +197,7 @@ const List<GreeceCity> greeceCities = [
     name: 'Γρεβενά',
     latitude: 40.0833,
     longitude: 21.4333,
-    imageUrl: 'https://www.explorerides.com/wp-content/uploads/2024/11/grevena-jpg.webp',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/0/02/%CE%A0%CE%BB%CE%B1%CF%84%CE%B5%CE%AF%CE%B1_%CE%91%CE%B9%CE%BC%CE%B9%CE%BB%CE%B9%CE%B1%CE%BD%CE%BF%CF%8D_%CE%93%CF%81%CE%B5%CE%B2%CE%B5%CE%BD%CF%8E%CE%BD.jpg',
   ),
   GreeceCity(
     name: 'Αίγινα',
@@ -377,7 +377,7 @@ const List<GreeceCity> greeceCities = [
     name: 'Μήλος',
     latitude: 36.7230,
     longitude: 24.4520,
-    imageUrl: 'https://www.visitgreece.gr/files/i_1225938906_milos-mandrakia_1310x769.jpg',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f1/Milos-2.jpg/1280px-Milos-2.jpg',
   ),
   GreeceCity(
     name: 'Κάρπαθος',

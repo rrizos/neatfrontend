@@ -176,6 +176,16 @@ import UIKit
                     self?.nativeTabBar?.isHidden = false
                 }
                 result(nil)
+            case "isNativeTabBarReady":
+                // Flutter pulls this on startup instead of relying solely on
+                // the nativeTabBarReady push below. The push fires once, at
+                // engine init — long before HomePage exists on a fresh
+                // sign-up, so a listener that registers later would never
+                // hear it and the app would fall back to Flutter's own bar
+                // until the next launch.
+                DispatchQueue.main.async {
+                    result(self?.nativeTabBar != nil)
+                }
             case "setProfileImage":
                 let args = call.arguments as? [String: Any]
                 if let typedData = args?["bytes"] as? FlutterStandardTypedData {

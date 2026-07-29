@@ -107,17 +107,9 @@ class _HomePageState extends State<HomePage> {
   late final RealtimeService _realtime = RealtimeService(token: widget.session.token);
   StreamSubscription<RealtimeEvent>? _realtimeBadgeSub;
 
-  static bool _detectIOS26() {
-    if (kIsWeb || !Platform.isIOS) return false;
-    final major = int.tryParse(
-        Platform.operatingSystemVersion.split('.').first) ?? 0;
-    return major >= 26;
-  }
-
   @override
   void initState() {
     super.initState();
-    _isIOS26 = _detectIOS26();
     _setupNativeTabChannel();
     // Paint last-known posts instantly instead of a blank spinner while the
     // network round-trip for fresh ones is still in flight.
@@ -160,14 +152,40 @@ class _HomePageState extends State<HomePage> {
         case 'onTabTapped':
           _onNavTap(call.arguments as int);
         case 'nativeTabBarReady':
-          // Native iOS 26 tab bar is live — switch Flutter layout to placeholder and show bar.
-          if (mounted) {
-            if (!_isIOS26) setState(() => _isIOS26 = true);
-            _kTabChannel.invokeMethod('showTabBar');
-            _syncNativeProfileIcon();
-          }
+          // The bar came up after this screen did — the ordering on a warm
+          // start with a restored session.
+          _adoptNativeTabBar();
       }
     });
+    // ...and the other ordering: the bar was built at engine init, which is
+    // what happens when the user signs up or logs in, because HomePage only
+    // exists minutes later. That push is long gone, so ask instead of wait —
+    // otherwise the native bar stays hidden and Flutter draws its own until
+    // the app is relaunched.
+    unawaited(_askForNativeTabBar());
+  }
+
+  Future<void> _askForNativeTabBar() async {
+    if (kIsWeb || !Platform.isIOS) return;
+    try {
+      final ready = await _kTabChannel.invokeMethod<bool>('isNativeTabBarReady');
+      if (ready == true) _adoptNativeTabBar();
+    } on PlatformException catch (_) {
+      // Pre-iOS 26: the channel exists but the handler doesn't. Flutter's own
+      // bar stays, which is the correct outcome there.
+    } on MissingPluginException catch (_) {
+      // Android and older builds — same story.
+    }
+  }
+
+  /// Hands the bottom bar over to the native one: Flutter's own is replaced by
+  /// a placeholder, and the native bar is unhidden unless something on screen
+  /// is deliberately holding it down.
+  void _adoptNativeTabBar() {
+    if (!mounted) return;
+    if (!_isIOS26) setState(() => _isIOS26 = true);
+    if (_navBarHideCount == 0) _kTabChannel.invokeMethod('showTabBar');
+    _syncNativeProfileIcon();
   }
 
   @override
@@ -2545,7 +2563,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
                             height: 52,
                             child: Center(
                               child: Text(
-                                AppLocalizations.of(context).feedTabFollowing,
+                                AppLocalizations.of(context).following,
                                 style: TextStyle(
                                   color: followingClr,
                                   fontSize: 17,
@@ -2640,6 +2658,9 @@ class _ViralViewState extends State<_ViralView> {
   List<FeedPost> _viralPosts = [];
   bool _loadingViral = true;
   _ViralPeriod _period = _ViralPeriod.weekly;
+  // True when [_period] was reached by widening past an empty window rather
+  // than chosen by the user.
+  bool _periodAutoWidened = false;
 
   // ── Search ─────────────────────────────────────────────────────────────────
   bool _searchActive = false;
@@ -2684,42 +2705,75 @@ class _ViralViewState extends State<_ViralView> {
     super.dispose();
   }
 
-  // Only used to render the "N neat pts" badge on the (at most 10) already-
-  // ranked posts the server returns — ranking/filtering itself happens
-  // server-side now (see viral_posts in posts/views.py), instead of
-  // downloading the whole city feed and sorting it locally on every load.
+  // Orders the (at most 10) already-ranked posts the server returns; the
+  // number itself is never shown. Ranking/filtering happens server-side (see
+  // viral_posts in posts/views.py) instead of downloading the whole city feed
+  // and sorting it locally on every load.
   double _score(FeedPost p) => (p.likes * 0.33 + p.commentCount * 0.33 + p.shares * 0.33) * 100;
 
   String get _homeCity => widget.currentUser.city;
 
-  String get _periodParam => switch (_period) {
+  String _paramFor(_ViralPeriod period) => switch (period) {
         _ViralPeriod.daily => 'daily',
         _ViralPeriod.weekly => 'weekly',
         _ViralPeriod.monthly => 'monthly',
       };
 
-  Future<void> _loadViral() async {
-    if (mounted) setState(() => _loadingViral = true);
+  /// The next window out, or null at the widest one.
+  _ViralPeriod? _widerThan(_ViralPeriod period) => switch (period) {
+        _ViralPeriod.daily => _ViralPeriod.weekly,
+        _ViralPeriod.weekly => _ViralPeriod.monthly,
+        _ViralPeriod.monthly => null,
+      };
+
+  Future<List<FeedPost>?> _fetchViral(_ViralPeriod period) async {
+    final param = _paramFor(period);
     try {
       final res = await http.get(
         _scope == _ViralScope.myCity
-            ? viralPostsEndpoint(city: _homeCity, period: _periodParam)
-            : viralPostsEndpoint(excludeCity: _homeCity, period: _periodParam),
+            ? viralPostsEndpoint(city: _homeCity, period: param)
+            : viralPostsEndpoint(excludeCity: _homeCity, period: param),
         headers: authGetHeaders(widget.token),
       );
+      if (res.statusCode != 200) return null;
+      return await compute(_parseFeedPosts, res.body);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Loads the charts, widening the window until something comes back.
+  ///
+  /// A quiet city has no posts today and an empty "daily" chart is a dead end,
+  /// so daily falls back to weekly and weekly to monthly rather than showing
+  /// nothing. Only the widening is automatic — an explicit pick from the menu
+  /// clears [_periodAutoWidened] and is honoured as the starting point.
+  Future<void> _loadViral() async {
+    if (mounted) setState(() => _loadingViral = true);
+    // A previously auto-widened period must not stick: a refresh, or switching
+    // scope, deserves a fresh look at today first.
+    var period = _periodAutoWidened ? _ViralPeriod.daily : _period;
+    var widened = false;
+    while (true) {
+      final posts = await _fetchViral(period);
       if (!mounted) return;
-      if (res.statusCode != 200) {
+      if (posts == null) {
+        // Request failed — leave the current period alone and stop.
         setState(() => _loadingViral = false);
         return;
       }
-      final posts = await compute(_parseFeedPosts, res.body);
-      if (!mounted) return;
-      setState(() {
-        _viralPosts = posts;
-        _loadingViral = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _loadingViral = false);
+      final wider = posts.isEmpty ? _widerThan(period) : null;
+      if (wider == null) {
+        setState(() {
+          _period = period;
+          _periodAutoWidened = widened;
+          _viralPosts = posts;
+          _loadingViral = false;
+        });
+        return;
+      }
+      period = wider;
+      widened = true;
     }
   }
 
@@ -2911,7 +2965,10 @@ class _ViralViewState extends State<_ViralView> {
                             PopupMenuButton<_ViralPeriod>(
                               onSelected: (p) {
                                 if (_period == p) return;
-                                setState(() => _period = p);
+                                setState(() {
+                                  _period = p;
+                                  _periodAutoWidened = false;
+                                });
                                 _loadViral();
                               },
                               offset: const Offset(0, 32),
@@ -3029,10 +3086,8 @@ class _ViralViewState extends State<_ViralView> {
         itemBuilder: (_, i) {
           final post = sortedPosts[i];
           final rank = i + 1;
-          final score = _score(post);
           final isTop3 = rank <= 3;
           final mc = isTop3 ? _mc(rank) : null;
-          final scoreStr = AppLocalizations.of(context).neatPts(score.toInt());
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -3046,8 +3101,6 @@ class _ViralViewState extends State<_ViralView> {
                   child: Row(
                     children: [
                       Text('#$rank', style: TextStyle(color: mc, fontSize: 19, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
-                      const Spacer(),
-                      Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: mc.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)), child: Text(scoreStr, style: TextStyle(color: mc, fontSize: 12, fontWeight: FontWeight.w700))),
                     ],
                   ),
                 )
@@ -3057,8 +3110,6 @@ class _ViralViewState extends State<_ViralView> {
                   child: Row(
                     children: [
                       Text('#$rank', style: TextStyle(color: isLight ? const Color(0xffb8c0cc) : const Color(0xff4a5568), fontSize: 13, fontWeight: FontWeight.w800)),
-                      const Spacer(),
-                      Text(scoreStr, style: TextStyle(color: isLight ? const Color(0xffb8c0cc) : const Color(0xff4a5568), fontSize: 12)),
                     ],
                   ),
                 ),
@@ -4920,16 +4971,10 @@ class _CommentSheetState extends State<_CommentSheet> {
                   ),
                 if (imgBytes != null) ...[
                   const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.memory(imgBytes, width: double.infinity, fit: BoxFit.cover),
-                  ),
+                  _CommentPhoto(bytes: imgBytes),
                 ] else if (isNetworkImg) ...[
                   const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(c.imageUrl, width: double.infinity, fit: BoxFit.cover),
-                  ),
+                  _CommentPhoto(url: c.imageUrl),
                 ],
                 const SizedBox(height: 6),
                 Row(
@@ -5398,5 +5443,109 @@ class _OfflineBanner extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Comment photo
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A photo attached to a comment, sized the way TikTok sizes them.
+///
+/// The thumbnail keeps its aspect ratio inside a fixed box rather than filling
+/// the comment's width, so a portrait shot — which used to render at full
+/// width and whatever height that implied — can't swallow the thread. Tapping
+/// opens the full image.
+class _CommentPhoto extends StatelessWidget {
+  const _CommentPhoto({this.bytes, this.url});
+
+  final Uint8List? bytes;
+  final String? url;
+
+  // Both caps apply, and RenderImage fits the picture inside them without
+  // distorting it: a landscape photo ends up 168 wide, a portrait one 210 tall.
+  static const double _maxWidth = 168;
+  static const double _maxHeight = 210;
+
+  @override
+  Widget build(BuildContext context) {
+    // Decoding a full-resolution photo just to draw it at thumbnail size is
+    // what makes a comment thread with a few pictures expensive.
+    final cacheWidth =
+        (_maxWidth * MediaQuery.devicePixelRatioOf(context)).round();
+    final Widget? thumb = bytes != null
+        ? Image.memory(bytes!, cacheWidth: cacheWidth, gaplessPlayback: true)
+        : (url != null && url!.isNotEmpty
+            ? Image.network(url!, cacheWidth: cacheWidth, gaplessPlayback: true)
+            : null);
+    if (thumb == null) return const SizedBox.shrink();
+
+    return GestureDetector(
+      onTap: () => _openFullscreen(context),
+      // Align both anchors the thumbnail left and — the part that matters —
+      // hands the ConstrainedBox loose constraints. A parent that sizes its
+      // children to a tight width (a ListView, a stretched Column) would
+      // otherwise override maxWidth entirely and the cap would do nothing.
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: _maxWidth,
+            maxHeight: _maxHeight,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: thumb,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openFullscreen(BuildContext context) {
+    final full = bytes != null
+        ? Image.memory(bytes!, fit: BoxFit.contain)
+        : Image.network(url!, fit: BoxFit.contain);
+    Navigator.of(context).push(PageRouteBuilder<void>(
+      opaque: false,
+      pageBuilder: (ctx, animation, secondaryAnimation) {
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            children: [
+              GestureDetector(
+                onTap: () => Navigator.of(ctx).pop(),
+                child: Center(
+                  child: InteractiveViewer(
+                    minScale: 0.5,
+                    maxScale: 4,
+                    child: SizedBox(
+                      width: MediaQuery.of(ctx).size.width,
+                      height: MediaQuery.of(ctx).size.height,
+                      child: full,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: MediaQuery.of(ctx).padding.top + 12,
+                right: 16,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(ctx).pop(),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: const Icon(Icons.close, color: Colors.white, size: 22),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ));
   }
 }

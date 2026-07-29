@@ -9,9 +9,15 @@ import 'package:flutter/material.dart';
 /// placeholders, where many loaders can be on screen at once (each would need
 /// its own controller); those keep a plain spinner.
 class NeatLoader extends StatefulWidget {
-  const NeatLoader({super.key, this.size = 68});
+  const NeatLoader({super.key, this.size = 68, this.color});
 
   final double size;
+
+  /// Overrides the tint. The logo asset is white, so by default it is painted
+  /// in the theme's foreground — black on the light scaffold, where an
+  /// untinted white logo was simply invisible. Pass this only for surfaces
+  /// that stay dark regardless of theme, such as the city card.
+  final Color? color;
 
   @override
   State<NeatLoader> createState() => _NeatLoaderState();
@@ -37,6 +43,10 @@ class _NeatLoaderState extends State<NeatLoader>
   Widget build(BuildContext context) {
     final decodeWidth =
         (widget.size * MediaQuery.devicePixelRatioOf(context)).round();
+    final tint = widget.color ??
+        (Theme.of(context).brightness == Brightness.light
+            ? Colors.black
+            : Colors.white);
     return Center(
       child: FadeTransition(
         opacity: Tween<double>(begin: 0.45, end: 1.0).animate(_curve),
@@ -47,6 +57,8 @@ class _NeatLoaderState extends State<NeatLoader>
             width: widget.size,
             height: widget.size,
             cacheWidth: decodeWidth,
+            color: tint,
+            colorBlendMode: BlendMode.srcIn,
           ),
         ),
       ),
