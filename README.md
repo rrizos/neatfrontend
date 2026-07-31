@@ -45,7 +45,15 @@ The plain-text format is load-bearing: first line is the document title,
 second is the "last updated" line, then numbered `1. HEADING` sections whose
 bodies are paragraphs and `•` bullets.
 
-`landing/brand/og-default.png` is the social card shown for posts without an
-image of their own. It is committed; regenerate it with
-`python3 landing/generate_og_default.py` (needs Pillow) after a logo or tagline
-change.
+Two image sets are generated from `landing/brand/logo-dark.png` and committed
+rather than built each time. Both need Pillow; re-run them after a logo change:
+
+```sh
+python3 landing/generate_og_default.py   # landing/brand/og-default.png — the
+                                         # social card for posts with no image
+python3 tools/generate_web_icons.py      # web/favicon.png + web/icons/* — the
+                                         # browser tab and PWA icons
+```
+
+The mark is a near-white script "n" on transparency, so the icons put it on the
+brand's dark paper; left bare it would vanish against a light browser tab.
