@@ -26,26 +26,37 @@ export default async (request, context) => {
   const description = `@${post.author} on Neat${post.city ? ' · ' + post.city : ''}`;
   const ogImage = `${url.origin}/post/${postId}/og-image`;
 
+  // No og:image:width/height — the endpoint serves the post's own photo when
+  // it has one, so the dimensions vary; crawlers read them off the image.
   const tags = `
   <meta property="og:type" content="article" />
   <meta property="og:site_name" content="Neat" />
+  <meta property="og:locale" content="el_GR" />
   <meta property="og:title" content="${esc(title)}" />
   <meta property="og:description" content="${esc(description)}" />
   <meta property="og:image" content="${ogImage}" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
   <meta property="og:url" content="${esc(url.toString())}" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${esc(title)}" />
   <meta name="twitter:description" content="${esc(description)}" />
-  <meta name="twitter:image" content="${ogImage}" />`;
+  <meta name="twitter:image" content="${ogImage}" />
+  <meta name="description" content="${esc(description)}" />
+  <title>${esc(title)}</title>`;
 
-  const indexRes = await context.next();
-  const html = await indexRes.text();
+  // Ask for the Flutter shell by name rather than relying on context.next()
+  // picking up the SPA rewrite — `/` is the landing page now, so the shell has
+  // to be addressed explicitly.
+  const shellRes = await fetch(`${url.origin}/app.html`);
+  if (!shellRes.ok) return context.next();
+
+  // Drop the shell's own generic <title>/<meta description> so the post's win.
+  const html = (await shellRes.text())
+    .replace(/\n?\s*<title>[^<]*<\/title>/, '')
+    .replace(/\n?\s*<meta name="description"[^>]*>/, '');
   const injected = html.replace('</head>', `${tags}\n</head>`);
 
   return new Response(injected, {
-    status: indexRes.status,
+    status: 200,
     headers: { 'content-type': 'text/html; charset=utf-8' },
   });
 };

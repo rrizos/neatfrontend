@@ -562,6 +562,9 @@ class AppLocalizationsEl extends AppLocalizations {
   String get couldNotLoadPost => 'Δεν ήταν δυνατή η φόρτωση της δημοσίευσης';
 
   @override
+  String get couldNotOpenLink => 'Δεν ήταν δυνατό το άνοιγμα του συνδέσμου';
+
+  @override
   String get openInApp => 'Άνοιγμα στην εφαρμογή';
 
   @override

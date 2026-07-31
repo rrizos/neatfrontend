@@ -18,6 +18,11 @@ const String webBaseUrl = String.fromEnvironment(
   defaultValue: 'https://neatapp.gr',
 );
 
+// The web app and the marketing site share one origin: `/` is the landing
+// page, so the app itself is entered at `/app`. Shared post links
+// (`/post/<id>`) land on the app too — see netlify.toml.
+const String webAppPath = '/app';
+
 Uri postDetailEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/');
 
 Uri postsEndpoint({bool fresh = false, String? city}) {

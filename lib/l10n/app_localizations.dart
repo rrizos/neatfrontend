@@ -1094,6 +1094,12 @@ abstract class AppLocalizations {
   /// **'Could not load post'**
   String get couldNotLoadPost;
 
+  /// No description provided for @couldNotOpenLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the link'**
+  String get couldNotOpenLink;
+
   /// No description provided for @openInApp.
   ///
   /// In en, this message translates to:

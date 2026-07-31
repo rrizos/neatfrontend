@@ -559,6 +559,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get couldNotLoadPost => 'Could not load post';
 
   @override
+  String get couldNotOpenLink => 'Could not open the link';
+
+  @override
   String get openInApp => 'Open in app';
 
   @override

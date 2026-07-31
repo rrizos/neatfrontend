@@ -4,7 +4,7 @@ import '../core/http_client.dart' as http;
 import '../../l10n/app_localizations.dart';
 import '../app.dart';
 import '../core/api.dart';
-import '../legal/legal_page.dart';
+import '../core/legal_links.dart';
 import 'blocked_accounts_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -78,34 +78,14 @@ class SettingsPage extends StatelessWidget {
               icon: Icons.description_outlined,
               label: l10n.termsOfService,
               isLight: isLight,
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => LegalPage(
-                    title: 'Terms of Service',
-                    body: termsOfServiceText,
-                    titleEl: termsOfServiceTitleEl,
-                    bodyEl: termsOfServiceTextEl,
-                    themeMode: themeMode,
-                  ),
-                ),
-              ),
+              onTap: () => openTermsOfService(context),
             ),
             Divider(height: 1, color: divider),
             _SettingsRow(
               icon: Icons.privacy_tip_outlined,
               label: l10n.privacyPolicy,
               isLight: isLight,
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => LegalPage(
-                    title: 'Privacy Policy',
-                    body: privacyPolicyText,
-                    titleEl: privacyPolicyTitleEl,
-                    bodyEl: privacyPolicyTextEl,
-                    themeMode: themeMode,
-                  ),
-                ),
-              ),
+              onTap: () => openPrivacyPolicy(context),
             ),
             const SizedBox(height: 28),
             _SectionHeader(label: l10n.account, color: sectionColor),

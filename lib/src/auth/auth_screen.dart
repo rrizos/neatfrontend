@@ -8,7 +8,7 @@ import '../core/http_client.dart' as http;
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/models.dart';
-import '../legal/legal_page.dart';
+import '../core/legal_links.dart';
 import '../map/city_map_view.dart';
 import 'city_setup_page.dart';
 import 'forgot_password_screen.dart';
@@ -57,28 +57,8 @@ unawaited(prewarmCityMap(homeCity: '', isDark: Theme.of(context).brightness == B
 @override
 void initState() {
 super.initState();
-_termsRecognizer.onTap = () => Navigator.of(context).push(
-  MaterialPageRoute(
-    builder: (_) => LegalPage(
-      title: 'Terms of Service',
-      body: termsOfServiceText,
-      titleEl: termsOfServiceTitleEl,
-      bodyEl: termsOfServiceTextEl,
-      themeMode: widget.themeMode,
-    ),
-  ),
-);
-_privacyRecognizer.onTap = () => Navigator.of(context).push(
-  MaterialPageRoute(
-    builder: (_) => LegalPage(
-      title: 'Privacy Policy',
-      body: privacyPolicyText,
-      titleEl: privacyPolicyTitleEl,
-      bodyEl: privacyPolicyTextEl,
-      themeMode: widget.themeMode,
-    ),
-  ),
-);
+_termsRecognizer.onTap = () => openTermsOfService(context);
+_privacyRecognizer.onTap = () => openPrivacyPolicy(context);
 }
 
 @override

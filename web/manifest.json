@@ -1,11 +1,11 @@
 {
     "name": "neat",
     "short_name": "neat",
-    "start_url": ".",
+    "start_url": "/app",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Μία εφαρμογή, τα πάντα για την περιοχή σου.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

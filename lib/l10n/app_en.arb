@@ -198,6 +198,7 @@
 
   "postNotFound": "Post not found",
   "couldNotLoadPost": "Could not load post",
+  "couldNotOpenLink": "Could not open the link",
   "openInApp": "Open in app",
   "noCommentsYet": "No comments yet",
   "commentsCount": "{count, plural, =1{1 comment} other{{count} comments}}",

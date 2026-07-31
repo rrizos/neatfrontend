@@ -149,8 +149,9 @@ class _OpenInAppBtn extends StatelessWidget {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
       return;
     }
-    // Fallback: open web app root (user is already on web, so just go home)
-    await launchUrl(Uri.base.replace(path: '/'), mode: LaunchMode.platformDefault);
+    // Fallback: open the web app. `/` is the marketing landing page — the app
+    // itself lives at /app.
+    await launchUrl(Uri.base.replace(path: webAppPath), mode: LaunchMode.platformDefault);
   }
 
   @override

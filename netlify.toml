@@ -1,3 +1,16 @@
+# neatapp.gr serves three things from one origin, so a shared post link
+# (https://neatapp.gr/post/123) previews and opens without an `app.` hop:
+#
+#   /                 → the marketing landing page   (landing/index.html)
+#   /privacy, /terms  → the legal pages              (landing/*.html)
+#   everything else   → the Flutter web app          (app.html + build assets)
+#
+# The publish directory is assembled by tools/build_web.sh.
+
+[build]
+  publish = "build/netlify"
+  edge_functions = "netlify/edge-functions"
+
 [[edge_functions]]
   path = "/post/:id/og-image"
   function = "og-image"
@@ -19,6 +32,19 @@
   force = true
 
 [[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 200
+
+[[redirects]]
+  from = "/terms"
+  to = "/terms.html"
+  status = 200
+
+# SPA fallback: /app, /post/:id and every other in-app route load the Flutter
+# shell. `/` is not caught by this — index.html (the landing page) is a real
+# file, and Netlify serves matching files before applying rewrites.
+[[redirects]]
   from = "/*"
-  to = "/index.html"
+  to = "/app.html"
   status = 200

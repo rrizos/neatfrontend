@@ -178,6 +178,7 @@
 
   "postNotFound": "Η δημοσίευση δεν βρέθηκε",
   "couldNotLoadPost": "Δεν ήταν δυνατή η φόρτωση της δημοσίευσης",
+  "couldNotOpenLink": "Δεν ήταν δυνατό το άνοιγμα του συνδέσμου",
   "openInApp": "Άνοιγμα στην εφαρμογή",
   "noCommentsYet": "Κανένα σχόλιο ακόμη",
   "commentsCount": "{count, plural, =1{1 σχόλιο} other{{count} σχόλια}}",
