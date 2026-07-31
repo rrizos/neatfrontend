@@ -551,7 +551,10 @@ class _PostPreview extends StatelessWidget {
     final muted = isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af);
     final bg = isLight ? const Color(0xfff9fafb) : const Color(0xff1c1c1e);
     final border = isLight ? const Color(0xffe5e7eb) : const Color(0xff2a2a2a);
-    final bytes = post.imageUrl.isNotEmpty ? _dataUrlBytes(post.imageUrl) : null;
+    // Prefer the media array URL (real network URL); fall back to imageUrl.
+    final mediaUrl = post.media.isNotEmpty ? post.media.first.url : '';
+    final rawUrl = mediaUrl.isNotEmpty ? mediaUrl : post.imageUrl;
+    final bytes = rawUrl.isNotEmpty ? _dataUrlBytes(rawUrl) : null;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -581,7 +584,7 @@ class _PostPreview extends StatelessWidget {
               ],
             ),
           ),
-          if (post.imageUrl.isNotEmpty) ...[
+          if (rawUrl.isNotEmpty) ...[
             const SizedBox(width: 10),
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
@@ -590,11 +593,12 @@ class _PostPreview extends StatelessWidget {
                 child: bytes != null
                     ? Image.memory(bytes, fit: BoxFit.cover, cacheWidth: 144)
                     : CachedNetworkImage(
-                        imageUrl: post.imageUrl,
+                        imageUrl: rawUrl,
                         cacheManager: imageCacheManager,
                         fit: BoxFit.cover,
                         memCacheWidth: 144, // 48 logical px × 3.0 max DPR
                         fadeInDuration: Duration.zero,
+                        errorWidget: (_, _, _) => const SizedBox.shrink(),
                       ),
               ),
             ),

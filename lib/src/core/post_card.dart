@@ -1338,7 +1338,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                     OutlinedButton(
                       onPressed: widget.isFollowing ? widget.onUnfollow : widget.onFollow,
                       style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         side: BorderSide(
@@ -1353,6 +1353,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                             : widget.followerAuthors.contains(widget.post.author)
                                 ? AppLocalizations.of(context).followBack
                                 : AppLocalizations.of(context).follow,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,

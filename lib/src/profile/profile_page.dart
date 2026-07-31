@@ -1766,16 +1766,17 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
             const SizedBox(height: 12),
             Row(
               children: [
-                Text(
-                  AppLocalizations.of(context).allowAvatarZoom,
-                  style: TextStyle(
-                    color: Theme.of(context).brightness == Brightness.light
-                        ? Colors.black
-                        : Colors.white,
-                    fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Text(
+                    AppLocalizations.of(context).allowAvatarZoom,
+                    style: TextStyle(
+                      color: Theme.of(context).brightness == Brightness.light
+                          ? Colors.black
+                          : Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-                const Spacer(),
                 Switch(
                   value: _avatarZoomable,
                   onChanged: (v) => setState(() => _avatarZoomable = v),
@@ -2452,7 +2453,7 @@ class _UserListPageState extends State<_UserListPage>
                 onTap: () => _toggleFollow(user),
                 child: Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   decoration: BoxDecoration(
                     color: isFollowing
                         ? (isLight
@@ -2465,6 +2466,7 @@ class _UserListPageState extends State<_UserListPage>
                     isFollowing
                         ? AppLocalizations.of(context).following
                         : (user.followsYou ? AppLocalizations.of(context).followBack : AppLocalizations.of(context).follow),
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isFollowing
                           ? (isLight ? Colors.black : Colors.white)

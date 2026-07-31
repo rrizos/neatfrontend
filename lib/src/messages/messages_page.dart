@@ -3348,17 +3348,14 @@ class _SharedPostCard extends StatelessWidget {
       );
       showCaptionBelow = true;
     } else if (pollOptions.isNotEmpty) {
-      mediaArea = AspectRatio(
-        aspectRatio: 1,
-        child: _SharedPollGraphic(
-          question: text,
-          options: pollOptions.cast<Map>(),
-          isLight: isLight,
-        ),
+      mediaArea = _SharedPollGraphic(
+        question: text,
+        options: pollOptions.cast<Map>(),
+        isLight: isLight,
       );
       showCaptionBelow = false;
     } else if (text.isNotEmpty) {
-      mediaArea = AspectRatio(aspectRatio: 1, child: _SharedTextGraphic(text: text));
+      mediaArea = _SharedTextGraphic(text: text);
       showCaptionBelow = false;
     } else {
       mediaArea = Container(
@@ -3446,119 +3443,99 @@ class _SharedPollGraphic extends StatelessWidget {
   final List<Map> options;
   final bool isLight;
 
-  // Posts cap polls at 4 options (see _ComposePollEditor in home_page.dart),
-  // so this always has room to show every option — never just a subset.
-  static const _kAccent = Color(0xff1479ff); // neat's brand blue, see app.dart
+  static const _kAccent = Color(0xff1479ff);
 
   @override
   Widget build(BuildContext context) {
-    final shown = options.take(4).toList();
-    final total = shown.fold<int>(0, (s, o) => s + ((o['votes'] as num?)?.toInt() ?? 0));
-    final bg      = isLight ? const Color(0xfff7f7f7) : const Color(0xff232323);
-    final barBg   = isLight ? const Color(0xffe8e8e8) : const Color(0xff2f2f2f);
-    final textClr = isLight ? Colors.black : Colors.white;
+    final shown   = options.take(4).toList();
+    final total   = shown.fold<int>(0, (s, o) => s + ((o['votes'] as num?)?.toInt() ?? 0));
+    final bg      = isLight ? const Color(0xfff5f5f5) : const Color(0xff1e1e1e);
+    final textClr = isLight ? const Color(0xff111111) : Colors.white;
+    final subClr  = isLight ? const Color(0xff888888) : const Color(0xff7a7a7a);
+    final divClr  = isLight ? const Color(0xffe2e2e2) : const Color(0xff2c2c2c);
 
     return Container(
+      width: double.infinity,
       color: bg,
-      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      padding: const EdgeInsets.fromLTRB(13, 12, 13, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
-              const Icon(Icons.poll_rounded, size: 13, color: _kAccent),
-              const SizedBox(width: 5),
+              const Icon(Icons.poll_rounded, size: 12, color: _kAccent),
+              const SizedBox(width: 4),
               Text(
                 AppLocalizations.of(context).pollLabel,
-                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _kAccent, letterSpacing: 0.6),
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _kAccent, letterSpacing: 0.5),
               ),
             ],
           ),
           if (question.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 5),
             Text(
               question,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textClr, height: 1.2),
-              maxLines: 1,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textClr, height: 1.25),
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ],
-          const SizedBox(height: 7),
+          const SizedBox(height: 10),
           for (final o in shown) ...[
-            _bar(o, total, barBg, textClr),
-            if (o != shown.last) const SizedBox(height: 5),
+            _row(o, total, textClr, subClr),
+            if (o != shown.last) Divider(height: 1, thickness: 0.5, color: divClr),
           ],
+          const SizedBox(height: 8),
         ],
       ),
     );
   }
 
-  Widget _bar(Map option, int total, Color barBg, Color textClr) {
-    final votes    = (option['votes'] as num?)?.toInt() ?? 0;
-    final fraction = total > 0 ? (votes / total).clamp(0.0, 1.0) : 0.0;
-    final optText  = option['text']?.toString() ?? '';
-    return SizedBox(
-      height: 18,
-      child: Stack(
+  Widget _row(Map option, int total, Color textClr, Color subClr) {
+    final votes   = (option['votes'] as num?)?.toInt() ?? 0;
+    final fraction = total > 0 ? votes / total : 0.0;
+    final pct     = total > 0 ? (fraction * 100).round() : 0;
+    final optText = option['text']?.toString() ?? '';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
         children: [
-          Container(decoration: BoxDecoration(color: barBg, borderRadius: BorderRadius.circular(5))),
-          FractionallySizedBox(
-            widthFactor: fraction,
-            child: Container(
-              decoration: BoxDecoration(
-                color: _kAccent.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(5),
-              ),
+          Expanded(
+            child: Text(optText,
+              style: TextStyle(fontSize: 12, color: textClr, fontWeight: FontWeight.w500),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 7),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  optText,
-                  style: TextStyle(fontSize: 10, color: textClr, fontWeight: FontWeight.w500),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-          ),
+          const SizedBox(width: 8),
+          Text('$pct%', style: TextStyle(fontSize: 11, color: subClr, fontWeight: FontWeight.w600)),
         ],
       ),
     );
   }
 }
 
-// A "photo-styled" stand-in for a shared text-only post — a gradient card
-// with the caption itself as the centerpiece, rather than a blank icon.
 class _SharedTextGraphic extends StatelessWidget {
   const _SharedTextGraphic({required this.text});
   final String text;
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final bg      = isLight ? const Color(0xfff5f5f5) : const Color(0xff1e1e1e);
+    final textClr = isLight ? const Color(0xff111111) : Colors.white;
     return Container(
-      decoration: const BoxDecoration(
-        // neat's own blue (see app.dart's theme `secondary` colors), not an
-        // unrelated purple — a lighter tint fading into the app's primary
-        // blue rather than a different hue entirely.
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xff4ea3ff), Color(0xff1479ff)],
-        ),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(15, 12, 13, 12),
+      decoration: BoxDecoration(
+        color: bg,
+        border: const Border(left: BorderSide(color: Color(0xff1479ff), width: 3)),
       ),
-      padding: const EdgeInsets.all(18),
-      alignment: Alignment.center,
       child: Text(
         text,
-        textAlign: TextAlign.center,
-        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600, height: 1.35),
-        maxLines: 6,
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: textClr, height: 1.45),
+        maxLines: 5,
         overflow: TextOverflow.ellipsis,
       ),
     );

@@ -4267,7 +4267,7 @@ class _NotifTile extends StatelessWidget {
         child: OutlinedButton(
           onPressed: onFollowToggle,
           style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             side: BorderSide(
               color: isLight
                   ? const Color(0xffdbdbdb)
@@ -4282,7 +4282,10 @@ class _NotifTile extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          child: Text(isFollowing ? AppLocalizations.of(context).following : followsYou ? AppLocalizations.of(context).followBack : AppLocalizations.of(context).follow),
+          child: Text(
+            isFollowing ? AppLocalizations.of(context).following : followsYou ? AppLocalizations.of(context).followBack : AppLocalizations.of(context).follow,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       );
     } else if (isEvent) {
@@ -4988,17 +4991,18 @@ class _CommentSheetState extends State<_CommentSheet> {
                         ),
                       ),
                     const SizedBox(width: 14),
-                    GestureDetector(
-                      onTap: () => setState(() => _replyingTo = c),
-                      child: Text(
-                        AppLocalizations.of(context).reply,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                    if (widget.likingEnabled)
+                      GestureDetector(
+                        onTap: () => setState(() => _replyingTo = c),
+                        child: Text(
+                          AppLocalizations.of(context).reply,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isLight ? const Color(0xff536471) : const Color(0xff71767b),
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
                 if (_likedByOwner[c.id] ?? c.likedByOwner) ...[
