@@ -37,6 +37,18 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- The app uses only standard HTTPS/TLS, which is exempt under the US
+	     export regulations. Declaring it here stops App Store Connect asking
+	     the export-compliance question on every single upload. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<!-- Without this the App Store lists the app as English-only, even though
+	     it ships full Greek. Greek is first: it is the primary language. -->
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>el</string>
+		<string>en</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

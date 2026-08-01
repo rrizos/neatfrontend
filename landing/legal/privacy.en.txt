@@ -3,7 +3,7 @@ Last updated: 1 August 2026
 
 This policy explains what Neat collects, why, who it is shared with and what you can do about it. It is written to match how the app actually works, feature by feature.
 
-Neat is operated by [FULL LEGAL NAME], [POSTAL ADDRESS], Greece ("we", "us"). We are the data controller for the personal data described here. You can reach us at any time at neatgreece@gmail.com.
+Neat is operated by Andreas Exadaktylos, Filerimou 8, Greece ("we", "us"). We are the data controller for the personal data described here. You can reach us at any time at neatgreece@gmail.com.
 
 1. THE SHORT VERSION
 • We do not sell your data, we show no advertising, and we run no third-party analytics, advertising or tracking software of any kind.
@@ -12,7 +12,7 @@ Neat is operated by [FULL LEGAL NAME], [POSTAL ADDRESS], Greece ("we", "us"). We
 • You can delete your account from Settings at any time, and it takes effect immediately.
 
 2. WHO WE ARE AND HOW TO CONTACT US
-Controller: [FULL LEGAL NAME], [POSTAL ADDRESS], Greece.
+Controller: Andreas Exadaktylos, Filerimou 8, Greece.
 Email for any privacy question or request: neatgreece@gmail.com
 We are not required to appoint a Data Protection Officer and have not appointed one. The address above reaches the person responsible.
 

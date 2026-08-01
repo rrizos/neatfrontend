@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["RZ36PNWS82.NeatApp.Neat"],
+        "components": [
+          { "/": "/post/*", "comment": "Shared post links open in the app" }
+        ]
+      }
+    ]
+  }
+}

@@ -40,6 +40,10 @@ cp "$ROOT/landing/legal.css"    "$OUT/legal.css"
 # Real files, so the SPA fallback stops answering crawlers with the app shell.
 cp "$ROOT/landing/robots.txt"   "$OUT/robots.txt"
 cp "$ROOT/landing/sitemap.xml"  "$OUT/sitemap.xml"
+# Same reason: Apple and Google fetch these to verify that neatapp.gr and the
+# app belong together. Both must be real files served as JSON, not the shell.
+mkdir -p "$OUT/.well-known"
+cp "$ROOT"/landing/well-known/* "$OUT/.well-known/"
 mkdir -p "$OUT/brand"
 cp "$ROOT"/landing/brand/*.png  "$OUT/brand/"
 

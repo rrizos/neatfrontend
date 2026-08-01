@@ -31,6 +31,13 @@
   status = 200
   force = true
 
+# Apple fetches this with no Accept header and requires JSON, but the file is
+# extensionless so Netlify would guess text/plain.
+[[headers]]
+  for = "/.well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"
+
 [[redirects]]
   from = "/privacy"
   to = "/privacy.html"

@@ -3,7 +3,7 @@ Last updated: 1 August 2026
 
 These Terms are the agreement between you and us about your use of Neat. They also serve as the end user licence agreement for the mobile app. By creating an account, or by using Neat without one, you accept them. If you do not accept them, do not use Neat.
 
-Neat is operated by [FULL LEGAL NAME], [POSTAL ADDRESS], Greece ("we", "us"). You can reach us at neatgreece@gmail.com.
+Neat is operated by Andreas Exadaktylos, Filerimou 8, Greece ("we", "us"). You can reach us at neatgreece@gmail.com.
 
 1. WHAT NEAT IS
 Neat is a social app organised by city. Greece is divided into cities and islands, each with its own feed. You choose one city as your own and post there; you can also browse any other city's feed as a spectator. Alongside the feed, Neat offers comments and replies, likes and saves, polls, trending charts, local events with attendance, and private one-to-one messages including photos, GIFs and voice notes.
