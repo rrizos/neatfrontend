@@ -1,29 +1,86 @@
-TERMS OF SERVICE / END USER LICENSE AGREEMENT (EULA)
-Last Updated: July 2026
+TERMS OF SERVICE
+Last updated: 1 August 2026
 
-By creating an account on Neat ("the App"), you agree to be bound by these Terms. If you do not agree, do not use the App.
+These Terms are the agreement between you and us about your use of Neat. They also serve as the end user licence agreement for the mobile app. By creating an account, or by using Neat without one, you accept them. If you do not accept them, do not use Neat.
 
-1. ELIGIBILITY
-You must be at least 13 years old to use Neat. You are responsible for keeping your account login secure.
+Neat is operated by [FULL LEGAL NAME], [POSTAL ADDRESS], Greece ("we", "us"). You can reach us at neatgreece@gmail.com.
 
-2. CITY SELECTION & USER RESPONSIBILITY
-Neat lets you select a city on a map to view and interact with that local feed. Because this app is public to members of that city, you should not post your precise home address, phone number, or highly private personal routines in public chat fields. You use the application at your own risk regarding information you choose to share.
+1. WHAT NEAT IS
+Neat is a social app organised by city. Greece is divided into cities and islands, each with its own feed. You choose one city as your own and post there; you can also browse any other city's feed as a spectator. Alongside the feed, Neat offers comments and replies, likes and saves, polls, trending charts, local events with attendance, and private one-to-one messages including photos, GIFs and voice notes.
+Neat is a young service and we are still building it. Features may be added, changed or withdrawn.
 
-3. USER-GENERATED CONTENT (UGC) SAFETY MANDATE
-In strict compliance with Apple App Store Guideline 1.2, Neat maintains a ZERO-TOLERANCE policy for abusive behavior. You explicitly agree that you will NOT post content that:
-• Is hateful, defamatory, or targets individuals or groups maliciously.
-• Depicts graphic violence, illegal drugs, or highly dangerous activities.
-• Is sexually explicit or pornographic.
-• Harasses or bullies other users in the local community.
+2. WHO CAN USE IT
+You must be at least 15 years old. Under Greek law that is the age at which you can agree to an online service like this on your own.
+You must not use Neat if a previous account of yours was terminated for breaking these Terms, or if the law where you live prohibits it.
+One person, one account, unless we agree otherwise in writing.
 
-4. MANDATORY SAFETY CONTROLS (REPORTING & BLOCKING)
-To ensure safety, every user has access to immediate tools on the signup/feed screens:
-• Report Feature: You can flag any post or user violating these terms. Our moderators review reports within 24 hours.
-• Block Feature: You can instantly block any user. Once blocked, they can never see your posts, and their content is permanently hidden from your feed.
-• Enforcement: Neat reserves the right to immediately delete objectionable content and ban offending users without notice.
+3. YOUR ACCOUNT
+You are responsible for keeping your password secret and for what happens under your account. Choose a password you do not use elsewhere, and tell us at neatgreece@gmail.com if you think someone else has access.
+Giving an email address is optional. If you do not give one, we have no way to verify who you are, and we will not be able to restore your access if you lose your password. That is your choice to make.
+You may change your username, display name, bio, picture and city at any time in the app.
 
-5. TERMINATION
-We reserve the right to suspend or terminate your account instantly if you violate these community safety guidelines.
+4. YOUR CONTENT
+What you post stays yours. We claim no ownership of it.
+So that Neat can work, you grant us a worldwide, non-exclusive, royalty-free licence to host, store, reproduce, adapt for display, publish and distribute the content you submit, for the purpose of operating and promoting the service. "Adapt for display" means the technical work of running a feed: resizing an image, generating a preview, transcoding a video, building a link preview when your post is shared. This licence ends when you delete the content or your account, except where the content has already been shared onward by someone else, and except for copies we must keep to comply with the law or to resolve a dispute.
+You confirm that you have the rights to everything you post, and that posting it does not break anyone else's rights.
+Remember what is public. Posts, comments, polls, events and your profile are visible to everyone using Neat. Photos and videos attached to a public post can be opened by anyone who has the direct link. Do not post your home address, your phone number, your daily routine, or anything about another person that they would not want public.
 
-6. CONTACT INFORMATION
-To report violations or receive support, please email: neatgreece@gmail.com
+5. RULES
+Do not post, send or do any of the following on Neat:
+• Content that attacks, harasses, bullies, threatens or intimidates a person or a group, or that incites hatred or violence against them, including on the basis of race, ethnicity, national origin, religion, disability, sex, gender identity or sexual orientation.
+• Sexual content involving minors, in any form. This is reported to the authorities without exception.
+• Pornographic or sexually explicit material, and non-consensual intimate images.
+• Graphic violence, content that glorifies self-harm, suicide or eating disorders, or that encourages dangerous acts.
+• Content promoting illegal drugs, weapons, or other unlawful goods and services.
+• Impersonating another person, or misrepresenting your identity or affiliation in a way that misleads.
+• Someone else's private information, published without their permission.
+• Spam, bulk or repetitive posting, artificial engagement, scams, phishing or malware.
+• Content that infringes copyright, trademark or another intellectual property right.
+• Scraping, automated collection, reverse engineering, probing our security, interfering with the service, or accessing it other than through the interfaces we provide.
+We have no tolerance for abusive behaviour or objectionable content. We can remove anything that breaks these rules and act against the account behind it.
+
+6. REPORTING, BLOCKING AND MODERATION
+Every post, comment, event and message has a report option, and you can block any account. Blocking hides that person's content from you and yours from them.
+We review reports of objectionable content and act on them within 24 hours, by removing the content, restricting or removing the account responsible, or rejecting the report.
+If you report a direct message, that message becomes visible to our moderators so they can assess it. Moderators cannot read conversations that have not been reported.
+If we act against your content or your account, you can write to neatgreece@gmail.com to ask us to look again, and a person will review it. Tell us what was removed and why you think the decision was wrong.
+We can suspend or terminate an account that seriously or repeatedly breaks these Terms, or where we must do so by law. Where it is reasonable to do so, we will tell you why.
+
+7. EVENTS AND LINKS TO OTHER SERVICES
+Events are created by users. We do not organise them, verify them, or check that they will happen as described. A ticket link on an event points to a third party; buying a ticket is a contract between you and that third party, on their terms, and we are not a party to it and take no responsibility for it.
+Neat shows content from and links to other services, including maps, GIF search, app stores and third-party websites. We do not control them and are not responsible for them.
+
+8. WHAT WE PROVIDE, AND WHAT WE DO NOT PROMISE
+We provide Neat with reasonable care and skill, and we try to keep it available and working. We do not promise that it will be uninterrupted, error-free, or that content on it is accurate, and we do not review content before it is posted.
+Nothing in these Terms limits your rights as a consumer under Greek or EU law. Where you are a consumer, you keep every mandatory legal protection you have, including the statutory guarantee that a digital service conforms to the contract, and nothing here excludes or limits our liability for death or personal injury caused by our negligence, for fraud, or for anything else that cannot be limited by law.
+Subject to that, we are not liable for indirect or consequential loss, loss of profits, loss of data, or loss caused by content posted by another user or by a third-party service.
+Neat is free. If we ever introduce a paid feature, we will set out its terms before you pay for anything.
+
+9. YOUR LICENCE TO USE THE APP
+We grant you a personal, non-transferable, non-exclusive, revocable licence to install and use the Neat app on devices you own or control, for your own non-commercial use, in line with these Terms and with the rules of the app store you got it from. You may not copy, modify, distribute, sell, sublicense or reverse engineer the app, except where the law says you may.
+
+10. APPLE APP STORE
+This section applies if you obtained the app from Apple's App Store.
+• These Terms are between you and us, not Apple. Apple is not responsible for the app or its content.
+• Apple has no obligation to provide any support or maintenance for the app.
+• If the app fails to conform to any warranty, you may notify Apple and Apple will refund the purchase price, if any. To the maximum extent permitted by law, Apple has no other warranty obligation with respect to the app.
+• Apple is not responsible for addressing any claim by you or a third party relating to the app, including product liability claims, claims that the app fails to conform to a legal requirement, and claims under consumer protection or similar legislation.
+• Apple is not responsible for investigating, defending, settling or discharging any third-party claim that the app infringes intellectual property rights.
+• You confirm you are not located in a country subject to a US Government embargo or designated as a terrorist-supporting country, and that you are not on any US Government list of prohibited or restricted parties.
+• Apple and its subsidiaries are third-party beneficiaries of these Terms and may enforce them against you.
+
+11. ENDING THE AGREEMENT
+You can stop using Neat at any time and delete your account from Settings. Deletion is immediate and irreversible; see our Privacy Policy for exactly what it removes.
+We can end this agreement and close your account if you break these Terms, as described in section 6.
+Sections that by their nature should survive termination do so, including the licence you granted us for content already shared onward, the disclaimers, and the law and jurisdiction clause.
+
+12. CHANGES TO THESE TERMS
+We may change these Terms as Neat develops or as the law requires. We update the date at the top when we do. If a change materially affects your rights, we will notify you in the app before it takes effect, and continuing to use Neat afterwards means you accept it. If you do not accept it, delete your account.
+
+13. LAW AND DISPUTES
+These Terms are governed by Greek law. If you are a consumer, you also keep the protection of the mandatory rules of the country you live in, and you may bring proceedings in the courts of that country.
+We would much rather sort out a problem directly. Write to neatgreece@gmail.com first and we will try to resolve it.
+If we cannot, and you are a consumer in the EU, you may use the European Commission's online dispute resolution platform at ec.europa.eu/consumers/odr. Otherwise the courts of Athens, Greece have jurisdiction.
+
+14. CONTACT
+neatgreece@gmail.com
