@@ -3,7 +3,7 @@ Last updated: 1 August 2026
 
 This policy explains what Neat collects, why, who it is shared with and what you can do about it. It is written to match how the app actually works, feature by feature.
 
-Neat is operated by Andreas Exadaktylos, Filerimou 8, Greece ("we", "us"). We are the data controller for the personal data described here. You can reach us at any time at neatgreece@gmail.com.
+Neat is operated by Andreas Exadaktylos, Filerimou 8, 851 32 Rhodes, Greece ("we", "us"). We are the data controller for the personal data described here. You can reach us at any time at neatgreece@gmail.com.
 
 1. THE SHORT VERSION
 • We do not sell your data, we show no advertising, and we run no third-party analytics, advertising or tracking software of any kind.
@@ -12,7 +12,7 @@ Neat is operated by Andreas Exadaktylos, Filerimou 8, Greece ("we", "us"). We ar
 • You can delete your account from Settings at any time, and it takes effect immediately.
 
 2. WHO WE ARE AND HOW TO CONTACT US
-Controller: Andreas Exadaktylos, Filerimou 8, Greece.
+Controller: Andreas Exadaktylos, Filerimou 8, 851 32 Rhodes, Greece.
 Email for any privacy question or request: neatgreece@gmail.com
 We are not required to appoint a Data Protection Officer and have not appointed one. The address above reaches the person responsible.
 
@@ -38,26 +38,35 @@ Technical and security information:
 We do not collect a date of birth, a phone number, your contacts, calendar data, advertising identifiers or device fingerprints, and we do not track you across other apps or websites.
 
 4. DEVICE PERMISSIONS
-The app asks only for what a feature needs, at the moment you use it:
-• Microphone, to record a voice message.
-• Photos and camera, to attach an image to a post, comment or message.
-• Notifications, to deliver push notifications.
-Declining any of these leaves the rest of Neat working normally. The app contains no location permission at all.
+These are the only permissions the app declares, and each is requested at the moment you first use the feature that needs it, not at startup:
+• Microphone, to record a voice message. Recording only ever starts when you hold the record button.
+• Camera, to take a photo for a post, comment or message.
+• Photo library, to attach a photo you already have. We receive only the images you pick, never a listing of your library.
+• Notifications, to deliver push notifications. The app is also allowed to receive a notification while it is in the background or closed, which is what lets a message arrive without you opening Neat first.
+• Network access, to reach our servers. This one is granted automatically by the operating system and is not something you are asked about.
+Declining any of the others leaves the rest of Neat working normally.
+The app declares no other permission. It cannot read your contacts, your calendar, your files, your call or message history, or any other app's data, and it has no background location or activity tracking.
 
-5. WHY WE USE IT, AND ON WHAT LEGAL BASIS
+5. LOCATION, IN DETAIL
+Neat is organised by city, so it is fair to ask exactly what we know about where you are. Three separate things are worth separating:
+• We do not use your device's location. The app requests no location permission on either iOS or Android, and none is declared in the app package, so the operating system could not give us your position even if we asked it for one. There is no GPS, no Wi-Fi or cell-tower positioning, no background location and no location history.
+• Your city is a choice, not a measurement. You pick it yourself by tapping a map, you can change it whenever you like, and it can be any city in Greece regardless of where you actually are. It is stored with your profile and shown publicly on it. The map you pick from is drawn by Apple MapKit and is configured with its "show my location" control switched off.
+• Your IP address implies an approximate location. This is unavoidable for any internet service. An IP address can usually be resolved to a city or region, and every service that sends you data sees yours: us, when we write a security log entry, and the providers listed in section 7 when they serve you a map tile, a GIF or an image. We do not resolve IP addresses to locations, we do not store a derived location, and we do not use IP to guess or set your city.
+
+6. WHY WE USE IT, AND ON WHAT LEGAL BASIS
 Performance of our contract with you (Article 6(1)(b) GDPR): creating and running your account, showing your city's feed, and delivering your posts, messages, events and notifications.
 Our legitimate interests (Article 6(1)(f) GDPR): keeping Neat safe and working. This covers moderating reported content, enforcing our Terms, preventing spam, abuse and fraud, rate-limiting, and keeping the security log described above. We have weighed these against your interests and limited both what we keep and how long we keep it.
 Your consent (Article 6(1)(a) GDPR): push notifications, and access to your microphone, camera and photo library. You can withdraw consent at any time in your device settings, without affecting anything done before you withdrew it.
 Compliance with a legal obligation (Article 6(1)(c) GDPR): responding to lawful requests from authorities and meeting our obligations as a platform.
 We do not use your data for automated decision-making that produces legal effects, and we do not profile you for advertising.
 
-6. WHAT IS PUBLIC AND WHAT IS NOT
+7. WHAT IS PUBLIC AND WHAT IS NOT
 Public: your username, display name, profile picture, bio and city; your posts, comments, polls and events; likes and attendance counts. Anyone using Neat can see these, including people browsing your city from elsewhere.
 Publicly reachable by link: photos and videos attached to public posts are served from a long, random, unguessable web address. Anyone who has that address can open the file without logging in, which is what lets a shared post show a preview. Treat a photo you post as public.
 Private: your direct messages, your saved posts, your search history, your blocked list and your email address are not shown to other users.
 The exception for messages: if a participant reports a message, that message becomes visible to our moderators so the report can be assessed. Moderators cannot browse or read conversations that have not been reported.
 
-7. WHO WE SHARE IT WITH
+8. WHO WE SHARE IT WITH
 We do not sell personal data and we do not share it for advertising. We use a small number of service providers, each receiving only what its feature needs:
 • Amazon Web Services: our server and database, hosted in the eu-central-1 region in Frankfurt, Germany. Your account data and content is stored there.
 • Netlify: hosting and content delivery for the website and the browser version of Neat.
@@ -69,10 +78,10 @@ We do not sell personal data and we do not share it for advertising. We use a sm
 Some city cover images shown in the app are loaded from third-party image hosts, which receive your IP address as part of serving the image.
 We may also disclose information where we are legally required to, where it is necessary to establish, exercise or defend legal claims, or to protect someone's safety.
 
-8. INTERNATIONAL TRANSFERS
+9. INTERNATIONAL TRANSFERS
 Your account and content stay in the European Union. Some of the providers listed above are established in, or transfer data to, the United States. Those transfers rely on the European Commission's adequacy decision for the EU–US Data Privacy Framework where the provider is certified under it, and otherwise on Standard Contractual Clauses. Write to us if you would like details of the safeguards that apply.
 
-9. HOW LONG WE KEEP IT
+10. HOW LONG WE KEEP IT
 • Account data and content: until you delete it, or delete your account.
 • Deleting your account: this happens immediately and cannot be undone. It removes your profile, your posts and their photo and video files, the events you created, your comments, likes, saves, follows, blocks, search history, notifications and device tokens, and any one-to-one conversation left with nobody else in it.
 • Messages you sent: deleted with your account.
@@ -81,7 +90,7 @@ Your account and content stay in the European Union. Some of the providers liste
 • Reports and moderation records: kept while needed to handle the report and to enforce our Terms against repeat behaviour.
 An entry may remain in our append-only security log recording that an account was deleted. That record does not contain your content.
 
-10. HOW WE PROTECT IT
+11. HOW WE PROTECT IT
 • Passwords are never stored in readable form. They are salted and hashed with PBKDF2-SHA256, and checked against minimum-length, common-password and similarity rules when you set them.
 • The mobile app connects to our server over TLS and additionally pins our server's certificate, so it refuses to talk to anything presenting a different one. The website and the browser version of Neat are served over HTTPS.
 • Your session token is a 48-byte random value held in the iOS Keychain or the Android Keystore rather than in ordinary app storage. Logging out revokes it.
@@ -89,19 +98,19 @@ An entry may remain in our append-only security log recording that an account wa
 • Uploaded images are validated as real images before being stored, and are served with headers that stop a browser reinterpreting them as anything else.
 No service can promise perfect security. Direct messages are not end-to-end encrypted: they are stored on our server in a form we could read, which is what makes reviewing a reported message possible.
 
-11. YOUR RIGHTS
+12. YOUR RIGHTS
 Under the GDPR you have the right to access your data, to have it corrected, to have it erased, to restrict or object to how we use it, to receive it in a portable form, and to withdraw consent where we rely on it. You can exercise several of these yourself: edit your profile in the app, clear your search history, and delete your account from Settings.
 For anything else, email neatgreece@gmail.com. We will respond within one month. We may ask you to confirm that you control the account before acting on a request.
 If you believe we have handled your data unlawfully you can complain to the Hellenic Data Protection Authority, Kifissias 1-3, 115 23 Athens, www.dpa.gr, or to the authority in your country of residence.
 
-12. CHILDREN
+13. CHILDREN
 Neat is not for people under 15. That is the age at which, under Greek law, a person can consent to an online service on their own. We do not knowingly keep an account belonging to someone younger. If you believe a child under 15 has an account, write to neatgreece@gmail.com and we will remove it.
 
-13. STORAGE ON YOUR DEVICE
+14. STORAGE ON YOUR DEVICE
 Neat stores a small amount of data on your device so that it works between launches: your session token, your theme and language choice, and a cached copy of your profile and inbox so the app can open without a blank screen. The browser version uses your browser's local storage for the same purpose. We set no advertising or tracking cookies.
 
-14. CHANGES TO THIS POLICY
+15. CHANGES TO THIS POLICY
 When we change this policy we update the date at the top. If a change materially affects your rights we will say so in the app before it takes effect. The current version always lives at https://neatapp.gr/privacy.
 
-15. CONTACT
+16. CONTACT
 Questions, requests or complaints: neatgreece@gmail.com
