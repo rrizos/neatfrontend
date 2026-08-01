@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# The favicon must stay crawlable — Google reads it from the site root to show
+# next to a search result.
+Allow: /favicon.ico
+Allow: /favicon.png
+
+Sitemap: https://neatapp.gr/sitemap.xml

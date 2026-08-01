@@ -24,9 +24,10 @@ PAPER = (10, 13, 24, 255)
 # Plain icons get rounded corners and a little breathing room; maskable icons
 # are full-bleed with the mark inside Android's 80% safe zone.
 ROUNDED = [
-    # The favicon is read at 16px, where the script mark is delicate — give it
-    # more of the frame than the larger icons need.
-    (ROOT / 'web' / 'favicon.png', 64, 0.80, True),
+    # 96px because Google Search wants the favicon it shows next to a result to
+    # be a multiple of 48px square. The mark is delicate at the 16px a browser
+    # tab renders, so it takes more of the frame than the larger icons need.
+    (ROOT / 'web' / 'favicon.png', 96, 0.80, True),
     (ROOT / 'web' / 'icons' / 'Icon-192.png', 192, 0.70, True),
     (ROOT / 'web' / 'icons' / 'Icon-512.png', 512, 0.70, True),
     (ROOT / 'web' / 'icons' / 'Icon-maskable-192.png', 192, 0.55, False),
@@ -76,6 +77,14 @@ def main() -> None:
     glyph = mark()
     for path, size, scale, rounded in ROUNDED:
         render(path, size, scale, rounded, glyph)
+
+    # Google Search asks for /favicon.ico at the site root whether or not the
+    # page declares one, so ship a real multi-resolution .ico there.
+    ico = ROOT / 'web' / 'favicon.ico'
+    Image.open(ROOT / 'web' / 'favicon.png').save(
+        ico, format='ICO', sizes=[(16, 16), (32, 32), (48, 48)]
+    )
+    print('wrote', ico.relative_to(ROOT), '16/32/48')
 
 
 if __name__ == '__main__':

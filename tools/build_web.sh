@@ -37,6 +37,9 @@ cp "$ROOT/landing/index.html"   "$OUT/index.html"
 cp "$ROOT/landing/privacy.html" "$OUT/privacy.html"
 cp "$ROOT/landing/terms.html"   "$OUT/terms.html"
 cp "$ROOT/landing/legal.css"    "$OUT/legal.css"
+# Real files, so the SPA fallback stops answering crawlers with the app shell.
+cp "$ROOT/landing/robots.txt"   "$OUT/robots.txt"
+cp "$ROOT/landing/sitemap.xml"  "$OUT/sitemap.xml"
 mkdir -p "$OUT/brand"
 cp "$ROOT"/landing/brand/*.png  "$OUT/brand/"
 

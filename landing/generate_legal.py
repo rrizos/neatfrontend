@@ -124,7 +124,8 @@ PAGE = """<!DOCTYPE html>
 <meta name="description" content="{description}">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="https://neatapp.gr{path}">
-<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/favicon.png" sizes="96x96">
 <link rel="apple-touch-icon" href="/icons/Icon-192.png">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Neat">
