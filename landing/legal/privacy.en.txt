@@ -7,7 +7,7 @@ Neat is operated by Andreas Exadaktylos, Filerimou 8, 851 32 Rhodes, Greece ("we
 
 1. THE SHORT VERSION
 • We do not sell your data, we show no advertising, and we run no third-party analytics, advertising or tracking software of any kind.
-• We never access your device's GPS or precise location. Your city is one you pick yourself from a map.
+• We ask once, on the sign-up map, for your approximate location so we can suggest your city. Refuse it and nothing else changes. We never track you in the background and keep no location history.
 • Anything you post to a city feed is public. Direct messages are private, with one exception: a message that someone reports.
 • You can delete your account from Settings at any time, and it takes effect immediately.
 
@@ -43,20 +43,23 @@ These are the only permissions the app declares, and each is requested at the mo
 • Camera, to take a photo for a post, comment or message.
 • Photo library, to attach a photo you already have. We receive only the images you pick, never a listing of your library.
 • Notifications, to deliver push notifications. The app is also allowed to receive a notification while it is in the background or closed, which is what lets a message arrive without you opening Neat first.
+• Approximate location, asked for once, on the sign-up map only, so that Neat can preselect the city you are in. See the next section, which explains this one in full.
 • Network access, to reach our servers. This one is granted automatically by the operating system and is not something you are asked about.
 Declining any of the others leaves the rest of Neat working normally.
-The app declares no other permission. It cannot read your contacts, your calendar, your files, your call or message history, or any other app's data, and it has no background location or activity tracking.
+The app declares no other permission. It cannot read your contacts, your calendar, your files, your call or message history, or any other app's data, and it has no activity tracking.
 
 5. LOCATION, IN DETAIL
-Neat is organised by city, so it is fair to ask exactly what we know about where you are. Three separate things are worth separating:
-• We do not use your device's location. The app requests no location permission on either iOS or Android, and none is declared in the app package, so the operating system could not give us your position even if we asked it for one. There is no GPS, no Wi-Fi or cell-tower positioning, no background location and no location history.
-• Your city is a choice, not a measurement. You pick it yourself by tapping a map, you can change it whenever you like, and it can be any city in Greece regardless of where you actually are. It is stored with your profile and shown publicly on it. The map you pick from is drawn by Apple MapKit and is configured with its "show my location" control switched off.
-• Your IP address implies an approximate location. This is unavoidable for any internet service. An IP address can usually be resolved to a city or region, and every service that sends you data sees yours: us, when we write a security log entry, and the providers listed in section 7 when they serve you a map tile, a GIF or an image. We do not resolve IP addresses to locations, we do not store a derived location, and we do not use IP to guess or set your city.
+Neat is organised by city, so it is fair to ask exactly what we know about where you are. Five separate things are worth separating:
+• The one time we ask. When you first reach the map during sign-up, the app asks for permission to use your approximate location. If you allow it, your position is used once, on your device, to work out which of the Greek cities in the app you are closest to, and that city's card opens ready for you to confirm. You still have to press connect: nothing is chosen for you.
+• What happens to that position. Nothing. It is used to compare against a fixed list of city coordinates that ships inside the app, and then it is discarded. It is never sent to our servers, never written to your profile, never logged and never shared with anyone. All we ever store is the city name you go on to confirm, which is the same thing we would have stored had you tapped the map yourself.
+• Refusing costs you nothing. Decline the prompt, or ignore it, and the map opens exactly as it otherwise would, for you to pick from by hand. Every other part of Neat behaves identically either way. We ask for coarse rather than precise location, because the answer we need is a city, and we ask on the sign-up map only — never again, never in the background, and never while the app is closed. There is no location history and no tracking of your movements. If you change your mind later, you can revoke the permission in your device settings.
+• Your city is still a choice, not a measurement. Whatever the prompt does, you can change your city whenever you like, and it can be any city in Greece regardless of where you actually are. It is stored with your profile and shown publicly on it. The map itself is drawn by Apple MapKit, configured with its "show my location" control switched off.
+• Your IP address implies an approximate location. This is unavoidable for any internet service. An IP address can usually be resolved to a city or region, and every service that sends you data sees yours: us, when we write a security log entry, and the providers listed in section 8 when they serve you a map tile, a GIF or an image. We do not resolve IP addresses to locations, we do not store a derived location, and we do not use IP to guess or set your city.
 
 6. WHY WE USE IT, AND ON WHAT LEGAL BASIS
 Performance of our contract with you (Article 6(1)(b) GDPR): creating and running your account, showing your city's feed, and delivering your posts, messages, events and notifications.
 Our legitimate interests (Article 6(1)(f) GDPR): keeping Neat safe and working. This covers moderating reported content, enforcing our Terms, preventing spam, abuse and fraud, rate-limiting, and keeping the security log described above. We have weighed these against your interests and limited both what we keep and how long we keep it.
-Your consent (Article 6(1)(a) GDPR): push notifications, and access to your microphone, camera and photo library. You can withdraw consent at any time in your device settings, without affecting anything done before you withdrew it.
+Your consent (Article 6(1)(a) GDPR): push notifications, the one-off approximate location request on the sign-up map, and access to your microphone, camera and photo library. You can withdraw consent at any time in your device settings, without affecting anything done before you withdrew it.
 Compliance with a legal obligation (Article 6(1)(c) GDPR): responding to lawful requests from authorities and meeting our obligations as a platform.
 We do not use your data for automated decision-making that produces legal effects, and we do not profile you for advertising.
 

@@ -12,6 +12,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../../l10n/app_localizations.dart';
 import '../core/media_cache.dart';
 import '../core/neat_loader.dart';
+import 'city_locator.dart';
 import 'greece_cities.dart';
 
 // MapKit JS JWT — origin: netnest.net
@@ -192,6 +193,19 @@ class _CityMapViewState extends State<CityMapView> {
   void initState() {
     super.initState();
     _iosChannel.setMethodCallHandler(_onNativeCall);
+    // Sign-up only: offer to preselect the city you are actually in. Every
+    // failure path inside leaves the plain map, which is the old behaviour.
+    if (widget.isSignUp) unawaited(_preselectCurrentCity());
+  }
+
+  /// Asks for location permission and, if it is granted, opens the card for
+  /// the city the device is in so the user only has to press connect.
+  Future<void> _preselectCurrentCity() async {
+    final name = await CityLocator.detectCity();
+    // The prompt is modal and the fix can take seconds — by now the user may
+    // have left, or already picked a city by hand. Never override either.
+    if (!mounted || name == null || _activeCity != null) return;
+    _onCityPinTapped(name);
   }
 
   @override

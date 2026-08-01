@@ -55,6 +55,10 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Neat uses your microphone to record voice messages.</string>
+	<!-- Asked once, on the sign-up map only, to preselect the city you are in.
+	     Refusing it just leaves you picking from the map by hand. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Neat can use your location once, while you are choosing your city, to find which city you are in. Your location is never stored or shared, and Neat never tracks you in the background.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Neat needs access to your photo library to send photos.</string>
 	<key>NSCameraUsageDescription</key>
