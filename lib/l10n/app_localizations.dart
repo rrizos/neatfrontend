@@ -269,31 +269,31 @@ abstract class AppLocalizations {
   /// No description provided for @citySetupSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'It\'s the only city you\'ll be able to take part in.'**
+  /// **'The city you choose will be your community on Neat.'**
   String get citySetupSubtitle;
 
   /// No description provided for @citySetupHomeCityTitle.
   ///
   /// In en, this message translates to:
-  /// **'This is where you take part'**
+  /// **'Your city'**
   String get citySetupHomeCityTitle;
 
   /// No description provided for @citySetupHomeCityBody.
   ///
   /// In en, this message translates to:
-  /// **'You post, comment and interact only in the city you choose.'**
+  /// **'This is where you can post, comment and like.'**
   String get citySetupHomeCityBody;
 
   /// No description provided for @citySetupElsewhereTitle.
   ///
   /// In en, this message translates to:
-  /// **'Nowhere else'**
+  /// **'Every other city'**
   String get citySetupElsewhereTitle;
 
   /// No description provided for @citySetupElsewhereBody.
   ///
   /// In en, this message translates to:
-  /// **'In every other city you can\'t post or comment.'**
+  /// **'You can visit them, but you can\'t take part.'**
   String get citySetupElsewhereBody;
 
   /// No description provided for @citySetupMicrocopy.
@@ -317,31 +317,31 @@ abstract class AppLocalizations {
   /// No description provided for @spectatorSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'The map shows you what\'s going on in 75+ cities across Greece.'**
+  /// **'See what\'s happening in the rest of Greece\'s cities.'**
   String get spectatorSubtitle;
 
   /// No description provided for @spectatorWatchTitle.
   ///
   /// In en, this message translates to:
-  /// **'You see everything'**
+  /// **'Explore every city'**
   String get spectatorWatchTitle;
 
   /// No description provided for @spectatorWatchBody.
   ///
   /// In en, this message translates to:
-  /// **'Posts, news and conversations from any city, without living there.'**
+  /// **'Posts, Virals and conversations from every corner of Greece.'**
   String get spectatorWatchBody;
 
   /// No description provided for @spectatorNoInteractionTitle.
   ///
   /// In en, this message translates to:
-  /// **'No interaction'**
+  /// **'Visitor only'**
   String get spectatorNoInteractionTitle;
 
   /// No description provided for @spectatorNoInteractionBody.
   ///
   /// In en, this message translates to:
-  /// **'Outside your own city you can\'t post, comment or react.'**
+  /// **'You can see everything, but you can\'t post, like or comment.'**
   String get spectatorNoInteractionBody;
 
   /// No description provided for @spectatorMicrocopy.
