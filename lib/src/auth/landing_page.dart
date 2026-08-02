@@ -88,7 +88,7 @@ class _LandingPageState extends State<LandingPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 24),
+              const Spacer(flex: 3),
               Image.asset(
                 'assets/neat_logo.png',
                 height: 110,
