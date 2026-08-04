@@ -22,8 +22,23 @@ export default async (request, context) => {
   }
 
   const raw = (post.text || '').trim();
-  const title = raw.length > 100 ? raw.slice(0, 97) + '…' : raw || `Post by @${post.author}`;
-  const description = `@${post.author} on Neat${post.city ? ' · ' + post.city : ''}`;
+  // A post that is just a pasted link previewed as its own URL, which told a
+  // recipient nothing. The API resolves the link for us, so show what it
+  // actually points at — "Zach King · TikTok" rather than the tiktok.com URL.
+  const link = post.link_preview || null;
+  const linkTitle = link && (link.title || '').trim();
+  const fallback = raw.length > 100 ? raw.slice(0, 97) + '…' : raw || `Post by @${post.author}`;
+  const title = linkTitle || fallback;
+
+  let description = `@${post.author} on Neat${post.city ? ' · ' + post.city : ''}`;
+  if (link) {
+    // Credit whoever made the thing being linked, next to whoever shared it.
+    const by = (link.author_name || '').trim();
+    const site = (link.site_name || '').trim();
+    const source = by && site ? `${by} · ${site}` : by || site;
+    if (source) description = `${source} — shared by @${post.author}`;
+  }
+
   const ogImage = `${url.origin}/post/${postId}/og-image`;
 
   // No og:image:width/height — the endpoint serves the post's own photo when

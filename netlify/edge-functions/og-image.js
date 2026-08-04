@@ -47,10 +47,14 @@ export default async (request, context) => {
     return defaultCard(url.origin);
   }
 
-  // Prefer the post's first image; fall back to the author's avatar, then to
-  // the branded card for text-only and video-only posts.
+  // Prefer the post's first image; then, for a post that is just a pasted
+  // link, that link's own thumbnail — a shared TikTok should preview as the
+  // video, not as a branded placeholder. The author's avatar is the next
+  // fallback, and the branded card the last.
   const media = post.media || [];
-  const source = media.find((m) => m.type === 'image')?.url || post.avatarUrl || '';
+  const linkThumb = (post.link_preview && post.link_preview.image_url) || '';
+  const source =
+    media.find((m) => m.type === 'image')?.url || linkThumb || post.avatarUrl || '';
 
   if (source.startsWith('data:')) {
     const { bytes, mimeType } = decodeDataUrl(source);
