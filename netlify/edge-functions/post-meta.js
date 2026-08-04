@@ -26,15 +26,20 @@ export default async (request, context) => {
   // recipient nothing. The API resolves the link for us, so show what it
   // actually points at — "Zach King · TikTok" rather than the tiktok.com URL.
   const link = post.link_preview || null;
-  const linkTitle = link && (link.title || '').trim();
+  const by = link ? (link.author_name || link.author_handle || '').trim() : '';
+  const site = link ? (link.site_name || '').trim() : '';
+
+  // Preference order for a link post: the link's own caption, then whose post
+  // it is ("andre0268 on TikTok") when the caption is empty, and only then the
+  // post text — which for these posts is the bare URL and says nothing.
+  const linkTitle = link ? (link.title || '').trim() : '';
+  const byline = by && site ? `${by} on ${site}` : by || site;
   const fallback = raw.length > 100 ? raw.slice(0, 97) + '…' : raw || `Post by @${post.author}`;
-  const title = linkTitle || fallback;
+  const title = linkTitle || byline || fallback;
 
   let description = `@${post.author} on Neat${post.city ? ' · ' + post.city : ''}`;
   if (link) {
     // Credit whoever made the thing being linked, next to whoever shared it.
-    const by = (link.author_name || '').trim();
-    const site = (link.site_name || '').trim();
     const source = by && site ? `${by} · ${site}` : by || site;
     if (source) description = `${source} — shared by @${post.author}`;
   }
