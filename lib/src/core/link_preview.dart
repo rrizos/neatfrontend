@@ -256,12 +256,13 @@ class LinkPreviewService {
       final res = await http
           .get(linkPreviewEndpoint(url), headers: authGetHeaders(token))
           .timeout(const Duration(seconds: 12));
-      if (res.statusCode != 200) {
-        // 429 is the server's rate limit — don't cache it as a permanent miss,
-        // the same link should get a card once things calm down.
-        if (res.statusCode != 429) _cache[url] = null;
-        return null;
-      }
+      // Only a 200 is an answer about the link. Anything else is a statement
+      // about this request — a 401 because the session had not finished
+      // loading when the feed painted, a 429 from the rate limiter, a 502 —
+      // and caching those as "this link has no card" is what made previews
+      // vanish for the rest of the run after a cold start. The server keeps
+      // its own negative cache, so asking again is cheap.
+      if (res.statusCode != 200) return null;
       final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
       final raw = body['preview'];
       final data = raw is Map<String, dynamic>
@@ -352,17 +353,23 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
   @override
   void didUpdateWidget(LinkPreviewCard old) {
     super.didUpdateWidget(old);
-    if (old.url != widget.url) {
+    // A token arriving matters as much as the url changing: on a cold start
+    // the feed paints from its local cache before the session has loaded, so
+    // the first build of a card often has nothing to authenticate with.
+    if (old.url != widget.url || old.token != widget.token) {
       _stopMeasuring();
+      _retry?.cancel();
       _data = null;
       _resolved = false;
       _measuredAspect = null;
+      _attempts = 0;
       _start();
     }
   }
 
   @override
   void dispose() {
+    _retry?.cancel();
     _stopMeasuring();
     super.dispose();
   }
@@ -375,6 +382,19 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
     _imageListener = null;
   }
 
+  /// Retries after a request that told us nothing — no session yet, offline,
+  /// rate limited, server hiccup. Without these the card gave up on the first
+  /// attempt and stayed empty for the rest of the run, which is why previews
+  /// were there when a post was written and gone after the app restarted.
+  static const _kRetryDelays = [
+    Duration(seconds: 2),
+    Duration(seconds: 5),
+    Duration(seconds: 15),
+  ];
+
+  int _attempts = 0;
+  Timer? _retry;
+
   void _start() {
     final service = LinkPreviewService.instance;
     if (service.isCached(widget.url)) {
@@ -383,14 +403,30 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
       _measureIfNeeded();
       return;
     }
+    // No session yet — the feed can paint before it loads. Wait to be given
+    // one (didUpdateWidget) rather than settling as "this link has no card".
     if (widget.token.isEmpty) return;
+
     service.fetch(widget.url, widget.token).then((data) {
       if (!mounted) return;
-      setState(() {
-        _data = data;
-        _resolved = true;
+      // A null that the service recorded is an answer: the link genuinely has
+      // no card. A null it did not record means the request never got one.
+      final answered = data != null || service.isCached(widget.url);
+      if (answered) {
+        setState(() {
+          _data = data;
+          _resolved = true;
+        });
+        _measureIfNeeded();
+        return;
+      }
+      if (_attempts >= _kRetryDelays.length) {
+        setState(() => _resolved = true);
+        return;
+      }
+      _retry = Timer(_kRetryDelays[_attempts++], () {
+        if (mounted) _start();
       });
-      _measureIfNeeded();
     });
   }
 

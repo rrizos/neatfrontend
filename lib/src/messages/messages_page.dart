@@ -3625,9 +3625,22 @@ class _SharedLinkGraphicState extends State<_SharedLinkGraphic> {
   LinkPreviewData? _data;
   bool _resolved = false;
 
+  Timer? _retry;
+  int _attempts = 0;
+
   @override
   void initState() {
     super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    super.dispose();
+  }
+
+  void _load() {
     final service = LinkPreviewService.instance;
     if (service.isCached(widget.url)) {
       _data = service.cached(widget.url);
@@ -3637,9 +3650,19 @@ class _SharedLinkGraphicState extends State<_SharedLinkGraphic> {
     if (widget.token.isEmpty) return;
     service.fetch(widget.url, widget.token).then((data) {
       if (!mounted) return;
-      setState(() {
-        _data = data;
-        _resolved = true;
+      // Same reasoning as LinkPreviewCard: only a recorded null means the
+      // link has no card. Anything else is a request that failed, and giving
+      // up on it leaves the thumbnail missing until the chat is reopened.
+      final answered = data != null || service.isCached(widget.url);
+      if (answered || _attempts >= 3) {
+        setState(() {
+          _data = data;
+          _resolved = true;
+        });
+        return;
+      }
+      _retry = Timer(Duration(seconds: 2 * (1 << _attempts++)), () {
+        if (mounted) _load();
       });
     });
   }
