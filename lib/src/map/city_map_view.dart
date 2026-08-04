@@ -198,6 +198,21 @@ class _CityMapViewState extends State<CityMapView> {
 
   // ── UI state ──────────────────────────────────────────────────────────────
   GreeceCity? _activeCity;
+
+  // Bumped whenever the card is dismissed, to build a fresh platform view.
+  //
+  // On iOS a live map that has had a full-screen Flutter layer over it does
+  // not reliably get its gestures back once that layer goes away — the map
+  // still draws, but no longer pans, which is the "it became a photo" people
+  // hit after opening a city and closing it again. This codebase has met the
+  // same limitation before and worked around it by not putting the live map
+  // under Flutter layers at all (see CitySetupPage's doc comment); here the
+  // card has to sit over the map, so the map is rebuilt instead.
+  //
+  // The cost is a tile reload, and nothing else: the card only ever closes
+  // back to the country-wide view, which is exactly where a new map starts,
+  // so there is no camera state worth preserving across the swap.
+  int _mapGeneration = 0;
   Brightness _brightness = Brightness.dark;
   bool _androidInitDone = false;
 
@@ -325,9 +340,16 @@ class _CityMapViewState extends State<CityMapView> {
 
   void _closeCard() {
     if (_activeCity == null) return;
-    setState(() => _activeCity = null);
-    _resetNativeMap();
+    setState(() {
+      _activeCity = null;
+      if (_needsFreshMapAfterOverlay) _mapGeneration++;
+    });
+    if (!_needsFreshMapAfterOverlay) _resetNativeMap();
   }
+
+  /// iOS only: see [_mapGeneration]. Elsewhere the map survives having Flutter
+  /// drawn over it, so it is reset in place rather than rebuilt.
+  bool get _needsFreshMapAfterOverlay => !kIsWeb && Platform.isIOS;
 
   void _joinCity() {
     final city = _activeCity;
@@ -357,7 +379,15 @@ class _CityMapViewState extends State<CityMapView> {
     final city = _activeCity;
     return Stack(
       children: [
-        Positioned.fill(child: _MapLayer(androidMap: _androidMap, homeCity: widget.homeCity, isDark: _brightness == Brightness.dark)),
+        Positioned.fill(
+          child: _MapLayer(
+            // Changing key = new platform view; see [_mapGeneration].
+            key: ValueKey(_mapGeneration),
+            androidMap: _androidMap,
+            homeCity: widget.homeCity,
+            isDark: _brightness == Brightness.dark,
+          ),
+        ),
 
         if (city != null)
           Positioned.fill(
@@ -626,7 +656,12 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MapLayer extends StatelessWidget {
-  const _MapLayer({this.androidMap, required this.homeCity, required this.isDark});
+  const _MapLayer({
+    super.key,
+    this.androidMap,
+    required this.homeCity,
+    required this.isDark,
+  });
   final _AndroidMap? androidMap;
   final String homeCity;
   final bool isDark;
