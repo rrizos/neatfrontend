@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'api.dart' show apiBaseUrl, webBaseUrl;
+import 'link_preview.dart' show LinkPreviewData;
 
 // Resolves media URLs so they are always HTTPS on web (avoids mixed-content
 // blocks when the app is served from Netlify). Handles three cases:
@@ -253,6 +254,10 @@ class FeedPost {
   bool saved = false;
   Poll? poll;
 
+  /// The resolved card for the first link in [text], when the server sent one.
+  /// Only the single-post endpoint fills this in — see [FeedPost.fromJson].
+  LinkPreviewData? linkPreview;
+
   // Server-sent comment count. Populated for lightweight payloads (e.g. the
   // viral/charts list) that ship the count but not the full comment threads.
   // Null for older/other payloads, where the loaded [comments] list is the
@@ -312,6 +317,13 @@ class FeedPost {
     );
     post.liked = json['liked'] == true;
     post.saved = json['saved'] == true;
+    // Only the single-post endpoint resolves this. It matters for the deep
+    // link page, which is often viewed logged-out and so can't ask the
+    // preview endpoint for itself.
+    final rawPreview = json['link_preview'];
+    if (rawPreview is Map<String, dynamic>) {
+      post.linkPreview = LinkPreviewData.fromJson(rawPreview);
+    }
     if (json['comment_count'] != null) post.serverCommentCount = parseInt(json['comment_count']);
     if (json['poll'] != null) post.poll = Poll.fromJson(json['poll'] as Map<String, dynamic>);
     return post;

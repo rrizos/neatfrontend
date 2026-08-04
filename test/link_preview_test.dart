@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neat/src/core/link_preview.dart';
+import 'package:neat/src/core/models.dart';
 
 void main() {
   group('extractUrls', () {
@@ -122,6 +123,37 @@ void main() {
     test('displayHost strips www when the server sent no site name', () {
       final d = parse({'resolved_url': 'https://www.example.com/a'});
       expect(d.displayHost, 'example.com');
+    });
+  });
+
+  group('FeedPost.linkPreview', () {
+    // The deep link page is usually opened logged-out, so it can't ask the
+    // preview endpoint itself — the card has to arrive with the post.
+    test('is parsed from the single-post payload', () {
+      final post = FeedPost.fromJson({
+        'id': 879,
+        'author': 'rizos',
+        'text': 'https://www.tiktok.com/@andre02684/video/766',
+        'link_preview': {
+          'url': 'https://www.tiktok.com/@andre02684/video/766',
+          'resolved_url': 'https://www.tiktok.com/@andre02684/video/766',
+          'title': '',
+          'site_name': 'TikTok',
+          'author_name': 'andre0268',
+          'author_handle': 'andre02684',
+          'kind': 'video',
+          'image_url': 'https://cdn/thumb.jpg',
+        },
+      });
+      expect(post.linkPreview, isNotNull);
+      expect(post.linkPreview!.isVideo, isTrue);
+      expect(post.linkPreview!.authorLabel, '@andre02684');
+      expect(post.linkPreview!.imageUrl, 'https://cdn/thumb.jpg');
+    });
+
+    test('is null when the server sent none', () {
+      final post = FeedPost.fromJson({'id': 1, 'author': 'a', 'text': 'γεια'});
+      expect(post.linkPreview, isNull);
     });
   });
 

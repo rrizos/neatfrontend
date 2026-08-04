@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../l10n/app_localizations.dart';
 import 'api.dart';
+import 'link_preview.dart';
 import 'media_cache.dart';
 import 'models.dart';
 
@@ -193,6 +194,7 @@ class _PostContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final firstMedia = post.media.isNotEmpty ? post.media.first : null;
     final avatarBytes = _decodeDataUrl(post.avatarUrl);
+    final linkPreview = post.linkPreview;
 
     return Stack(
       fit: StackFit.expand,
@@ -202,6 +204,12 @@ class _PostContent extends StatelessWidget {
           firstMedia.isVideo
               ? _VideoMedia(url: firstMedia.url)
               : _ImageMedia(url: firstMedia.url)
+        // A post that is only a link — the text is the bare URL, which says
+        // nothing. Show what the link points at instead. The server resolves
+        // it and sends it with the post, so this works logged-out, which is
+        // how most people arrive at a shared permalink.
+        else if (linkPreview != null && linkPreview.imageUrl.isNotEmpty)
+          _LinkMedia(preview: linkPreview)
         else
           Center(
             child: Padding(
@@ -272,7 +280,26 @@ class _PostContent extends StatelessWidget {
                   ),
                 ],
               ),
-              if (post.text.isNotEmpty && firstMedia != null) ...[
+              // With a link card standing in for the media, the caption
+              // describes the link — its own title, or who made it — rather
+              // than repeating the URL that is already the whole post.
+              if (linkPreview != null && linkPreview.imageUrl.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  linkPreview.title.isNotEmpty
+                      ? linkPreview.title
+                      : [
+                          if (linkPreview.authorLabel.isNotEmpty) linkPreview.authorLabel,
+                          if (linkPreview.displayHost.isNotEmpty) linkPreview.displayHost,
+                        ].join(' · '),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white, fontSize: 13, height: 1.35,
+                    shadows: [Shadow(color: Colors.black87, blurRadius: 6)],
+                  ),
+                ),
+              ] else if (post.text.isNotEmpty && firstMedia != null) ...[
                 const SizedBox(height: 8),
                 Text(
                   post.text,
@@ -314,6 +341,61 @@ class _PostContent extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 // Author avatar (right column, non-interactive)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Stands in for the post's media when the post is only a link: the linked
+/// thing's own thumbnail, tappable, with a play badge when it is a video.
+class _LinkMedia extends StatelessWidget {
+  const _LinkMedia({required this.preview});
+  final LinkPreviewData preview;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => openLink(preview.resolvedUrl),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Blurred fill behind the frame, so a portrait video doesn't sit in
+          // black bars on a wide screen.
+          Image.network(
+            preview.imageUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => const ColoredBox(color: Colors.black),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(color: Colors.black54),
+            child: SizedBox.expand(),
+          ),
+          Center(
+            child: Image.network(
+              preview.imageUrl,
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+          ),
+          if (preview.isVideo)
+            Center(
+              child: Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.9), width: 2),
+                ),
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 4),
+                  child: Icon(Icons.play_arrow_rounded,
+                      color: Colors.white, size: 38),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 class _AvatarCircle extends StatelessWidget {
   const _AvatarCircle({required this.avatarBytes, required this.author});
