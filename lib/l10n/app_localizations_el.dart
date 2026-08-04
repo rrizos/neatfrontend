@@ -1046,6 +1046,12 @@ class AppLocalizationsEl extends AppLocalizations {
       'Στείλε προσωπικό μήνυμα σε κάποιον στην πόλη σου.';
 
   @override
+  String get copy => 'Αντιγραφή';
+
+  @override
+  String get messageCopied => 'Το μήνυμα αντιγράφηκε';
+
+  @override
   String get edit => 'Επεξεργασία';
 
   @override

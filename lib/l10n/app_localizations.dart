@@ -1964,6 +1964,18 @@ abstract class AppLocalizations {
   /// **'Send a private message to someone in your city.'**
   String get yourMessagesSubtitle;
 
+  /// No description provided for @copy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get copy;
+
+  /// No description provided for @messageCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Message copied'**
+  String get messageCopied;
+
   /// No description provided for @edit.
   ///
   /// In en, this message translates to:

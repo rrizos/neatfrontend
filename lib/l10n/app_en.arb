@@ -361,6 +361,8 @@
   "noResultsSubtitle": "No conversations match your search.",
   "yourMessagesTitle": "Your messages",
   "yourMessagesSubtitle": "Send a private message to someone in your city.",
+  "copy": "Copy",
+  "messageCopied": "Message copied",
   "edit": "Edit",
   "deleteMessage": "Delete message",
   "report": "Report",

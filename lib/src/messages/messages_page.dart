@@ -1413,6 +1413,12 @@ class _ConversationPageState extends State<ConversationPage>
               title: Text(AppLocalizations.of(context).reply, style: TextStyle(color: fgClr)),
               onTap: () { Navigator.of(sheetCtx).pop(); _setReplyTo(msg); },
             ),
+            if (_copyableText(msg) != null)
+              ListTile(
+                leading: Icon(Icons.copy_rounded, color: fgClr),
+                title: Text(AppLocalizations.of(context).copy, style: TextStyle(color: fgClr)),
+                onTap: () { Navigator.of(sheetCtx).pop(); _copyMessage(msg); },
+              ),
             if (mine && _isPlainText(msg.text))
               ListTile(
                 leading: Icon(Icons.edit_outlined, color: fgClr),
@@ -1897,6 +1903,36 @@ class _ConversationPageState extends State<ConversationPage>
       !text.startsWith(_kImagePrefix) &&
       !text.startsWith(_kVoicePrefix) &&
       !text.startsWith(_kReplyPrefix);
+
+  /// What "Copy" should put on the clipboard, or null when there is nothing
+  /// worth copying.
+  ///
+  /// A reply carries its own text alongside the quoted message, so copy the
+  /// reply itself rather than the sentinel-prefixed blob. Photos, voice notes
+  /// and shared posts have no text at all — the option is hidden for those
+  /// rather than silently copying base64 or JSON.
+  String? _copyableText(MessageItem msg) {
+    if (_isPlainText(msg.text)) {
+      return msg.text.trim().isEmpty ? null : msg.text;
+    }
+    final reply = _parseReply(msg.text);
+    if (reply != null && reply.text.trim().isNotEmpty) return reply.text;
+    return null;
+  }
+
+  Future<void> _copyMessage(MessageItem msg) async {
+    final text = _copyableText(msg);
+    if (text == null) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(AppLocalizations.of(context).messageCopied),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
 
   void _startEdit(MessageItem msg) {
     if (_replyTo != null) setState(() => _replyTo = null);

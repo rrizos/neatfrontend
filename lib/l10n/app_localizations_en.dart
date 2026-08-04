@@ -1039,6 +1039,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'Send a private message to someone in your city.';
 
   @override
+  String get copy => 'Copy';
+
+  @override
+  String get messageCopied => 'Message copied';
+
+  @override
   String get edit => 'Edit';
 
   @override
