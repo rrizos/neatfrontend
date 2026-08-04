@@ -183,6 +183,14 @@ class _CityMapViewState extends State<CityMapView> {
   // ── iOS channel ──────────────────────────────────────────────────────────
   static const _iosChannel = MethodChannel('neat/native_city_map_channel');
 
+  // The channel is one shared name, so only one handler can be installed at a
+  // time. Two maps can exist at once (sign-up, and the home tab's), and the
+  // second one to be torn down used to clear the handler out from under the
+  // first — after which every 'citySelected' from the live map went nowhere:
+  // no card, and so nothing left to call zoomOut. Tracking the owner means
+  // only the instance that installed the handler can remove it.
+  static Object? _iosHandlerOwner;
+
   _AndroidMap? _androidMap;
   // Guards against an in-flight obtain() from a superseded theme/config
   // finishing late and overwriting the newer map.
@@ -200,6 +208,7 @@ class _CityMapViewState extends State<CityMapView> {
   @override
   void initState() {
     super.initState();
+    _iosHandlerOwner = this;
     _iosChannel.setMethodCallHandler(_onNativeCall);
     // Sign-up only: offer to preselect the city you are actually in. Every
     // failure path inside leaves the plain map, which is the old behaviour.
@@ -207,10 +216,11 @@ class _CityMapViewState extends State<CityMapView> {
   }
 
   /// How long the map is given to reach the detected city before the card
-  /// covers it: the glide across the country (750ms, set on both native
-  /// sides) plus the descent that follows it. Land the card any earlier and
-  /// it hides the half of the movement that shows where the city is.
-  static const _kFocusTravel = Duration(milliseconds: 1500);
+  /// covers it: settling at the country view (350ms), the glide across to the
+  /// city (750ms), and the descent onto it — all set on both native sides.
+  /// Land the card any earlier and it hides the movement that is the whole
+  /// point of showing someone where their city is.
+  static const _kFocusTravel = Duration(milliseconds: 2000);
 
   /// Asks for location permission and, if it is granted, opens the card for
   /// the city the device is in so the user only has to press connect.
@@ -263,7 +273,10 @@ class _CityMapViewState extends State<CityMapView> {
 
   @override
   void dispose() {
-    _iosChannel.setMethodCallHandler(null);
+    if (identical(_iosHandlerOwner, this)) {
+      _iosChannel.setMethodCallHandler(null);
+      _iosHandlerOwner = null;
+    }
     _androidMap?.onPinTap = null;
     super.dispose();
   }
@@ -547,17 +560,24 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
            'select' listener, which posts back as a tap and opens the card
            instantly — over the animation this exists to let people watch. */
         try {
-          var span = map.region.span;
-          map.setRegionAnimated(
-            new mapkit.CoordinateRegion(target.coordinate, span));
+          /* 1. back to the country view, so every trip starts alike */
+          map.setRegionAnimated(overview());
           setTimeout(function () {
             try {
+              /* 2. glide to the city at that height */
               map.setRegionAnimated(new mapkit.CoordinateRegion(
-                target.coordinate,
-                new mapkit.CoordinateSpan(0.63, 0.81)
-              ));
+                target.coordinate, overview().span));
             } catch (e) {}
-          }, 750);
+            setTimeout(function () {
+              try {
+                /* 3. descend onto it */
+                map.setRegionAnimated(new mapkit.CoordinateRegion(
+                  target.coordinate,
+                  new mapkit.CoordinateSpan(0.63, 0.81)
+                ));
+              } catch (e) {}
+            }, 750);
+          }, 350);
         } catch (e) {}
       }
 

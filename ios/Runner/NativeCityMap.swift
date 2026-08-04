@@ -31,6 +31,15 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
   private let map = MKMapView()
   private var channel: FlutterMethodChannel?
 
+  /// The map that incoming calls apply to.
+  ///
+  /// Every instance registers a handler under the same channel name, so only
+  /// the newest registration is live — and a call meant for the map on screen
+  /// could land on an older, off-screen one instead. zoomOut going astray is
+  /// what left a map locked with nothing able to release it. Weak so a
+  /// dismissed map does not keep itself alive as the target.
+  private static weak var current: NativeCityMapView?
+
   private let overview = MKCoordinateRegion(
     center: CLLocationCoordinate2D(latitude: 39.0, longitude: 22.9),
     span: MKCoordinateSpan(latitudeDelta: 7.5, longitudeDelta: 7.5)
@@ -42,6 +51,7 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     configureMap(frame: frame, isDark: isDark)
     wireChannel(messenger: messenger)
     loadCities(from: args)
+    NativeCityMapView.current = self
   }
 
   func view() -> UIView { map }
@@ -100,23 +110,33 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
       ($0.title ?? nil) == name
     }) else { return }
 
-    // Flown in two stages so it reads as travel rather than a cut: glide
-    // across the country at the height you were already at, then descend once
-    // the city is under you. A single setRegion does both at once, which is
-    // over before it registers as movement.
+    // Three beats, so it reads as a journey rather than a cut.
     //
-    // Deliberately does not select the annotation — that would fire
+    //   1. sit at the default view of the whole country — wherever the map
+    //      happened to be, the trip starts from the same place every time
+    //   2. glide to the city at that same height, so the distance is visible
+    //   3. descend onto it
+    //
+    // A single setRegion does all of this at once and is over before it
+    // registers as movement, which is what made the card feel like it simply
+    // appeared. Deliberately does not select the annotation — that would fire
     // didSelect, report back to Flutter as though the pin had been tapped,
     // and drop the card over the animation this exists to show.
-    let span = map.region.span
-    map.setRegion(
-      MKCoordinateRegion(center: annotation.coordinate, span: span),
-      animated: true
-    )
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.travelSeconds) { [weak self] in
-      self?.focus(on: annotation.coordinate)
+    map.setRegion(overview, animated: true)
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleSeconds) { [weak self] in
+      guard let self else { return }
+      self.map.setRegion(
+        MKCoordinateRegion(center: annotation.coordinate, span: self.overview.span),
+        animated: true
+      )
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.travelSeconds) { [weak self] in
+        self?.focus(on: annotation.coordinate)
+      }
     }
   }
+
+  /// Time given to settle at the country view before the journey starts.
+  static let settleSeconds = 0.35
 
   /// How long the glide runs before the descent begins. Kept here and mirrored
   /// in the Dart side's card delay so the card lands after the map settles.
@@ -167,13 +187,16 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
       name: "neat/native_city_map_channel",
       binaryMessenger: messenger
     )
-    channel?.setMethodCallHandler { [weak self] call, result in
-      if call.method == "zoomOut" { self?.zoomOut() }
+    // Routed to `current`, not to `self`: whichever instance registered the
+    // live handler may not be the map the user is looking at.
+    channel?.setMethodCallHandler { call, result in
+      let target = NativeCityMapView.current
+      if call.method == "zoomOut" { target?.zoomOut() }
       if call.method == "focusCity", let name = call.arguments as? String {
-        self?.focusCity(named: name)
+        target?.focusCity(named: name)
       }
       if call.method == "updateColorScheme", let isDark = call.arguments as? Bool {
-        self?.map.overrideUserInterfaceStyle = isDark ? .dark : .light
+        target?.map.overrideUserInterfaceStyle = isDark ? .dark : .light
       }
       result(nil)
     }
