@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -287,27 +289,14 @@ class _CityPickPage extends StatelessWidget {
               bottom: 56,
               left: 20,
               right: 20,
-              // No BackdropFilter here, and nothing else that blurs what is
-              // behind it, however good it looks.
-              //
-              // The map below is a UIKit view, not Flutter pixels. Asking to
-              // blur the backdrop forces the engine to read those pixels back,
-              // and since it cannot blur a live UIView it substitutes a still
-              // image of it. The map then stops redrawing and stops receiving
-              // touches — it does not merely look like a photograph of a map,
-              // at that point it is one. Panning died a second or two in
-              // because that is when the flattening took effect.
-              //
-              // A flat translucent fill costs one design flourish and keeps
-              // the map alive underneath it.
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(18),
-                child: Container(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                  child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                     decoration: BoxDecoration(
-                      // Denser than the old 0.52, which relied on the blur
-                      // behind it to keep the label readable over map detail.
-                      color: Colors.black.withValues(alpha: 0.72),
+                      color: Colors.black.withValues(alpha: 0.52),
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(
                         color: Colors.white.withValues(alpha: 0.12),
@@ -342,6 +331,7 @@ class _CityPickPage extends StatelessWidget {
                       ],
                     ),
                   ),
+                ),
               ),
             ),
           ],
