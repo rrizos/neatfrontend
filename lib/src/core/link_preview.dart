@@ -11,9 +11,12 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show File;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
@@ -228,11 +231,125 @@ class LinkPreviewService {
   final Map<String, LinkPreviewData?> _cache = {};
   final Map<String, Future<LinkPreviewData?>> _inFlight = {};
 
+  // ── Disk cache ────────────────────────────────────────────────────────────
+  //
+  // Kept alongside the in-memory map so a cold start opens with the cards it
+  // had last time instead of re-earning every one of them over the network.
+  //
+  // Bounded two ways, because this is a cache and not a record of anything:
+  // entries older than [_kMaxAge] are dropped on load, and if more than
+  // [_kMaxEntries] survive that, the oldest go too. Both happen while reading,
+  // so a file that grew during a heavy session is trimmed the next time the
+  // app opens rather than growing forever.
+  //
+  // Only successes are stored. A miss is cheap to re-ask and the server keeps
+  // its own negative cache; persisting "this had no card" would make a link
+  // that has since gained one stay blank for a week.
+  static const _kMaxAge = Duration(days: 7);
+  static const _kMaxEntries = 400;
+  static const _kFileName = 'link_previews.json';
+
+  /// When each entry was written, for expiry and for evicting the oldest.
+  final Map<String, int> _storedAt = {};
+  File? _file;
+  bool _restored = false;
+  Timer? _saveDebounce;
+
+  /// Reads the previous session's cards. Call once at startup; failures are
+  /// silent because an unreadable cache is only ever a slower start.
+  Future<void> restore() async {
+    if (_restored || kIsWeb) return;
+    _restored = true;
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final file = File('${dir.path}/$_kFileName');
+      _file = file;
+      if (!await file.exists()) return;
+      final raw = jsonDecode(await file.readAsString());
+      if (raw is! Map<String, dynamic>) return;
+
+      final cutoff = DateTime.now().millisecondsSinceEpoch - _kMaxAge.inMilliseconds;
+      final entries = <MapEntry<String, ({int at, LinkPreviewData data})>>[];
+      for (final entry in raw.entries) {
+        final value = entry.value;
+        if (value is! Map<String, dynamic>) continue;
+        final at = value['at'];
+        final data = value['data'];
+        if (at is! int || at < cutoff || data is! Map<String, dynamic>) continue;
+        entries.add(MapEntry(entry.key,
+            (at: at, data: LinkPreviewData.fromJson(data))));
+      }
+      // Newest first, so the cap keeps what is most likely to be looked at.
+      entries.sort((a, b) => b.value.at.compareTo(a.value.at));
+      for (final entry in entries.take(_kMaxEntries)) {
+        // Never overwrite something this run already resolved or was sent.
+        _cache.putIfAbsent(entry.key, () => entry.value.data);
+        _storedAt.putIfAbsent(entry.key, () => entry.value.at);
+      }
+      // Trim the file itself if it had grown past either bound.
+      if (entries.length > _kMaxEntries || entries.length != raw.length) {
+        _scheduleSave();
+      }
+    } catch (_) {
+      // Corrupt or unreadable — start empty rather than fail to launch.
+    }
+  }
+
+  void _remember(String url, LinkPreviewData data) {
+    _storedAt[url] = DateTime.now().millisecondsSinceEpoch;
+    _scheduleSave();
+  }
+
+  /// Batches writes: a feed resolving twenty links should produce one file
+  /// write, not twenty.
+  void _scheduleSave() {
+    if (kIsWeb) return;
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(const Duration(seconds: 3), _save);
+  }
+
+  Future<void> _save() async {
+    if (kIsWeb) return;
+    try {
+      final file = _file ??=
+          File('${(await getApplicationSupportDirectory()).path}/$_kFileName');
+      final keys = _storedAt.keys.toList()
+        ..sort((a, b) => (_storedAt[b] ?? 0).compareTo(_storedAt[a] ?? 0));
+      final out = <String, dynamic>{};
+      for (final key in keys.take(_kMaxEntries)) {
+        final data = _cache[key];
+        if (data == null) continue; // misses are never persisted
+        out[key] = {
+          'at': _storedAt[key],
+          'data': {
+            'url': data.url,
+            'resolved_url': data.resolvedUrl,
+            'title': data.title,
+            'description': data.description,
+            'image_url': data.imageUrl,
+            'image_width': data.imageWidth,
+            'image_height': data.imageHeight,
+            'site_name': data.siteName,
+            'author_name': data.authorName,
+            'author_handle': data.authorHandle,
+            'author_url': data.authorUrl,
+            'kind': data.kind,
+          },
+        };
+      }
+      await file.writeAsString(jsonEncode(out), flush: true);
+    } catch (_) {
+      // Out of space, sandbox denial — the cache is expendable.
+    }
+  }
+
   /// Records a card the server sent alongside its post, so the widget that
   /// eventually renders it paints on its first frame instead of asking for
   /// something we were already given.
   void seed(String url, LinkPreviewData data) {
-    _cache[normaliseUrl(url)] = data;
+    final key = normaliseUrl(url);
+    _cache[key] = data;
+    _remember(key, data);
   }
 
   /// Cached value if we already have one. Lets a widget paint a known card on
@@ -276,6 +393,7 @@ class LinkPreviewService {
           ? LinkPreviewData.fromJson(raw)
           : null;
       _cache[url] = data;
+      if (data != null) _remember(url, data);
       return data;
     } catch (_) {
       // Offline or timed out. Not cached: worth retrying on the next build.

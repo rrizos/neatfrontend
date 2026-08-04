@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/giphy_flutter_sdk.dart';
 
 import 'src/app.dart';
+import 'src/core/link_preview.dart';
 import 'src/core/pinned_http.dart';
 import 'src/core/push_service.dart';
 
@@ -36,6 +37,11 @@ void main() {
     // start can't hit FirebaseMessaging before Firebase itself is ready.
     unawaited(PushService.instance.init());
 
+    // Also fire-and-forget: reading last session's link cards is a single
+    // small file, and it finishes long before the first feed response lands,
+    // so cards paint from it rather than re-earning every one over the
+    // network. A slow or failed read only means a slower start.
+    unawaited(LinkPreviewService.instance.restore());
   }
   runApp(const NeatApp());
 }

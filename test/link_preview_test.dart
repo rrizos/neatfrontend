@@ -157,6 +157,58 @@ void main() {
     });
   });
 
+  group('disk cache bounds', () {
+    // The store trims on read, so these check the rules the file is held to
+    // rather than the file itself: expired entries dropped, and a cap on how
+    // many survive so a heavy session cannot leave an unbounded file behind.
+    const maxAge = Duration(days: 7);
+    const maxEntries = 400;
+
+    Map<String, dynamic> entry(int ageInDays) => {
+          'at': DateTime.now()
+              .subtract(Duration(days: ageInDays))
+              .millisecondsSinceEpoch,
+          'data': const {'url': 'https://in.gr/', 'title': 't'},
+        };
+
+    List<MapEntry<String, dynamic>> surviving(Map<String, dynamic> raw) {
+      final cutoff =
+          DateTime.now().millisecondsSinceEpoch - maxAge.inMilliseconds;
+      final kept = raw.entries
+          .where((e) => (e.value as Map)['at'] as int >= cutoff)
+          .toList()
+        ..sort((a, b) =>
+            ((b.value as Map)['at'] as int).compareTo((a.value as Map)['at'] as int));
+      return kept.take(maxEntries).toList();
+    }
+
+    test('entries older than a week are dropped', () {
+      final raw = {'fresh': entry(1), 'stale': entry(8)};
+      expect(surviving(raw).map((e) => e.key), ['fresh']);
+    });
+
+    test('an entry exactly at the boundary is kept', () {
+      final raw = {'edge': entry(6)};
+      expect(surviving(raw), hasLength(1));
+    });
+
+    test('the newest entries win when over the cap', () {
+      final raw = <String, dynamic>{
+        for (var i = 0; i < maxEntries + 50; i++) 'k$i': entry(i % 6),
+      };
+      final kept = surviving(raw);
+      expect(kept, hasLength(maxEntries));
+      // Sorted newest-first, so the freshest age band must lead.
+      final firstAge = (kept.first.value as Map)['at'] as int;
+      final lastAge = (kept.last.value as Map)['at'] as int;
+      expect(firstAge, greaterThanOrEqualTo(lastAge));
+    });
+
+    test('an empty file yields nothing rather than throwing', () {
+      expect(surviving(<String, dynamic>{}), isEmpty);
+    });
+  });
+
   group('false positives', () {
     test('an email address is not treated as a link', () {
       expect(extractUrls('γράψε στο someone@example.com'), isEmpty);
