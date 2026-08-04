@@ -20,6 +20,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
+import '../core/link_preview.dart';
 import '../core/media_cache.dart';
 import '../core/mentions.dart';
 import '../core/models.dart';
@@ -4951,7 +4952,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                     ],
                   ),
                 ),
-                if (c.text.isNotEmpty)
+                if (c.text.isNotEmpty) ...[
                   RichText(
                     text: TextSpan(
                       children: buildMentionSpans(
@@ -4972,6 +4973,14 @@ class _CommentSheetState extends State<_CommentSheet> {
                       ),
                     ),
                   ),
+                  if (firstUrl(c.text) case final link?)
+                    LinkPreviewCard(
+                      url: link,
+                      token: widget.session.token,
+                      isLight: isLight,
+                      compact: isReply,
+                    ),
+                ],
                 if (imgBytes != null) ...[
                   const SizedBox(height: 8),
                   _CommentPhoto(bytes: imgBytes),

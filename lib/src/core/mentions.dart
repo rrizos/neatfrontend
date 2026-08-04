@@ -7,33 +7,77 @@ import 'http_client.dart' as http;
 
 import '../../l10n/app_localizations.dart';
 import 'api.dart';
+import 'link_preview.dart';
 import 'models.dart';
 import 'post_card.dart' show decodeAvatarUrl;
 
 final RegExp mentionRegex = RegExp(r'@([\w.]+)');
 
-/// Splits [text] into spans, rendering "@username" runs as tappable,
-/// distinctly-styled links via [onTapMention]. Used everywhere mentionable
-/// text is displayed: post captions, post comments, event comments.
+/// One tappable run found in the text — either a mention or a URL.
+class _Hit {
+  const _Hit(this.start, this.end, this.text, this.isLink);
+  final int start;
+  final int end;
+  final String text;
+  final bool isLink;
+}
+
+/// Splits [text] into spans, rendering "@username" runs and URLs as tappable,
+/// distinctly-styled links. Used everywhere free text is displayed: post
+/// captions, post comments, event comments and DM bubbles.
+///
+/// Mentions go to [onTapMention]. Links open in the in-app browser unless
+/// [onTapLink] overrides that. Pass [linkStyle] to colour links differently
+/// from mentions — by default they share [mentionStyle].
 List<InlineSpan> buildMentionSpans(
   String text, {
   required TextStyle style,
   required TextStyle mentionStyle,
   required ValueChanged<String> onTapMention,
+  TextStyle? linkStyle,
+  ValueChanged<String>? onTapLink,
 }) {
+  final effectiveLinkStyle = linkStyle ?? mentionStyle;
+  final hits = <_Hit>[];
+
+  for (final m in linkMatches(text)) {
+    hits.add(_Hit(m.start, m.end, m.url, true));
+  }
+
+  for (final m in mentionRegex.allMatches(text)) {
+    // A "@handle" inside a URL path belongs to the URL, not to a user.
+    final overlapsLink =
+        hits.any((h) => h.isLink && m.start < h.end && m.end > h.start);
+    if (overlapsLink) continue;
+    hits.add(_Hit(m.start, m.end, m.group(0)!, false));
+  }
+
+  hits.sort((a, b) => a.start.compareTo(b.start));
+
   final spans = <InlineSpan>[];
   var last = 0;
-  for (final match in mentionRegex.allMatches(text)) {
-    if (match.start > last) {
-      spans.add(TextSpan(text: text.substring(last, match.start), style: style));
+  for (final hit in hits) {
+    if (hit.start < last) continue; // defensive: overlapping runs
+    if (hit.start > last) {
+      spans.add(TextSpan(text: text.substring(last, hit.start), style: style));
     }
-    final username = match.group(1)!;
-    spans.add(TextSpan(
-      text: match.group(0),
-      style: mentionStyle,
-      recognizer: TapGestureRecognizer()..onTap = () => onTapMention(username),
-    ));
-    last = match.end;
+    if (hit.isLink) {
+      spans.add(TextSpan(
+        text: hit.text,
+        style: effectiveLinkStyle,
+        recognizer: TapGestureRecognizer()
+          ..onTap = () =>
+              onTapLink != null ? onTapLink(hit.text) : openLink(hit.text),
+      ));
+    } else {
+      final username = hit.text.substring(1);
+      spans.add(TextSpan(
+        text: hit.text,
+        style: mentionStyle,
+        recognizer: TapGestureRecognizer()..onTap = () => onTapMention(username),
+      ));
+    }
+    last = hit.end;
   }
   if (last < text.length) {
     spans.add(TextSpan(text: text.substring(last), style: style));

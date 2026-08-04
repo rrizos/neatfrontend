@@ -20,6 +20,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
+import '../core/link_preview.dart';
 import '../core/media_cache.dart';
 import '../core/mentions.dart';
 import '../core/models.dart';
@@ -2848,7 +2849,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                     ],
                   ]),
                 ),
-                if (c.text.isNotEmpty)
+                if (c.text.isNotEmpty) ...[
                   RichText(
                     text: TextSpan(
                       children: buildMentionSpans(
@@ -2869,6 +2870,14 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                       ),
                     ),
                   ),
+                  if (firstUrl(c.text) case final link?)
+                    LinkPreviewCard(
+                      url: link,
+                      token: widget.token,
+                      isLight: isLight,
+                      compact: isReply,
+                    ),
+                ],
                 if (imgBytes != null) ...[
                   const SizedBox(height: 8),
                   ClipRRect(

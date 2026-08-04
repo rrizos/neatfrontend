@@ -19,6 +19,7 @@ import 'package:record/record.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
+import '../core/link_preview.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
 import '../core/realtime_service.dart';
@@ -2275,6 +2276,7 @@ class _ConversationPageState extends State<ConversationPage>
                                         mine: mine,
                                         isLast: isLast,
                                         showRead: showRead,
+                                        token: widget.token,
                                         otherUsername: widget.otherUsername,
                                         otherAvatarUrl: widget.otherAvatarUrl,
                                         isLight: isLight,
@@ -2339,6 +2341,7 @@ class _MessageRow extends StatelessWidget {
     required this.otherAvatarUrl,
     required this.isLight,
     required this.onOpenPost,
+    required this.token,
     this.onOpenUserProfile,
     this.onReply,
     this.reactions = const [],
@@ -2355,6 +2358,7 @@ class _MessageRow extends StatelessWidget {
   final String otherUsername;
   final String otherAvatarUrl;
   final bool isLight;
+  final String token;
   final void Function(String, int)? onOpenPost;
   final VoidCallback? onOpenUserProfile;
   final VoidCallback? onReply;
@@ -2366,7 +2370,7 @@ class _MessageRow extends StatelessWidget {
   Widget _content() {
     final replyData = _parseReply(message.text);
     if (replyData != null) {
-      return _ReplyMessageBubble(replyData: replyData, mine: mine, isLast: isLast, isLight: isLight, onTapQuote: onTapQuote);
+      return _ReplyMessageBubble(replyData: replyData, mine: mine, isLast: isLast, isLight: isLight, token: token, onTapQuote: onTapQuote);
     }
 
     final imgBytes  = _parseImage(message.text);
@@ -2390,6 +2394,7 @@ class _MessageRow extends StatelessWidget {
       return _SharedPostCard(
         data: postData,
         isLight: isLight,
+        token: token,
         onTap: onOpenPost != null
             ? () => onOpenPost!(
                   postData['author']?.toString() ?? '',
@@ -2399,7 +2404,7 @@ class _MessageRow extends StatelessWidget {
       );
     }
 
-    return _Bubble(text: message.text, mine: mine, isLast: isLast, isLight: isLight, edited: message.edited);
+    return _Bubble(text: message.text, mine: mine, isLast: isLast, isLight: isLight, edited: message.edited, token: token);
   }
 
   Widget _wrapGesture(Widget child) => GestureDetector(
@@ -2507,11 +2512,12 @@ class _MessageRow extends StatelessWidget {
 // ─── Text bubble ──────────────────────────────────────────────────────────────
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.text, required this.mine, required this.isLast, required this.isLight, this.edited = false});
+  const _Bubble({required this.text, required this.mine, required this.isLast, required this.isLight, required this.token, this.edited = false});
   final String text;
   final bool mine;
   final bool isLast;
   final bool isLight;
+  final String token;
   final bool edited;
 
   @override
@@ -2521,6 +2527,21 @@ class _Bubble extends StatelessWidget {
     final editedColor = mine
         ? Colors.white.withValues(alpha: 0.55)
         : (isLight ? _kSubLgt : _kSubDark);
+    final baseStyle = TextStyle(color: textColor, fontSize: 15, height: 1.35);
+    // On a sent (blue) bubble the usual link blue would vanish into the
+    // background, so links there are underlined white instead.
+    final linkStyle = mine
+        ? baseStyle.copyWith(
+            decoration: TextDecoration.underline,
+            decorationColor: Colors.white.withValues(alpha: 0.7),
+            fontWeight: FontWeight.w600,
+          )
+        : baseStyle.copyWith(
+            color: const Color(0xff3897f0),
+            fontWeight: FontWeight.w600,
+          );
+    final link = firstUrl(text);
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(color: bg, borderRadius: _bubbleRadius(mine, isLast)),
@@ -2528,7 +2549,20 @@ class _Bubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(text, style: TextStyle(color: textColor, fontSize: 15, height: 1.35)),
+          RichText(
+            text: TextSpan(
+              children: buildLinkSpans(text, style: baseStyle, linkStyle: linkStyle),
+            ),
+          ),
+          if (link != null)
+            LinkPreviewCard(
+              url: link,
+              token: token,
+              isLight: isLight,
+              compact: true,
+              onSurface: mine,
+              maxWidth: 260,
+            ),
           if (edited) ...[
             const SizedBox(height: 3),
             Text(AppLocalizations.of(context).editedLabel, style: TextStyle(fontSize: 10, color: editedColor)),
@@ -3286,10 +3320,16 @@ class _EmptyConversation extends StatelessWidget {
 // ─── Shared post card ─────────────────────────────────────────────────────────
 
 class _SharedPostCard extends StatelessWidget {
-  const _SharedPostCard({required this.data, required this.isLight, required this.onTap});
+  const _SharedPostCard({
+    required this.data,
+    required this.isLight,
+    required this.onTap,
+    required this.token,
+  });
   final Map<String, dynamic> data;
   final bool isLight;
   final VoidCallback? onTap;
+  final String token;
 
   static const _kCardWidth = 210.0;
 
@@ -3352,6 +3392,15 @@ class _SharedPostCard extends StatelessWidget {
         question: text,
         options: pollOptions.cast<Map>(),
         isLight: isLight,
+      );
+      showCaptionBelow = false;
+    } else if (text.isNotEmpty && firstUrl(text) != null) {
+      // A post that is just a link — very often a TikTok or a reel. Show what
+      // the link *is* rather than its URL as text.
+      mediaArea = _SharedLinkGraphic(
+        url: firstUrl(text)!,
+        token: token,
+        text: text,
       );
       showCaptionBelow = false;
     } else if (text.isNotEmpty) {
@@ -3516,6 +3565,94 @@ class _SharedPollGraphic extends StatelessWidget {
   }
 }
 
+/// The square graphic for a shared post whose content is a link.
+///
+/// Posts here are often just a pasted TikTok or reel, and rendering the raw
+/// URL as text told the recipient nothing. This shows the link's own
+/// thumbnail, falling back to the text graphic when there isn't one.
+class _SharedLinkGraphic extends StatefulWidget {
+  const _SharedLinkGraphic({
+    required this.url,
+    required this.token,
+    required this.text,
+  });
+
+  final String url;
+  final String token;
+  final String text;
+
+  @override
+  State<_SharedLinkGraphic> createState() => _SharedLinkGraphicState();
+}
+
+class _SharedLinkGraphicState extends State<_SharedLinkGraphic> {
+  LinkPreviewData? _data;
+  bool _resolved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final service = LinkPreviewService.instance;
+    if (service.isCached(widget.url)) {
+      _data = service.cached(widget.url);
+      _resolved = true;
+      return;
+    }
+    if (widget.token.isEmpty) return;
+    service.fetch(widget.url, widget.token).then((data) {
+      if (!mounted) return;
+      setState(() {
+        _data = data;
+        _resolved = true;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = _data;
+    // Until it resolves — and if it never does — the text graphic is still a
+    // better placeholder than an empty square.
+    if (!_resolved || data == null || data.imageUrl.isEmpty) {
+      return _SharedTextGraphic(text: widget.text);
+    }
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          CachedNetworkImage(
+            imageUrl: data.imageUrl,
+            cacheManager: imageCacheManager,
+            fit: BoxFit.cover,
+            memCacheWidth: 630, // ~210 logical px card × 3.0 max DPR
+            fadeInDuration: Duration.zero,
+            errorWidget: (_, _, _) => _SharedTextGraphic(text: widget.text),
+          ),
+          if (data.isVideo)
+            Center(
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.9), width: 1.5),
+                ),
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 3),
+                  child: Icon(Icons.play_arrow_rounded,
+                      color: Colors.white, size: 26),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SharedTextGraphic extends StatelessWidget {
   const _SharedTextGraphic({required this.text});
   final String text;
@@ -3659,6 +3796,7 @@ class _ReplyMessageBubble extends StatelessWidget {
     required this.mine,
     required this.isLast,
     required this.isLight,
+    required this.token,
     this.onTapQuote,
   });
 
@@ -3666,6 +3804,7 @@ class _ReplyMessageBubble extends StatelessWidget {
   final bool mine;
   final bool isLast;
   final bool isLight;
+  final String token;
   final VoidCallback? onTapQuote;
 
   @override
@@ -3719,9 +3858,43 @@ class _ReplyMessageBubble extends StatelessWidget {
             // ── reply text ───────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-              child: Text(
-                replyData.text,
-                style: TextStyle(color: textColor, fontSize: 15, height: 1.35),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  RichText(
+                    text: TextSpan(
+                      children: buildLinkSpans(
+                        replyData.text,
+                        style: TextStyle(color: textColor, fontSize: 15, height: 1.35),
+                        linkStyle: mine
+                            ? TextStyle(
+                                color: textColor,
+                                fontSize: 15,
+                                height: 1.35,
+                                fontWeight: FontWeight.w600,
+                                decoration: TextDecoration.underline,
+                                decorationColor: Colors.white.withValues(alpha: 0.7),
+                              )
+                            : const TextStyle(
+                                color: Color(0xff3897f0),
+                                fontSize: 15,
+                                height: 1.35,
+                                fontWeight: FontWeight.w600,
+                              ),
+                      ),
+                    ),
+                  ),
+                  if (firstUrl(replyData.text) case final link?)
+                    LinkPreviewCard(
+                      url: link,
+                      token: token,
+                      isLight: isLight,
+                      compact: true,
+                      onSurface: mine,
+                      maxWidth: 260,
+                    ),
+                ],
               ),
             ),
           ],

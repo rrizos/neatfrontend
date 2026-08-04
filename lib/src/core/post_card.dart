@@ -12,6 +12,7 @@ import 'package:visibility_detector/visibility_detector.dart';
 import '../../l10n/app_localizations.dart';
 import 'api.dart';
 import 'icons.dart';
+import 'link_preview.dart';
 import 'media_cache.dart';
 import 'mentions.dart';
 import 'models.dart';
@@ -1372,24 +1373,42 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
             if (widget.post.text.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: RichText(
-                  text: TextSpan(
-                    children: buildMentionSpans(
-                      widget.post.text,
-                      style: TextStyle(
-                        fontSize: 15.5,
-                        height: 1.45,
-                        color: isLight ? Colors.black : Colors.white,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    RichText(
+                      text: TextSpan(
+                        children: buildMentionSpans(
+                          widget.post.text,
+                          style: TextStyle(
+                            fontSize: 15.5,
+                            height: 1.45,
+                            color: isLight ? Colors.black : Colors.white,
+                          ),
+                          mentionStyle: const TextStyle(
+                            fontSize: 15.5,
+                            height: 1.45,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xff3897f0),
+                          ),
+                          onTapMention: widget.onOpenUserProfile,
+                        ),
                       ),
-                      mentionStyle: const TextStyle(
-                        fontSize: 15.5,
-                        height: 1.45,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xff3897f0),
-                      ),
-                      onTapMention: widget.onOpenUserProfile,
                     ),
-                  ),
+                    // Only when the post has no media of its own — a card
+                    // under a photo post competes with the photo.
+                    if (widget.post.media.isEmpty)
+                      Builder(builder: (_) {
+                        final link = firstUrl(widget.post.text);
+                        if (link == null) return const SizedBox.shrink();
+                        return LinkPreviewCard(
+                          url: link,
+                          token: widget.token,
+                          isLight: isLight,
+                        );
+                      }),
+                  ],
                 ),
               ),
             if (widget.post.poll != null)

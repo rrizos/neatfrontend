@@ -23,6 +23,9 @@ const String webBaseUrl = String.fromEnvironment(
 // (`/post/<id>`) land on the app too — see netlify.toml.
 const String webAppPath = '/app';
 
+Uri linkPreviewEndpoint(String url) =>
+    Uri.parse('$apiBaseUrl/api/link-preview/').replace(queryParameters: {'url': url});
+
 Uri postDetailEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/');
 
 Uri postsEndpoint({bool fresh = false, String? city}) {
