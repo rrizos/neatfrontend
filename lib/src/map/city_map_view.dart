@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -205,9 +206,11 @@ class _CityMapViewState extends State<CityMapView> {
     if (widget.isSignUp) unawaited(_preselectCurrentCity());
   }
 
-  /// How long the map is given to fly to the detected city before the card
-  /// covers it. Matches the region animation MapKit runs on both platforms.
-  static const _kFocusTravel = Duration(milliseconds: 850);
+  /// How long the map is given to reach the detected city before the card
+  /// covers it: the glide across the country (750ms, set on both native
+  /// sides) plus the descent that follows it. Land the card any earlier and
+  /// it hides the half of the movement that shows where the city is.
+  static const _kFocusTravel = Duration(milliseconds: 1500);
 
   /// Asks for location permission and, if it is granted, opens the card for
   /// the city the device is in so the user only has to press connect.
@@ -536,14 +539,25 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
           if (a.title === name) target = a;
         });
         if (!target) return;
-        /* Camera only. Assigning selectedAnnotation fires the pin's own
+        /* Two stages so it reads as travel rather than a cut: glide across
+           the country at the height you were already at, then descend once
+           the city is under you.
+
+           Camera only. Assigning selectedAnnotation fires the pin's own
            'select' listener, which posts back as a tap and opens the card
            instantly — over the animation this exists to let people watch. */
         try {
-          map.setRegionAnimated(new mapkit.CoordinateRegion(
-            target.coordinate,
-            new mapkit.CoordinateSpan(0.63, 0.81)
-          ));
+          var span = map.region.span;
+          map.setRegionAnimated(
+            new mapkit.CoordinateRegion(target.coordinate, span));
+          setTimeout(function () {
+            try {
+              map.setRegionAnimated(new mapkit.CoordinateRegion(
+                target.coordinate,
+                new mapkit.CoordinateSpan(0.63, 0.81)
+              ));
+            } catch (e) {}
+          }, 750);
         } catch (e) {}
       }
 
@@ -615,6 +629,19 @@ class _MapLayer extends StatelessWidget {
       final homeCity = this.homeCity.trim().toLowerCase();
       return UiKitView(
         viewType: 'neat/native_city_map',
+        // Without this the map dies mid-pan and stays dead.
+        //
+        // A UiKitView with no recognizers of its own only *borrows* touches:
+        // Flutter withholds them pending the gesture arena, and hands them to
+        // the platform view only while nothing in Flutter has claimed them.
+        // The moment an ancestor recognizer wins — the route's own
+        // back-swipe, a parent page view — the native map is sent
+        // touchesCancelled and the pan stops dead, which is why it froze a
+        // second or two in rather than immediately. Claiming eagerly means the
+        // map owns the gesture from touch-down and cannot have it taken away.
+        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+          Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new),
+        },
         creationParams: {
           'cities': greeceCities
               .where((c) => c.name.trim().toLowerCase() != homeCity)
@@ -647,7 +674,15 @@ class _MapLayer extends StatelessWidget {
       valueListenable: map.ready,
       builder: (context, ready, child) =>
           ready ? child! : ColoredBox(color: placeholderColor),
-      child: WebViewWidget(controller: map.controller),
+      // Claims touches eagerly for the same reason as the iOS map above: an
+      // ancestor winning the arena mid-pan would cancel the WebView's gesture
+      // and leave the map unresponsive.
+      child: WebViewWidget(
+        controller: map.controller,
+        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+          Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new),
+        },
+      ),
     );
   }
 }

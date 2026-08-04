@@ -99,12 +99,28 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     guard let annotation = map.annotations.first(where: {
       ($0.title ?? nil) == name
     }) else { return }
-    // Deliberately only moves the camera. Selecting the annotation here would
-    // fire didSelect, which reports back to Flutter as though the user had
-    // tapped the pin — and the card would open instantly, over the very
-    // animation this exists to let people watch.
-    focus(on: annotation.coordinate)
+
+    // Flown in two stages so it reads as travel rather than a cut: glide
+    // across the country at the height you were already at, then descend once
+    // the city is under you. A single setRegion does both at once, which is
+    // over before it registers as movement.
+    //
+    // Deliberately does not select the annotation — that would fire
+    // didSelect, report back to Flutter as though the pin had been tapped,
+    // and drop the card over the animation this exists to show.
+    let span = map.region.span
+    map.setRegion(
+      MKCoordinateRegion(center: annotation.coordinate, span: span),
+      animated: true
+    )
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.travelSeconds) { [weak self] in
+      self?.focus(on: annotation.coordinate)
+    }
   }
+
+  /// How long the glide runs before the descent begins. Kept here and mirrored
+  /// in the Dart side's card delay so the card lands after the map settles.
+  static let travelSeconds = 0.75
 
   private func zoomOut() {
     // Still restores interaction, though nothing disables it any more: a map
