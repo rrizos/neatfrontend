@@ -213,6 +213,7 @@ class _CityMapViewState extends State<CityMapView> {
   // back to the country-wide view, which is exactly where a new map starts,
   // so there is no camera state worth preserving across the swap.
   int _mapGeneration = 0;
+  Timer? _mapRebuild;
   Brightness _brightness = Brightness.dark;
   bool _androidInitDone = false;
 
@@ -288,6 +289,7 @@ class _CityMapViewState extends State<CityMapView> {
 
   @override
   void dispose() {
+    _mapRebuild?.cancel();
     if (identical(_iosHandlerOwner, this)) {
       _iosChannel.setMethodCallHandler(null);
       _iosHandlerOwner = null;
@@ -340,16 +342,33 @@ class _CityMapViewState extends State<CityMapView> {
 
   void _closeCard() {
     if (_activeCity == null) return;
-    setState(() {
-      _activeCity = null;
-      if (_needsFreshMapAfterOverlay) _mapGeneration++;
-    });
-    if (!_needsFreshMapAfterOverlay) _resetNativeMap();
+    setState(() => _activeCity = null);
+    // Always animate out first. The rebuild that follows on iOS is only there
+    // to restore gestures; letting it replace the animation would drop the
+    // user at the country view with no sense of having travelled back.
+    _resetNativeMap();
+    if (_needsFreshMapAfterOverlay) _scheduleMapRebuild();
   }
 
   /// iOS only: see [_mapGeneration]. Elsewhere the map survives having Flutter
   /// drawn over it, so it is reset in place rather than rebuilt.
   bool get _needsFreshMapAfterOverlay => !kIsWeb && Platform.isIOS;
+
+  /// Long enough for the zoom-out to finish before the map is swapped, so the
+  /// new one is built at the camera the old one just animated to and the
+  /// exchange is invisible.
+  static const _kZoomOutSettle = Duration(milliseconds: 900);
+
+  void _scheduleMapRebuild() {
+    _mapRebuild?.cancel();
+    _mapRebuild = Timer(_kZoomOutSettle, () {
+      // A card opened again during the wait means the map is under an overlay
+      // once more; rebuilding now would swap it out from under the card, and
+      // the next close will schedule this again anyway.
+      if (!mounted || _activeCity != null) return;
+      setState(() => _mapGeneration++);
+    });
+  }
 
   void _joinCity() {
     final city = _activeCity;
