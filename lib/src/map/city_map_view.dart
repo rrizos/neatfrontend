@@ -59,6 +59,13 @@ class _AndroidMap {
     });
   }
 
+  void focusCity(String name) {
+    final encoded = jsonEncode(name);
+    controller.runJavaScript('NeatMap.focusCity($encoded)').catchError((Object e) {
+      debugPrint('[map] focusCity: $e');
+    });
+  }
+
   static String? _mapkitJs;
   static Future<_AndroidMap>? _warmed;
   static String? _warmedKey;
@@ -198,14 +205,38 @@ class _CityMapViewState extends State<CityMapView> {
     if (widget.isSignUp) unawaited(_preselectCurrentCity());
   }
 
+  /// How long the map is given to fly to the detected city before the card
+  /// covers it. Matches the region animation MapKit runs on both platforms.
+  static const _kFocusTravel = Duration(milliseconds: 850);
+
   /// Asks for location permission and, if it is granted, opens the card for
   /// the city the device is in so the user only has to press connect.
+  ///
+  /// The map travels there first. Dropping the card straight onto a map still
+  /// showing the whole country gave no sense of where "your city" is; flying
+  /// to it and then presenting the card reads as one movement.
   Future<void> _preselectCurrentCity() async {
     final name = await CityLocator.detectCity();
     // The prompt is modal and the fix can take seconds — by now the user may
     // have left, or already picked a city by hand. Never override either.
     if (!mounted || name == null || _activeCity != null) return;
+
+    _focusNativeCity(name);
+    await Future<void>.delayed(_kFocusTravel);
+    // Re-check: the wait is long enough for the user to have tapped a pin of
+    // their own, and their choice wins over the one we guessed.
+    if (!mounted || _activeCity != null) return;
     _onCityPinTapped(name);
+  }
+
+  /// Zooms the map to [name] without a tap, on whichever map is in play.
+  void _focusNativeCity(String name) {
+    if (kIsWeb) return;
+    if (Platform.isAndroid) {
+      _androidMap?.focusCity(name);
+    } else if (Platform.isIOS) {
+      _iosChannel.invokeMethod('focusCity', name);
+    }
   }
 
   @override
@@ -495,6 +526,27 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
         }
       }
 
+      /* Zooms to a city by name without waiting for a tap, so sign-up can
+         travel to the city it detected rather than dropping the card over an
+         untouched map of the whole country. */
+      function focusCity(name) {
+        if (!map) return;
+        var target = null;
+        map.annotations.forEach(function (a) {
+          if (a.title === name) target = a;
+        });
+        if (!target) return;
+        /* Camera only. Assigning selectedAnnotation fires the pin's own
+           'select' listener, which posts back as a tap and opens the card
+           instantly — over the animation this exists to let people watch. */
+        try {
+          map.setRegionAnimated(new mapkit.CoordinateRegion(
+            target.coordinate,
+            new mapkit.CoordinateSpan(0.63, 0.81)
+          ));
+        } catch (e) {}
+      }
+
       function reset() {
         if (!map) return;
         // Deselect FIRST — this is what visually lowers the pin the moment
@@ -506,7 +558,7 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
         catch (e) { try { map.region = overview(); } catch (e2) {} }
       }
 
-      return { start: start, reset: reset };
+      return { start: start, reset: reset, focusCity: focusCity };
     })();
   </script>
 ''');

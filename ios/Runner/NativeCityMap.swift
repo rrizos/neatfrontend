@@ -66,26 +66,50 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
       !name.isEmpty
     else { return }
 
-    // Lock the map immediately so no further taps can land while the
-    // Flutter card is visible. Unlocked as the first act of zoomOut().
-    mv.isUserInteractionEnabled = false
-
-    mv.setRegion(
-      MKCoordinateRegion(
-        center: annotation.coordinate,
-        latitudinalMeters: 70_000,
-        longitudinalMeters: 70_000
-      ),
-      animated: true
-    )
+    // No interaction lock here. While the card is up the Flutter overlay
+    // already swallows every touch before it reaches this view, so a lock adds
+    // nothing — but it made the map's only unlock path a round trip through
+    // Flutter (zoomOut(), reached solely from the card's close/join handlers).
+    // Any selection that did not end in a visible card therefore froze the map
+    // for good: interaction off, no card to dismiss, nothing left to call
+    // zoomOut. The Android map has never had a lock for exactly this reason.
+    focus(on: annotation.coordinate)
     channel?.invokeMethod("citySelected", arguments: name)
   }
 
   // MARK: Private
 
+  /// The close-in region used whenever a city becomes the subject, whether
+  /// the user tapped its pin or we picked it from their location.
+  private func focus(on coordinate: CLLocationCoordinate2D) {
+    map.setRegion(
+      MKCoordinateRegion(
+        center: coordinate,
+        latitudinalMeters: 70_000,
+        longitudinalMeters: 70_000
+      ),
+      animated: true
+    )
+  }
+
+  /// Zooms to a city by name without waiting for a tap, so sign-up can travel
+  /// to the city it detected instead of the card appearing over an untouched
+  /// map of the whole country.
+  private func focusCity(named name: String) {
+    guard let annotation = map.annotations.first(where: {
+      ($0.title ?? nil) == name
+    }) else { return }
+    // Deliberately only moves the camera. Selecting the annotation here would
+    // fire didSelect, which reports back to Flutter as though the user had
+    // tapped the pin — and the card would open instantly, over the very
+    // animation this exists to let people watch.
+    focus(on: annotation.coordinate)
+  }
+
   private func zoomOut() {
-    // Unlock first — this must happen unconditionally so the map is never
-    // permanently stuck even if something else in this function throws.
+    // Still restores interaction, though nothing disables it any more: a map
+    // left locked by a previous build must come back to life on first close
+    // rather than staying dead until the app is reinstalled.
     map.isUserInteractionEnabled = true
     map.selectedAnnotations.forEach { map.deselectAnnotation($0, animated: false) }
     map.setRegion(overview, animated: true)
@@ -129,6 +153,9 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     )
     channel?.setMethodCallHandler { [weak self] call, result in
       if call.method == "zoomOut" { self?.zoomOut() }
+      if call.method == "focusCity", let name = call.arguments as? String {
+        self?.focusCity(named: name)
+      }
       if call.method == "updateColorScheme", let isDark = call.arguments as? Bool {
         self?.map.overrideUserInterfaceStyle = isDark ? .dark : .light
       }
