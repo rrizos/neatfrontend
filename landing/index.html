@@ -55,10 +55,10 @@
   :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 
   /* ---------- header ---------- */
-  header.site { background: transparent; position: fixed; top: 0; left: 0; right: 0; z-index: 50; padding-top: 44px; transform: translateZ(0); }
+  header.site { background: transparent; position: fixed; top: 0; left: 0; right: 0; z-index: 50; padding-top: 24px; transform: translateZ(0); }
   .navrow {
     display: grid; grid-template-columns: 1fr auto 1fr; grid-template-areas: "left center right";
-    align-items: center; height: 84px; gap: 12px;
+    align-items: center; padding-top: 10px; padding-bottom: 4px; gap: 12px;
   }
   .brand { grid-area: center; justify-self: center; display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 19px; letter-spacing: -0.01em; text-decoration: none; }
   .brand img { height: 64px; width: 64px; }
@@ -102,7 +102,7 @@
 
   /* ---------- hero ---------- */
   .hero {
-    position: relative; overflow: hidden; padding: 212px 0 150px;
+    position: relative; overflow: hidden; padding: 175px 0 150px;
     background:
       radial-gradient(60% 50% at 50% 0%, rgba(255,255,255,0.35), transparent 70%),
       linear-gradient(165deg, #0f4fd6 0%, #1f74f5 45%, #7db2ff 100%);
@@ -202,7 +202,7 @@
 
   /* ---------- mobile tightening ---------- */
   @media (max-width: 640px) {
-    .hero { padding: 172px 0 52px; }
+    .hero { padding: 145px 0 52px; }
     .hero p.deck { font-size: 16px; }
     .hero-panel { margin: 56px 18px 0; padding: 80px 20px 66px; border-radius: 22px; }
     .hero-panel p.lede { font-size: 13.5px; margin-bottom: 14px; }

@@ -2749,7 +2749,7 @@ class _ViralViewState extends State<_ViralView> {
   /// so daily falls back to weekly and weekly to monthly rather than showing
   /// nothing. Only the widening is automatic — an explicit pick from the menu
   /// clears [_periodAutoWidened] and is honoured as the starting point.
-  Future<void> _loadViral() async {
+  Future<void> _loadViral({bool autoWiden = true}) async {
     if (mounted) setState(() => _loadingViral = true);
     // A previously auto-widened period must not stick: a refresh, or switching
     // scope, deserves a fresh look at today first.
@@ -2763,7 +2763,9 @@ class _ViralViewState extends State<_ViralView> {
         setState(() => _loadingViral = false);
         return;
       }
-      final wider = posts.isEmpty ? _widerThan(period) : null;
+      // Only auto-widen on automatic loads (refresh/scope change), not when
+      // the user explicitly picked a period from the menu.
+      final wider = (autoWiden && posts.isEmpty) ? _widerThan(period) : null;
       if (wider == null) {
         setState(() {
           _period = period;
@@ -2970,7 +2972,7 @@ class _ViralViewState extends State<_ViralView> {
                                   _period = p;
                                   _periodAutoWidened = false;
                                 });
-                                _loadViral();
+                                _loadViral(autoWiden: false);
                               },
                               offset: const Offset(0, 32),
                               color: isLight ? Colors.white : const Color(0xff1e1e1e),

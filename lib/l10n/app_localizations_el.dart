@@ -99,21 +99,21 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get citySetupSubtitle =>
-      'Είναι η μόνη πόλη στην οποία θα μπορείς να συμμετέχεις.';
+      'Η πόλη που θα διαλέξεις θα είναι η κοινότητά σου στη Neat.';
 
   @override
-  String get citySetupHomeCityTitle => 'Μόνο εδώ συμμετέχεις';
+  String get citySetupHomeCityTitle => 'Η πόλη σου';
 
   @override
   String get citySetupHomeCityBody =>
-      'Δημοσιεύεις, σχολιάζεις και αλληλεπιδράς αποκλειστικά στην πόλη που θα διαλέξεις.';
+      'Εδώ μπορείς να κάνεις posts, σχόλια και likes.';
 
   @override
-  String get citySetupElsewhereTitle => 'Πουθενά αλλού';
+  String get citySetupElsewhereTitle => 'Οι υπόλοιπες πόλεις';
 
   @override
   String get citySetupElsewhereBody =>
-      'Στις υπόλοιπες πόλεις δεν μπορείς να δημοσιεύσεις ούτε να σχολιάσεις.';
+      'Μπορείς να τις επισκέπτεσαι, αλλά όχι να συμμετέχεις.';
 
   @override
   String get citySetupMicrocopy =>
@@ -127,21 +127,21 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get spectatorSubtitle =>
-      'Στον χάρτη βλέπεις τι γίνεται σε 75+ πόλεις της Ελλάδας.';
+      'Δες τι συμβαίνει και στις υπόλοιπες πόλεις της Ελλάδας.';
 
   @override
-  String get spectatorWatchTitle => 'Βλέπεις τα πάντα';
+  String get spectatorWatchTitle => 'Δες κάθε πόλη από μέσα';
 
   @override
   String get spectatorWatchBody =>
-      'Αναρτήσεις, νέα και συζητήσεις από κάθε πόλη, χωρίς να ζεις εκεί.';
+      'Posts, Virals και συζητήσεις από κάθε γωνιά της Ελλάδας.';
 
   @override
-  String get spectatorNoInteractionTitle => 'Χωρίς αλληλεπίδραση';
+  String get spectatorNoInteractionTitle => 'Μόνο ως επισκέπτης';
 
   @override
   String get spectatorNoInteractionBody =>
-      'Εκτός της πόλης σου δεν μπορείς να δημοσιεύσεις, να σχολιάσεις ή να αντιδράσεις.';
+      'Μπορείς να βλέπεις τα πάντα, αλλά όχι να κάνεις post, likes ή σχόλια.';
 
   @override
   String get spectatorMicrocopy =>

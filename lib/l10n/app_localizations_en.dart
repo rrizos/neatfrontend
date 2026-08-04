@@ -98,21 +98,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get citySetupSubtitle =>
-      'It\'s the only city you\'ll be able to take part in.';
+      'The city you choose will be your community on Neat.';
 
   @override
-  String get citySetupHomeCityTitle => 'This is where you take part';
+  String get citySetupHomeCityTitle => 'Your city';
 
   @override
   String get citySetupHomeCityBody =>
-      'You post, comment and interact only in the city you choose.';
+      'This is where you can post, comment and like.';
 
   @override
-  String get citySetupElsewhereTitle => 'Nowhere else';
+  String get citySetupElsewhereTitle => 'Every other city';
 
   @override
   String get citySetupElsewhereBody =>
-      'In every other city you can\'t post or comment.';
+      'You can visit them, but you can\'t take part.';
 
   @override
   String get citySetupMicrocopy =>
@@ -126,21 +126,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get spectatorSubtitle =>
-      'The map shows you what\'s going on in 75+ cities across Greece.';
+      'See what\'s happening in the rest of Greece\'s cities.';
 
   @override
-  String get spectatorWatchTitle => 'You see everything';
+  String get spectatorWatchTitle => 'Explore every city';
 
   @override
   String get spectatorWatchBody =>
-      'Posts, news and conversations from any city, without living there.';
+      'Posts, Virals and conversations from every corner of Greece.';
 
   @override
-  String get spectatorNoInteractionTitle => 'No interaction';
+  String get spectatorNoInteractionTitle => 'Visitor only';
 
   @override
   String get spectatorNoInteractionBody =>
-      'Outside your own city you can\'t post, comment or react.';
+      'You can see everything, but you can\'t post, like or comment.';
 
   @override
   String get spectatorMicrocopy =>
