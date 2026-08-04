@@ -228,6 +228,13 @@ class LinkPreviewService {
   final Map<String, LinkPreviewData?> _cache = {};
   final Map<String, Future<LinkPreviewData?>> _inFlight = {};
 
+  /// Records a card the server sent alongside its post, so the widget that
+  /// eventually renders it paints on its first frame instead of asking for
+  /// something we were already given.
+  void seed(String url, LinkPreviewData data) {
+    _cache[normaliseUrl(url)] = data;
+  }
+
   /// Cached value if we already have one. Lets a widget paint a known card on
   /// its first frame instead of flashing a loading state.
   ///

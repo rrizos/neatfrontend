@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'api.dart' show apiBaseUrl, webBaseUrl;
-import 'link_preview.dart' show LinkPreviewData;
+import 'link_preview.dart'
+    show LinkPreviewData, LinkPreviewService, firstUrl;
 
 // Resolves media URLs so they are always HTTPS on web (avoids mixed-content
 // blocks when the app is served from Netlify). Handles three cases:
@@ -322,7 +323,13 @@ class FeedPost {
     // preview endpoint for itself.
     final rawPreview = json['link_preview'];
     if (rawPreview is Map<String, dynamic>) {
-      post.linkPreview = LinkPreviewData.fromJson(rawPreview);
+      final preview = LinkPreviewData.fromJson(rawPreview);
+      post.linkPreview = preview;
+      // Feeds carry the cards they already know, so seed them here: the post
+      // card, and any comment quoting the same link, then paint on their first
+      // frame rather than each making a request for something already sent.
+      final link = firstUrl(post.text);
+      if (link != null) LinkPreviewService.instance.seed(link, preview);
     }
     if (json['comment_count'] != null) post.serverCommentCount = parseInt(json['comment_count']);
     if (json['poll'] != null) post.poll = Poll.fromJson(json['poll'] as Map<String, dynamic>);
@@ -525,10 +532,24 @@ class MessageItem {
               .map((v) => v.toString())
               .toList(),
     };
+    final text = json['text']?.toString() ?? '';
+    // The thread ships the cards the server already holds. Seeding them means
+    // a chat opens with its thumbnails rather than each bubble asking for one
+    // and filling in over the next minute.
+    final rawPreview = json['link_preview'];
+    if (rawPreview is Map<String, dynamic>) {
+      final link = firstUrl(text);
+      if (link != null) {
+        LinkPreviewService.instance.seed(
+          link,
+          LinkPreviewData.fromJson(rawPreview),
+        );
+      }
+    }
     return MessageItem(
       id: parseInt(json['id']),
       sender: json['sender']?.toString() ?? '',
-      text: json['text']?.toString() ?? '',
+      text: text,
       created:
           DateTime.tryParse(json['created']?.toString() ?? '') ??
           DateTime.now(),
