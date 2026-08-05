@@ -1067,6 +1067,7 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => ConversationPage(
           token: widget.session.token,
           currentUsername: widget.session.user.username,
+          currentAvatarUrl: widget.session.user.avatarUrl,
           conversationId: conv.id,
           otherUsername: conv.otherUser,
           otherFullName: conv.otherFullName,
@@ -1454,6 +1455,13 @@ class _HomePageState extends State<HomePage> {
                                                   _composePollControllers.removeAt(index);
                                                 });
                                               }
+                                            },
+                                            onCancel: () {
+                                              setPageState(() {
+                                                for (final c in _composePollControllers) { c.dispose(); }
+                                                _composePollControllers.clear();
+                                                _composePollActive = false;
+                                              });
                                             },
                                           ),
                                         // ── action row ───────────────────
@@ -1957,6 +1965,7 @@ class _HomePageState extends State<HomePage> {
                     builder: (_) => MessagesPage(
                       token: widget.session.token,
                       currentUsername: widget.session.user.username,
+                      currentAvatarUrl: widget.session.user.avatarUrl,
                       suggestedUsers: _followingProfiles,
                       onLogout: widget.onLogout,
                       onOpenPost: (author, postId) {
@@ -3910,11 +3919,13 @@ class _ComposePollEditor extends StatelessWidget {
     required this.isLight,
     required this.onAddOption,
     required this.onRemoveOption,
+    required this.onCancel,
   });
   final List<TextEditingController> controllers;
   final bool isLight;
   final VoidCallback onAddOption;
   final void Function(int) onRemoveOption;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -3925,6 +3936,25 @@ class _ComposePollEditor extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 12),
+        Row(
+          children: [
+            Icon(Icons.poll_outlined, size: 16, color: hint),
+            const SizedBox(width: 5),
+            Text(
+              'Poll',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: hint),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: onCancel,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8, bottom: 2),
+                child: Icon(Icons.close_rounded, size: 18, color: hint),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
         for (int i = 0; i < controllers.length; i++)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),

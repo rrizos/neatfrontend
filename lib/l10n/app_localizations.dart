@@ -2605,6 +2605,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Audit chain broken from entry #{id} — a record was altered or removed outside the application.'**
   String auditChainBroken(String id);
+
+  /// No description provided for @reactionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reactions'**
+  String get reactionsTitle;
+
+  /// No description provided for @tapToRemoveReaction.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to remove'**
+  String get tapToRemoveReaction;
 }
 
 class _AppLocalizationsDelegate

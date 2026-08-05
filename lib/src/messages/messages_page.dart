@@ -223,6 +223,7 @@ class MessagesPage extends StatefulWidget {
     super.key,
     required this.token,
     required this.currentUsername,
+    required this.currentAvatarUrl,
     required this.suggestedUsers,
     required this.onLogout,
     this.onOpenPost,
@@ -232,6 +233,7 @@ class MessagesPage extends StatefulWidget {
 
   final String token;
   final String currentUsername;
+  final String currentAvatarUrl;
   final List<UserProfile> suggestedUsers;
   final Future<void> Function() onLogout;
   final void Function(String author, int postId)? onOpenPost;
@@ -330,6 +332,7 @@ class _MessagesPageState extends State<MessagesPage> {
       builder: (_) => ConversationPage(
         token: widget.token,
         currentUsername: widget.currentUsername,
+        currentAvatarUrl: widget.currentAvatarUrl,
         conversationId: s.id,
         otherUsername: s.otherUser,
         otherFullName: s.otherFullName,
@@ -1216,6 +1219,7 @@ class ConversationPage extends StatefulWidget {
     super.key,
     required this.token,
     required this.currentUsername,
+    required this.currentAvatarUrl,
     required this.conversationId,
     required this.otherUsername,
     required this.otherFullName,
@@ -1229,6 +1233,7 @@ class ConversationPage extends StatefulWidget {
 
   final String token;
   final String currentUsername;
+  final String currentAvatarUrl;
   final int conversationId;
   final String otherUsername;
   final String otherFullName;
@@ -1270,6 +1275,10 @@ class _ConversationPageState extends State<ConversationPage>
   // and skip clobbering the fresher local state — without this, a poll that
   // raced a reaction/edit/delete could revert it until the next cycle.
   DateTime? _lastLocalMutationAt;
+  // Tracks message edits that have been applied locally but whose PATCH hasn't
+  // completed yet. The poll substitutes the pending version for any message id
+  // found here, so a slow PATCH can't be clobbered by a concurrent poll.
+  final _pendingEdits = <int, MessageItem>{};
   StreamSubscription<RealtimeEvent>? _realtimeSub;
 
   // Slide-to-reveal timestamps
@@ -1444,6 +1453,71 @@ class _ConversationPageState extends State<ConversationPage>
                 );
               },
             ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showReactionSheet(MessageItem msg) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final bg      = isLight ? Colors.white : const Color(0xff1c1c1e);
+    final textClr = isLight ? Colors.black87 : Colors.white;
+    final subClr  = isLight ? const Color(0xff8e8e93) : const Color(0xff8e8e93);
+    final l10n    = AppLocalizations.of(context);
+
+    // Flatten to (emoji, username) pairs in emoji-group order.
+    final rows = <(String emoji, String username)>[
+      for (final entry in msg.reactions.entries)
+        for (final u in entry.value) (entry.key, u),
+    ];
+    if (rows.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      useRootNavigator: true,
+      backgroundColor: bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 8),
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: isLight ? const Color(0xffC7C7CC) : const Color(0xff48484A),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Text(l10n.reactionsTitle,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: textClr)),
+            const SizedBox(height: 6),
+            for (final row in rows)
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                leading: _avatar(
+                  username: row.$2,
+                  url: row.$2 == widget.otherUsername
+                      ? widget.otherAvatarUrl
+                      : widget.currentAvatarUrl,
+                  radius: 20,
+                  isLight: isLight,
+                ),
+                title: Text(row.$2,
+                    style: TextStyle(fontWeight: FontWeight.w600, color: textClr)),
+                subtitle: row.$2 == widget.currentUsername
+                    ? Text(l10n.tapToRemoveReaction,
+                        style: TextStyle(fontSize: 12, color: subClr))
+                    : null,
+                trailing: Text(row.$1, style: const TextStyle(fontSize: 22)),
+                onTap: row.$2 == widget.currentUsername
+                    ? () { Navigator.of(sheetCtx).pop(); _react(msg.id, row.$1); }
+                    : null,
+              ),
             const SizedBox(height: 8),
           ],
         ),
@@ -1728,6 +1802,14 @@ class _ConversationPageState extends State<ConversationPage>
           .where((m) => DateTime.now().difference(m.created) < const Duration(seconds: 20))
           .toList();
       final merged = [...msgs, ...localOnly]..sort((a, b) => a.created.compareTo(b.created));
+      // If a PATCH is still in-flight, don't let the stale server text overwrite
+      // the optimistic edit — substitute the local version for those messages.
+      if (_pendingEdits.isNotEmpty) {
+        for (int i = 0; i < merged.length; i++) {
+          final pending = _pendingEdits[merged[i].id];
+          if (pending != null) merged[i] = pending;
+        }
+      }
       final hadNewFromOther = merged.length > _messages.length &&
           merged.last.sender != widget.currentUsername;
       final lastActive  = DateTime.tryParse(conv?['otherLastActive']?.toString() ?? '');
@@ -1961,6 +2043,7 @@ class _ConversationPageState extends State<ConversationPage>
       id: msg.id, sender: msg.sender, text: newText,
       created: msg.created, reactions: msg.reactions, edited: true,
     );
+    _pendingEdits[msg.id] = updated;
     _lastLocalMutationAt = DateTime.now();
     setState(() => _messages[idx] = updated);
     _saveCache(_messages);
@@ -1972,14 +2055,18 @@ class _ConversationPageState extends State<ConversationPage>
       );
       if (res.statusCode == 401) { widget.onLogout(); return; }
       if (res.statusCode != 200 && mounted) {
+        _pendingEdits.remove(msg.id);
         final i = _messages.indexWhere((m) => m.id == msg.id);
         if (i != -1) setState(() => _messages[i] = previous);
       }
     } catch (_) {
       if (mounted) {
+        _pendingEdits.remove(msg.id);
         final i = _messages.indexWhere((m) => m.id == msg.id);
         if (i != -1) setState(() => _messages[i] = previous);
       }
+    } finally {
+      _pendingEdits.remove(msg.id);
     }
   }
 
@@ -2315,6 +2402,8 @@ class _ConversationPageState extends State<ConversationPage>
                                         token: widget.token,
                                         otherUsername: widget.otherUsername,
                                         otherAvatarUrl: widget.otherAvatarUrl,
+                                        currentUsername: widget.currentUsername,
+                                        currentAvatarUrl: widget.currentAvatarUrl,
                                         isLight: isLight,
                                         onOpenPost: widget.onOpenPost,
                                         onOpenUserProfile: widget.onOpenUserProfile != null
@@ -2332,6 +2421,9 @@ class _ConversationPageState extends State<ConversationPage>
                                           );
                                           if (targetId != null) _scrollToMessage(targetId);
                                         } : null,
+                                        onTapReactions: msg.reactions.values.any((l) => l.isNotEmpty)
+                                            ? () => _showReactionSheet(msg)
+                                            : null,
                                       ),
                                     ],
                                   ),
@@ -2375,6 +2467,8 @@ class _MessageRow extends StatelessWidget {
     required this.isLast,
     required this.otherUsername,
     required this.otherAvatarUrl,
+    required this.currentUsername,
+    required this.currentAvatarUrl,
     required this.isLight,
     required this.onOpenPost,
     required this.token,
@@ -2385,6 +2479,7 @@ class _MessageRow extends StatelessWidget {
     this.onLongPress,
     this.showRead = false,
     this.onTapQuote,
+    this.onTapReactions,
   });
 
   final MessageItem message;
@@ -2393,6 +2488,8 @@ class _MessageRow extends StatelessWidget {
   final bool showRead;
   final String otherUsername;
   final String otherAvatarUrl;
+  final String currentUsername;
+  final String currentAvatarUrl;
   final bool isLight;
   final String token;
   final void Function(String, int)? onOpenPost;
@@ -2402,6 +2499,7 @@ class _MessageRow extends StatelessWidget {
   final VoidCallback? onDoubleTap;
   final VoidCallback? onLongPress;
   final VoidCallback? onTapQuote;
+  final VoidCallback? onTapReactions;
 
   Widget _content() {
     final replyData = _parseReply(message.text);
@@ -2450,29 +2548,67 @@ class _MessageRow extends StatelessWidget {
         child: child,
       );
 
-  Widget _reactionBadge() => Container(
-        margin: EdgeInsets.only(
-          top: 2,
-          left: mine ? 0 : 38,
-          right: mine ? 4 : 0,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+  Widget _reactionBadge() {
+    final groups = message.reactions.entries.where((e) => e.value.isNotEmpty).toList();
+    if (groups.isEmpty) return const SizedBox.shrink();
+    final bgColor     = isLight ? Colors.white : const Color(0xff2a2a2a);
+    final borderColor = isLight ? const Color(0xffe0e0e0) : const Color(0xff1a1a1a);
+    // Only show avatars when everyone used the same emoji — mixed reactions
+    // just show the emoji set without avatars to keep the badge uncluttered.
+    final singleEmoji = groups.length == 1;
+    // Sort so the other person always appears left and the current user right,
+    // keeping the display stable even when someone cancels and re-adds their
+    // reaction (which would otherwise move them to the end of the server list).
+    final reactors = singleEmoji
+        ? (groups.first.value.toList()
+            ..sort((a, b) {
+              if (a == currentUsername) return 1;
+              if (b == currentUsername) return -1;
+              return 0;
+            }))
+            .take(3)
+            .toList()
+        : const <String>[];
+    return GestureDetector(
+      onTap: onTapReactions,
+      child: Container(
+        margin: EdgeInsets.only(top: 2, left: mine ? 0 : 38, right: mine ? 4 : 0),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
         decoration: BoxDecoration(
-          color: const Color(0xff2a2a2a),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xff1a1a1a), width: 1.5),
+          color: bgColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isLight ? 0.07 : 0.18),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (final emoji in reactions)
+            for (final g in groups)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 1),
-                child: Text(emoji, style: const TextStyle(fontSize: 14)),
+                padding: const EdgeInsets.only(right: 3),
+                child: Text(g.key, style: const TextStyle(fontSize: 14)),
+              ),
+            for (final username in reactors)
+              Padding(
+                padding: const EdgeInsets.only(right: 3),
+                child: _avatar(
+                  username: username,
+                  url: username == otherUsername ? otherAvatarUrl : currentAvatarUrl,
+                  radius: 8,
+                  isLight: isLight,
+                ),
               ),
           ],
         ),
-      );
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2954,6 +3090,9 @@ class _ComposerState extends State<_Composer> {
   int  _recSecs    = 0;
   Timer? _timer;
   String? _recPath;
+  StreamSubscription<Amplitude>? _ampSub;
+  final _waveform = <double>[];
+  static const _kMaxWaveSamples = 60;
 
   void _onTextChanged() => setState(() {});
 
@@ -3034,6 +3173,16 @@ class _ComposerState extends State<_Composer> {
     final dir = await getTemporaryDirectory();
     _recPath = '${dir.path}/neat_voice_${DateTime.now().millisecondsSinceEpoch}.aac';
     await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: _recPath!);
+    _waveform.clear();
+    _ampSub = _recorder.onAmplitudeChanged(const Duration(milliseconds: 80)).listen((amp) {
+      if (!mounted) return;
+      // dBFS is 0 (max) to -160 (silence); map the usable -60..0 range to 0..1
+      final norm = ((amp.current + 60) / 60).clamp(0.0, 1.0);
+      setState(() {
+        _waveform.add(norm);
+        if (_waveform.length > _kMaxWaveSamples) _waveform.removeAt(0);
+      });
+    });
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _recSecs++);
     });
@@ -3044,10 +3193,12 @@ class _ComposerState extends State<_Composer> {
     if (!_recording) return;
     _timer?.cancel();
     _timer = null;
+    await _ampSub?.cancel();
+    _ampSub = null;
     final dur  = _recSecs;
     final path = await _recorder.stop();
     if (!mounted) return;
-    setState(() { _recording = false; _recSecs = 0; });
+    setState(() { _recording = false; _recSecs = 0; _waveform.clear(); });
     if (cancel || path == null) {
       if (path != null) try { File(path).deleteSync(); } catch (_) {}
       return;
@@ -3091,43 +3242,66 @@ class _ComposerState extends State<_Composer> {
     final mm = (_recSecs ~/ 60).toString().padLeft(2, '0');
     final ss = (_recSecs  % 60).toString().padLeft(2, '0');
     final textClr = widget.isLight ? Colors.black : Colors.white;
+    final pillBg  = widget.isLight ? _kInputLgt : _kInputDark;
+    final border  = widget.isLight
+        ? Border.all(color: const Color(0xffd0d0d0))
+        : Border.all(color: const Color(0xff2e2e2e));
+    final iconBg  = widget.isLight ? const Color(0xffd8d8d8) : const Color(0xff3a3a3a);
+
     return Container(
       key: const ValueKey('rec'),
-      padding: const EdgeInsets.fromLTRB(8, 6, 12, 10),
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 26),
-            padding: EdgeInsets.zero,
-            onPressed: () => _stopRecording(cancel: true),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Row(
-              children: [
-                const _PulsingDot(),
-                const SizedBox(width: 8),
-                Text(
-                  '$mm:$ss',
-                  style: TextStyle(color: textClr, fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  AppLocalizations.of(context).recording,
-                  style: TextStyle(color: widget.isLight ? _kSubLgt : _kSubDark, fontSize: 13),
-                ),
-              ],
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: pillBg,
+          borderRadius: BorderRadius.circular(28),
+          border: border,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        child: Row(
+          children: [
+            // Delete
+            GestureDetector(
+              onTap: () => _stopRecording(cancel: true),
+              child: Container(
+                width: 34, height: 34,
+                decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
+                child: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
+              ),
             ),
-          ),
-          GestureDetector(
-            onTap: () => _stopRecording(cancel: false),
-            child: Container(
-              width: 38, height: 38,
-              decoration: const BoxDecoration(color: _kBlue, shape: BoxShape.circle),
-              child: const Icon(Icons.check_rounded, color: Colors.white, size: 22),
+            const SizedBox(width: 10),
+            // Waveform
+            Expanded(
+              child: SizedBox(
+                height: 36,
+                child: CustomPaint(
+                  painter: _WaveformPainter(samples: List.unmodifiable(_waveform)),
+                ),
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            // Timer
+            Text(
+              '$mm:$ss',
+              style: TextStyle(
+                color: textClr,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Send
+            GestureDetector(
+              onTap: () => _stopRecording(cancel: false),
+              child: Container(
+                width: 36, height: 36,
+                decoration: const BoxDecoration(color: _kBlue, shape: BoxShape.circle),
+                child: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3278,35 +3452,37 @@ class _GiphyListener implements GiphyMediaSelectionListener {
 
 // ─── Pulsing red dot for recording indicator ──────────────────────────────────
 
-class _PulsingDot extends StatefulWidget {
-  const _PulsingDot();
-  @override
-  State<_PulsingDot> createState() => _PulsingDotState();
-}
-
-class _PulsingDotState extends State<_PulsingDot> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+class _WaveformPainter extends CustomPainter {
+  const _WaveformPainter({required this.samples});
+  final List<double> samples;
 
   @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))
-      ..repeat(reverse: true);
+  void paint(Canvas canvas, Size size) {
+    const barW = 2.5;
+    const gap  = 2.0;
+    const step = barW + gap;
+    const minH = 3.0;
+    final maxH = size.height * 0.88;
+    final cy   = size.height / 2;
+
+    final paint = Paint()
+      ..color = _kBlue
+      ..strokeWidth = barW
+      ..strokeCap = StrokeCap.round;
+
+    final count   = (size.width / step).floor();
+    final start   = samples.length > count ? samples.length - count : 0;
+    final visible = samples.sublist(start);
+
+    for (int i = 0; i < visible.length; i++) {
+      final h = minH + visible[i] * (maxH - minH);
+      final x = i * step + barW / 2;
+      canvas.drawLine(Offset(x, cy - h / 2), Offset(x, cy + h / 2), paint);
+    }
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _ctrl,
-      child: Container(
-        width: 10, height: 10,
-        decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-      ),
-    );
-  }
+  bool shouldRepaint(_WaveformPainter old) => old.samples != samples;
 }
 
 // ─── Empty conversation ───────────────────────────────────────────────────────

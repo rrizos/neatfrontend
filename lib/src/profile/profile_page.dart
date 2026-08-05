@@ -484,6 +484,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         builder: (_) => ConversationPage(
           token: widget.token,
           currentUsername: widget.currentUser.username,
+          currentAvatarUrl: widget.currentUser.avatarUrl,
           conversationId: conversation.id,
           otherUsername: conversation.otherUser,
           otherFullName: conversation.otherFullName,

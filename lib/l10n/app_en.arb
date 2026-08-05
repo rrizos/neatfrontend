@@ -485,5 +485,7 @@
   "actionFailedStatusShort": "Action failed ({status})",
   "@actionFailedStatusShort": { "placeholders": { "status": { "type": "int" } } },
   "auditChainBroken": "Audit chain broken from entry #{id} — a record was altered or removed outside the application.",
-  "@auditChainBroken": { "placeholders": { "id": { "type": "String" } } }
+  "@auditChainBroken": { "placeholders": { "id": { "type": "String" } } },
+  "reactionsTitle": "Reactions",
+  "tapToRemoveReaction": "Tap to remove"
 }

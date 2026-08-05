@@ -1393,4 +1393,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String auditChainBroken(String id) {
     return 'Audit chain broken from entry #$id — a record was altered or removed outside the application.';
   }
+
+  @override
+  String get reactionsTitle => 'Reactions';
+
+  @override
+  String get tapToRemoveReaction => 'Tap to remove';
 }

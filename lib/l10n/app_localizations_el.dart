@@ -1402,4 +1402,10 @@ class AppLocalizationsEl extends AppLocalizations {
   String auditChainBroken(String id) {
     return 'Η αλυσίδα ελέγχου έσπασε από την εγγραφή #$id — μια εγγραφή τροποποιήθηκε ή αφαιρέθηκε εκτός της εφαρμογής.';
   }
+
+  @override
+  String get reactionsTitle => 'Αντιδράσεις';
+
+  @override
+  String get tapToRemoveReaction => 'Πατήστε για αφαίρεση';
 }
