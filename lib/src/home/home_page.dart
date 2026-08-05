@@ -799,15 +799,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openProfileAtPost(String username, int postId) {
-    setState(() {
-      _inlineProfileUsername = username;
-      _inlinePostId = postId;
-      _showInlineProfile = true;
-      _nav = 0;
-    });
-  }
-
   void _pushProfileRoute(String username, {int? postId, bool? followEnabled, bool bouncePost = false, String? highlightCommentActor, int? autoOpenCommentId, FeedPost? autoOpenCommentPost}) {
     // Profile pages always show the native bar. Save the current hide count
     // so we can restore it when the profile pops (e.g. back into messages).
@@ -1075,8 +1066,7 @@ class _HomePageState extends State<HomePage> {
           otherLastActive: conv.otherLastActive,
           onLogout: widget.onLogout,
           onOpenPost: (author, postId) {
-            Navigator.popUntil(context, (route) => route.isFirst);
-            _openProfileAtPost(author, postId);
+            _pushProfileRoute(author, postId: postId);
           },
           onOpenUserProfile: _pushProfileRoute,
           realtime: _realtime,
@@ -1969,8 +1959,7 @@ class _HomePageState extends State<HomePage> {
                       suggestedUsers: _followingProfiles,
                       onLogout: widget.onLogout,
                       onOpenPost: (author, postId) {
-                        Navigator.popUntil(context, (route) => route.isFirst);
-                        _openProfileAtPost(author, postId);
+                        _pushProfileRoute(author, postId: postId);
                       },
                       onOpenUserProfile: _pushProfileRoute,
                       realtime: _realtime,

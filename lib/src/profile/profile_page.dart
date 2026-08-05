@@ -490,12 +490,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           otherFullName: conversation.otherFullName,
           otherAvatarUrl: conversation.otherAvatarUrl,
           onLogout: widget.onLogout,
-          onOpenPost: widget.onOpenProfileAtPost != null
-              ? (author, postId) {
-                  Navigator.pop(context);
-                  widget.onOpenProfileAtPost!(author, postId);
-                }
-              : null,
+          onOpenPost: widget.onOpenProfileAtPost,
           realtime: widget.realtime,
         ),
       ),
