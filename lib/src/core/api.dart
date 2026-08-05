@@ -143,6 +143,10 @@ Uri get registerDeviceEndpoint =>
     Uri.parse('$apiBaseUrl/api/push/devices/register/');
 Uri get unregisterDeviceEndpoint =>
     Uri.parse('$apiBaseUrl/api/push/devices/unregister/');
+/// What the iOS home-screen icon should read: unread DMs + unread activity.
+/// A push can only ever raise that number, so the app pulls this whenever the
+/// counts change and stamps it on the icon itself — see push/badge.py.
+Uri get pushBadgeEndpoint => Uri.parse('$apiBaseUrl/api/push/badge/');
 Uri searchHistoryEndpoint({int limit = 20}) =>
     Uri.parse('$apiBaseUrl/api/auth/search-history/?limit=$limit');
 Uri searchHistoryItemEndpoint(String query) =>

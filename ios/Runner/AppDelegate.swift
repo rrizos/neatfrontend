@@ -1,10 +1,12 @@
 import Flutter
 import UIKit
+import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UITabBarDelegate {
 
     private var tabChannel: FlutterMethodChannel?
+    private var badgeChannel: FlutterMethodChannel?
     private var nativeTabBar: UITabBar?
     // Held so we can replay the launch notification into firebase_messaging after
     // it registers late — see replayLaunchNotificationForFirebaseMessaging(_:).
@@ -33,6 +35,7 @@ import UIKit
     func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
         GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
         replayLaunchNotificationForFirebaseMessaging(engineBridge.pluginRegistry)
+        registerBadgeChannel(with: engineBridge.pluginRegistry)
         registerNativeCityMap(with: engineBridge.pluginRegistry)
         MapSnapshot.register(with: engineBridge.pluginRegistry)
         registerShareChannel(with: engineBridge.pluginRegistry)
@@ -71,6 +74,41 @@ import UIKit
             userInfo: userInfo
         )
         messaging.perform(selector, with: note)
+    }
+
+    // MARK: - App icon badge
+
+    /// Lets Flutter put the red count on the home-screen icon back down.
+    ///
+    /// Pushes carry `aps.badge` and so can raise it (see push/senders.py on the
+    /// backend), but nothing lowers it when the user actually reads a message
+    /// or opens the notifications bell — iOS keeps whatever the last push said
+    /// until the app itself writes a new value. This is that write.
+    ///
+    /// iOS only. Android launchers derive their own badge from the
+    /// notifications sitting in the tray, so there is nothing to set there and
+    /// the Dart side simply finds no channel.
+    private func registerBadgeChannel(with registry: FlutterPluginRegistry) {
+        guard let r = registry.registrar(forPlugin: "NeatBadge") else { return }
+        let channel = FlutterMethodChannel(name: "com.neat/badge",
+                                           binaryMessenger: r.messenger())
+        channel.setMethodCallHandler { call, result in
+            guard call.method == "setBadge", let count = call.arguments as? Int else {
+                result(FlutterMethodNotImplemented)
+                return
+            }
+            DispatchQueue.main.async {
+                if #available(iOS 16.0, *) {
+                    // setBadgeCount is the supported route from iOS 16 on;
+                    // applicationIconBadgeNumber is deprecated in iOS 17.
+                    UNUserNotificationCenter.current().setBadgeCount(count)
+                } else {
+                    UIApplication.shared.applicationIconBadgeNumber = count
+                }
+                result(nil)
+            }
+        }
+        badgeChannel = channel
     }
 
     // MARK: - Native share sheet
