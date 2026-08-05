@@ -67,7 +67,7 @@ class HomePage extends StatefulWidget {
 
 const _kSpectatorIntroSeenKey = 'neat_spectator_intro_seen';
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static final _kTabChannel = const MethodChannel('com.neat/tabbar');
 
   final TextEditingController _compose = TextEditingController();
@@ -121,12 +121,32 @@ class _HomePageState extends State<HomePage> {
     PushService.instance.onDmTap = _openConversationById;
     PushService.instance.onSoftTap = _openNotifications;
     PushService.instance.onNotificationTap = _openNotificationTargetFromPush;
-    PushService.instance.replayPending();
+    // Deferred by one frame rather than replayed inline: a push tapped from a
+    // killed app now reliably lands in PushService before this screen exists
+    // (see push_service.dart), so this is the path that actually routes a
+    // cold-start tap — and the handlers above open sheets and push routes,
+    // which need Theme.of/Navigator.of. Those throw if called before
+    // initState has returned, and the navigator isn't mounted yet either.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) PushService.instance.replayPending();
+    });
     _realtime.start();
     // Instant nav-badge updates on native, on top of the existing on-demand
     // refresh triggers below — web has no RealtimeService, so this stream
     // simply never fires there.
     _realtimeBadgeSub = _realtime.events.listen((_) => _loadUnreadMessages());
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Pushes that landed while the app was away have moved the icon badge on
+    // their own, and the user may have read some of it on another device.
+    // Recounting on the way back keeps the icon and the in-app counts honest.
+    // Deliberately a recount, not a clear: the badge is meant to survive
+    // merely opening the app, and only fall as things are actually read.
+    if (state == AppLifecycleState.resumed) unawaited(_loadUnreadMessages());
   }
 
   bool _cityMapPrewarmed = false;
@@ -191,6 +211,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (_isIOS26) _kTabChannel.invokeMethod('hideTabBar');
     _kTabChannel.setMethodCallHandler(null);
     if (identical(PushService.instance.onDmTap, _openConversationById)) {
@@ -275,6 +296,10 @@ class _HomePageState extends State<HomePage> {
           .fold<int>(0, (sum, c) => sum + (int.tryParse(c['unreadCount']?.toString() ?? '') ?? 0));
       if (mounted) setState(() => _unreadMessages = unread);
     } catch (_) {}
+    // This runs at every point the unread counts can move — first load, a
+    // realtime event, returning from a conversation — which is exactly when
+    // the icon badge needs restating. Pushes can only ever raise it.
+    unawaited(PushService.instance.refreshBadge());
   }
 
   Future<void> _loadOfficialEventsBadge() async {
@@ -486,6 +511,9 @@ class _HomePageState extends State<HomePage> {
         }
       }
     });
+    // Half the icon badge is unread activity, so clearing some of it here has
+    // to be reflected on the icon too.
+    unawaited(PushService.instance.refreshBadge());
   }
 
   static const _kMaxImageBytes = 6 * 1024 * 1024; // 6 MB per image
