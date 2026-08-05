@@ -47,6 +47,11 @@ const _kMapKitCdnUrl = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
 // CDN, and prewarm() builds the whole page off-screen (the native WebView
 // exists and runs JS before it is ever attached to the widget tree), so
 // opening the map tab shows an already-rendered map.
+/// How long focusCity() will wait for the WebView's page to report 'ready'
+/// before giving up. Generous: this covers a cold sign-up with no prewarm,
+/// where the page is built from scratch on a slow device.
+const Duration _kReadyTimeout = Duration(seconds: 12);
+
 class _AndroidMap {
   _AndroidMap._();
 
@@ -60,9 +65,33 @@ class _AndroidMap {
     });
   }
 
-  void focusCity(String name) {
+  /// Waits for the page to come up before flying, and resolves once the
+  /// command has actually been issued so the caller can time what follows.
+  ///
+  /// Unlike iOS — where the native map is live the moment the platform view
+  /// exists — this map is a WebView that has to load and run MapKit JS first.
+  /// Firing NeatMap.focusCity() into a page that has not reached 'ready' just
+  /// throws "NeatMap is not defined" into the catchError below, which is
+  /// precisely how the sign-up fly-to went missing on Android.
+  Future<void> focusCity(String name) async {
+    if (!ready.value) {
+      final loaded = Completer<void>();
+      void onReady() {
+        if (ready.value && !loaded.isCompleted) loaded.complete();
+      }
+
+      ready.addListener(onReady);
+      try {
+        await loaded.future.timeout(_kReadyTimeout);
+      } catch (_) {
+        debugPrint('[map] focusCity: page never became ready');
+        return;
+      } finally {
+        ready.removeListener(onReady);
+      }
+    }
     final encoded = jsonEncode(name);
-    controller.runJavaScript('NeatMap.focusCity($encoded)').catchError((Object e) {
+    await controller.runJavaScript('NeatMap.focusCity($encoded)').catchError((Object e) {
       debugPrint('[map] focusCity: $e');
     });
   }
@@ -192,6 +221,13 @@ class _CityMapViewState extends State<CityMapView> {
   static Object? _iosHandlerOwner;
 
   _AndroidMap? _androidMap;
+  // The same map as _androidMap, but available from the moment it is asked
+  // for rather than only once it has been built. Sign-up's auto-focus resolves
+  // the device's city on its own schedule and regularly wins that race, and
+  // firing at a null _androidMap simply did nothing — which is why Android
+  // never travelled to the detected city while iOS, whose native map exists
+  // with the platform view, always did.
+  Future<_AndroidMap>? _androidMapPending;
   // Guards against an in-flight obtain() from a superseded theme/config
   // finishing late and overwriting the newer map.
   int _mapEpoch = 0;
@@ -250,7 +286,13 @@ class _CityMapViewState extends State<CityMapView> {
     // have left, or already picked a city by hand. Never override either.
     if (!mounted || name == null || _activeCity != null) return;
 
-    _focusNativeCity(name);
+    // Awaited, so _kFocusTravel is measured from when the map actually starts
+    // moving. On Android that can be a second or two after detection resolves
+    // (the WebView still has to load), and timing the card from detection
+    // instead used to drop it over a map that had not gone anywhere.
+    await _focusNativeCity(name);
+    if (!mounted || _activeCity != null) return;
+
     await Future<void>.delayed(_kFocusTravel);
     // Re-check: the wait is long enough for the user to have tapped a pin of
     // their own, and their choice wins over the one we guessed.
@@ -259,12 +301,27 @@ class _CityMapViewState extends State<CityMapView> {
   }
 
   /// Zooms the map to [name] without a tap, on whichever map is in play.
-  void _focusNativeCity(String name) {
+  /// Completes once the map has been told to travel, not when it arrives.
+  Future<void> _focusNativeCity(String name) async {
     if (kIsWeb) return;
-    if (Platform.isAndroid) {
-      _androidMap?.focusCity(name);
-    } else if (Platform.isIOS) {
-      _iosChannel.invokeMethod('focusCity', name);
+    // Never lets a failure to travel stop the card from opening — a map that
+    // stayed put is the old behaviour, a sign-up stuck with no card is not.
+    // iOS installs the channel handler with the platform view, so an early
+    // detection can still find nothing listening there.
+    try {
+      if (Platform.isAndroid) {
+        // Not `_androidMap?.` — that field is only set once the map is built,
+        // and this runs on location's schedule, which is often sooner.
+        final pending = _androidMapPending;
+        if (pending == null) return;
+        final map = await pending;
+        if (!mounted) return;
+        await map.focusCity(name);
+      } else if (Platform.isIOS) {
+        await _iosChannel.invokeMethod('focusCity', name);
+      }
+    } catch (e) {
+      debugPrint('[map] focusNativeCity: $e');
     }
   }
 
@@ -315,10 +372,14 @@ class _CityMapViewState extends State<CityMapView> {
 
   Future<void> _initAndroid() async {
     final epoch = ++_mapEpoch;
-    final map = await _AndroidMap.obtain(
+    // Published before the first await so a waiter that arrives during the
+    // build gets this map rather than nothing.
+    final pending = _AndroidMap.obtain(
       homeCity: widget.homeCity,
       isDark: _brightness == Brightness.dark,
     );
+    _androidMapPending = pending;
+    final map = await pending;
     if (!mounted || epoch != _mapEpoch) return;
     map.onPinTap = _onCityPinTapped;
     setState(() => _androidMap = map);
@@ -485,6 +546,13 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
       var map = null;
       var userTouched = false;
       var settleTimer = null;
+      /* Set once focusCity() has aimed the camera somewhere deliberate. From
+         then on the home-framing retries below must only re-apply the fence,
+         never the country-wide region: their whole job is to correct a camera
+         that nothing has claimed yet, and left unguarded they land squarely on
+         top of the sign-up fly-to and snap it back to the whole of Greece. */
+      var cameraClaimed = false;
+      var focusAttempts = 0;
 
       function post(payload) {
         try { NeatBridge.postMessage(JSON.stringify(payload)); } catch (e) {}
@@ -503,7 +571,7 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
       // CoordinateRegion — assigning a BoundingRegion (the obvious guess,
       // and what an earlier version did) is silently rejected, which is why
       // the fence never held.
-      function applyHome() {
+      function applyFence() {
         try {
           map.cameraBoundary = new mapkit.CoordinateRegion(
             new mapkit.Coordinate(38.0, 24.0),
@@ -511,6 +579,14 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
           );
         } catch (e) {}
         try { map.cameraZoomRange = new mapkit.CameraZoomRange(1000, 2500000); } catch (e) {}
+      }
+
+      /* The fence is re-applied on every pass — it is cheap and the comment
+         above explains why it needs the repetition — but the framing is not,
+         once someone has claimed the camera. */
+      function applyHome() {
+        applyFence();
+        if (userTouched || cameraClaimed) return;
         map.region = overview();
       }
 
@@ -596,11 +672,24 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
          untouched map of the whole country. */
       function focusCity(name) {
         if (!map) return;
+        /* The WebView reaches 'ready' while it is still off the widget tree,
+           so the element can be 0x0 here. Every region below would then be
+           computed against a viewport with no size and land nowhere — and
+           because focusing claims the camera, nothing would come along to
+           correct it. Wait for a real layout instead. */
+        var el = document.getElementById('map');
+        if (el && (el.clientWidth === 0 || el.clientHeight === 0)) {
+          if (focusAttempts++ < 40) setTimeout(function () { focusCity(name); }, 100);
+          return;
+        }
         var target = null;
         map.annotations.forEach(function (a) {
           if (a.title === name) target = a;
         });
         if (!target) return;
+
+        cameraClaimed = true;
+        if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
         /* Two stages so it reads as travel rather than a cut: glide across
            the country at the height you were already at, then descend once
            the city is under you.

@@ -24,6 +24,12 @@ const double _kMaxDistanceMeters = 150000;
 /// How long to wait for a fix before giving up and leaving the map alone.
 const Duration _kFixTimeout = Duration(seconds: 8);
 
+/// A cached fix younger than this is used as-is, without waiting for a fresh
+/// one. Cities are tens of kilometres apart, so an hour-old position answers
+/// "which city are you in" just as well as a new one — and on Android it
+/// answers it instantly instead of after a fix that may never arrive.
+const Duration _kFreshEnough = Duration(hours: 1);
+
 class CityLocator {
   /// Asks for location permission and resolves the nearest city.
   ///
@@ -46,16 +52,49 @@ class CityLocator {
         return null;
       }
 
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.low,
-          timeLimit: _kFixTimeout,
-        ),
-      );
-      return nearestCity(position.latitude, position.longitude)?.name;
+      // Cached fix first. On Android a *fresh* low-power fix comes from cell
+      // towers alone and routinely never arrives indoors, so waiting on one
+      // was the whole reason sign-up silently failed to detect a city there
+      // while iOS — which hands back its cached location immediately — worked.
+      final cached = await _lastKnown();
+      if (cached != null &&
+          DateTime.now().difference(cached.timestamp) < _kFreshEnough) {
+        return nearestCity(cached.latitude, cached.longitude)?.name;
+      }
+
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            // Balanced rather than low: on Android `low` is PRIORITY_LOW_POWER
+            // (cell towers only), which is both slower and no more private in
+            // practice than the wifi-assisted balanced tier. Both are served by
+            // the coarse permission this app declares — neither turns on GPS.
+            accuracy: LocationAccuracy.medium,
+            timeLimit: _kFixTimeout,
+          ),
+        );
+        return nearestCity(position.latitude, position.longitude)?.name;
+      } catch (_) {
+        // No fix in time. An older cached position still beats showing the
+        // plain map — someone who was in Thessaloniki this morning is very
+        // probably still there.
+        if (cached == null) return null;
+        return nearestCity(cached.latitude, cached.longitude)?.name;
+      }
     } catch (_) {
-      // A refused prompt, a timeout, a device with no location hardware — all
-      // of it means the same thing to the caller.
+      // A refused prompt, a device with no location hardware — all of it means
+      // the same thing to the caller.
+      return null;
+    }
+  }
+
+  /// The platform's cached position, or null if there is none. Never throws:
+  /// some devices/emulators reject the call outright, and a missing cache is
+  /// not an error here.
+  static Future<Position?> _lastKnown() async {
+    try {
+      return await Geolocator.getLastKnownPosition();
+    } catch (_) {
       return null;
     }
   }
