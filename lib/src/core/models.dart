@@ -351,6 +351,7 @@ class FeedComment {
     required this.replies,
     this.pinned = false,
     this.likedByOwner = false,
+    this.replyToUsername,
   });
 
   final int id;
@@ -365,6 +366,8 @@ class FeedComment {
   bool liked;
   bool pinned;
   bool likedByOwner;
+  // Non-null only on replies that were directed at another reply's author.
+  final String? replyToUsername;
 
   factory FeedComment.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
@@ -385,6 +388,7 @@ class FeedComment {
       replies: replies,
       pinned: json['pinned'] == true,
       likedByOwner: json['likedByOwner'] == true,
+      replyToUsername: json['replyToUsername']?.toString(),
     );
     return c;
   }

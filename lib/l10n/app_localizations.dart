@@ -1322,6 +1322,18 @@ abstract class AppLocalizations {
   /// **'mentioned you in a comment'**
   String get notifMentionedComment;
 
+  /// No description provided for @notifMentionedPost.
+  ///
+  /// In en, this message translates to:
+  /// **'mentioned you in a post'**
+  String get notifMentionedPost;
+
+  /// No description provided for @notifMentionedDm.
+  ///
+  /// In en, this message translates to:
+  /// **'mentioned you in a DM'**
+  String get notifMentionedDm;
+
   /// No description provided for @timeMinutesAgo.
   ///
   /// In en, this message translates to:

@@ -2637,12 +2637,12 @@ class _ImageBubble extends StatelessWidget {
           backgroundColor: Colors.black,
           body: Stack(
             children: [
-              GestureDetector(
-                onTap: () => Navigator.of(ctx).pop(),
-                child: Center(
-                  child: InteractiveViewer(
-                    minScale: 0.5,
-                    maxScale: 4.0,
+              Center(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4.0,
+                  child: GestureDetector(
+                    onTap: () => Navigator.of(ctx).pop(),
                     child: Image.memory(
                       bytes,
                       fit: BoxFit.contain,

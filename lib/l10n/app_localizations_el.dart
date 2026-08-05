@@ -699,6 +699,12 @@ class AppLocalizationsEl extends AppLocalizations {
   String get notifMentionedComment => 'σε ανέφερε σε ένα σχόλιο';
 
   @override
+  String get notifMentionedPost => 'σε ανέφερε σε ένα post';
+
+  @override
+  String get notifMentionedDm => 'σε ανέφερε σε μήνυμα';
+
+  @override
   String timeMinutesAgo(int n) {
     return '$nλ πριν';
   }

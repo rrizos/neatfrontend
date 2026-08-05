@@ -696,6 +696,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notifMentionedComment => 'mentioned you in a comment';
 
   @override
+  String get notifMentionedPost => 'mentioned you in a post';
+
+  @override
+  String get notifMentionedDm => 'mentioned you in a DM';
+
+  @override
   String timeMinutesAgo(int n) {
     return '${n}m ago';
   }

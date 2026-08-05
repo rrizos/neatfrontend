@@ -241,6 +241,8 @@
   "notifRepliedComment": "replied to your comment",
   "notifLikedComment": "liked your comment",
   "notifMentionedComment": "mentioned you in a comment",
+  "notifMentionedPost": "mentioned you in a post",
+  "notifMentionedDm": "mentioned you in a DM",
   "timeMinutesAgo": "{n}m ago",
   "@timeMinutesAgo": { "placeholders": { "n": { "type": "int" } } },
   "timeHoursAgo": "{n}h ago",

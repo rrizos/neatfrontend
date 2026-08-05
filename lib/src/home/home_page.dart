@@ -936,6 +936,11 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
+      if (item.verb == 'mentioned you in a post' && postId != null) {
+        await _openPostThenComments(postId);
+        return;
+      }
+
       if (_kCommentVerbs.contains(item.verb) && postId != null) {
         await _openPostThenComments(
           postId,
@@ -4479,6 +4484,7 @@ String _actionLabel(String verb, AppLocalizations l10n) {
     'replied to your comment' => l10n.notifRepliedComment,
     'liked your comment' => l10n.notifLikedComment,
     'mentioned you in a comment' => l10n.notifMentionedComment,
+    'mentioned you in a post' => l10n.notifMentionedPost,
     _ => verb,
   };
 }
@@ -4514,6 +4520,7 @@ class _CommentSheet extends StatefulWidget {
 class _CommentSheetState extends State<_CommentSheet> {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
+  final _inputFocus = FocusNode();
   final _picker = ImagePicker();
   late List<FeedComment> _comments;
   final _liked = <int, bool>{};
@@ -4521,7 +4528,11 @@ class _CommentSheetState extends State<_CommentSheet> {
   final _likedByOwner = <int, bool>{};
   final _commentKeys = <int, GlobalKey>{};
   int? _highlightedCommentId;
+  int? _pressedCommentId;
   FeedComment? _replyingTo;
+  // When replying to a reply, this holds the top-level comment's id so we
+  // send the correct parentId to the backend (replies are one level deep).
+  int? _effectiveParentId;
   String _imageUrl = '';
   String _gifUrl   = '';
   bool _sending = false;
@@ -4644,7 +4655,17 @@ class _CommentSheetState extends State<_CommentSheet> {
   void dispose() {
     _controller.dispose();
     _scroll.dispose();
+    _inputFocus.dispose();
     super.dispose();
+  }
+
+  void _setReply(FeedComment c, {int? effectiveParentId}) {
+    setState(() {
+      _replyingTo = c;
+      _effectiveParentId = effectiveParentId;
+    });
+    // Small delay so the reply banner renders before the keyboard appears.
+    Future.microtask(() => _inputFocus.requestFocus());
   }
 
   Future<void> _pickImage() async {
@@ -4704,7 +4725,8 @@ class _CommentSheetState extends State<_CommentSheet> {
           'text': text,
           if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
           if (_gifUrl.isNotEmpty) 'imageUrl': _gifUrl,
-          if (_replyingTo != null) 'parentId': _replyingTo!.id,
+          if (_replyingTo != null) 'parentId': _effectiveParentId ?? _replyingTo!.id,
+          if (_effectiveParentId != null) 'replyToUsername': _replyingTo!.author,
         }),
       );
       if (!mounted) return;
@@ -4713,6 +4735,7 @@ class _CommentSheetState extends State<_CommentSheet> {
         _applyUpdatedPost(decoded);
         setState(() {
           _replyingTo = null;
+          _effectiveParentId = null;
           _imageUrl = '';
           _gifUrl   = '';
         });
@@ -4852,7 +4875,7 @@ class _CommentSheetState extends State<_CommentSheet> {
     }
   }
 
-  Widget _tile(BuildContext context, FeedComment c, bool isReply, bool isLight) {
+  Widget _tile(BuildContext context, FeedComment c, bool isReply, bool isLight, {int? parentCommentId}) {
     final bytes = decodeAvatarUrl(c.avatarUrl);
     final isNetworkImg = c.imageUrl.startsWith('http');
     final imgBytes = (!isNetworkImg && c.imageUrl.isNotEmpty) ? decodeAvatarUrl(c.imageUrl) : null;
@@ -4862,12 +4885,15 @@ class _CommentSheetState extends State<_CommentSheet> {
     final commentKey = _commentKeys.putIfAbsent(c.id, () => GlobalKey());
     DateTime? created;
     try { created = DateTime.parse(c.createdAt); } catch (_) {}
+    final pressed = c.id == _pressedCommentId;
     return AnimatedContainer(
       key: commentKey,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 150),
       color: highlighted
           ? (isLight ? const Color(0xfffff3cc) : const Color(0xff3a2e00))
-          : Colors.transparent,
+          : pressed
+              ? (isLight ? const Color(0xffeeeeee) : const Color(0xff2a2a2a))
+              : Colors.transparent,
       child: Padding(
       padding: EdgeInsets.fromLTRB(isReply ? 52 : 16, 10, 16, 2),
       child: Row(
@@ -4893,7 +4919,18 @@ class _CommentSheetState extends State<_CommentSheet> {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Column(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.likingEnabled
+                  ? () => _setReply(c, effectiveParentId: isReply ? parentCommentId : null)
+                  : null,
+              onLongPressDown: (_) => setState(() => _pressedCommentId = c.id),
+              onLongPressCancel: () => setState(() => _pressedCommentId = null),
+              onLongPress: () {
+                setState(() => _pressedCommentId = null);
+                _showCommentMenu(c, isReply);
+              },
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (c.pinned) ...[
@@ -4931,6 +4968,27 @@ class _CommentSheetState extends State<_CommentSheet> {
                         recognizer: TapGestureRecognizer()
                           ..onTap = () => widget.onOpenUserProfile(c.author),
                       ),
+                      if (c.replyToUsername != null) ...[
+                        TextSpan(
+                          text: '  ▶  ',
+                          style: TextStyle(
+                            color: isLight ? const Color(0xffa0a0a8) : const Color(0xff666672),
+                            fontSize: isReply ? 11 : 12,
+                            height: 1.4,
+                          ),
+                        ),
+                        TextSpan(
+                          text: c.replyToUsername,
+                          style: TextStyle(
+                            color: isLight ? const Color(0xff536471) : const Color(0xff8899a6),
+                            fontWeight: FontWeight.w600,
+                            fontSize: isReply ? 13.5 : 15,
+                            height: 1.4,
+                          ),
+                          recognizer: TapGestureRecognizer()
+                            ..onTap = () => widget.onOpenUserProfile(c.replyToUsername!),
+                        ),
+                      ],
                       if (c.author == widget.post.author) ...[
                         TextSpan(
                           text: ' · ',
@@ -5004,7 +5062,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                     const SizedBox(width: 14),
                     if (widget.likingEnabled)
                       GestureDetector(
-                        onTap: () => setState(() => _replyingTo = c),
+                        onTap: () => _setReply(c, effectiveParentId: isReply ? parentCommentId : null),
                         child: Text(
                           AppLocalizations.of(context).reply,
                           style: TextStyle(
@@ -5028,8 +5086,9 @@ class _CommentSheetState extends State<_CommentSheet> {
                   ),
                 ],
               ],
-            ),
-          ),
+            ), // Column
+            ), // GestureDetector
+          ),   // Expanded
           const SizedBox(width: 8),
           GestureDetector(
             onTap: widget.likingEnabled ? () => _toggleLike(c) : null,
@@ -5152,7 +5211,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                             children: [
                               _tile(context, c, false, isLight),
                               for (final r in c.replies)
-                                _tile(context, r, true, isLight),
+                                _tile(context, r, true, isLight, parentCommentId: c.id),
                               const SizedBox(height: 4),
                             ],
                           );
@@ -5242,7 +5301,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                         ),
                       ),
                       GestureDetector(
-                        onTap: () => setState(() => _replyingTo = null),
+                        onTap: () => setState(() { _replyingTo = null; _effectiveParentId = null; }),
                         child: Icon(
                           Icons.close,
                           size: 16,
@@ -5310,6 +5369,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                               value.text.trim().isNotEmpty || _imageUrl.isNotEmpty || _gifUrl.isNotEmpty;
                           return TextField(
                             controller: _controller,
+                            focusNode: _inputFocus,
                             style: TextStyle(
                               color: isLight ? Colors.black : Colors.white,
                               fontSize: 14,
@@ -5528,15 +5588,15 @@ class _CommentPhoto extends StatelessWidget {
           backgroundColor: Colors.black,
           body: Stack(
             children: [
-              GestureDetector(
-                onTap: () => Navigator.of(ctx).pop(),
-                child: Center(
-                  child: InteractiveViewer(
-                    minScale: 0.5,
-                    maxScale: 4,
-                    child: SizedBox(
-                      width: MediaQuery.of(ctx).size.width,
-                      height: MediaQuery.of(ctx).size.height,
+              Center(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4,
+                  child: SizedBox(
+                    width: MediaQuery.of(ctx).size.width,
+                    height: MediaQuery.of(ctx).size.height,
+                    child: GestureDetector(
+                      onTap: () => Navigator.of(ctx).pop(),
                       child: full,
                     ),
                   ),

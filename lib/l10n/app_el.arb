@@ -217,6 +217,8 @@
   "notifRepliedComment": "απάντησε στο σχόλιό σου",
   "notifLikedComment": "έκανε like στο σχόλιό σου",
   "notifMentionedComment": "σε ανέφερε σε ένα σχόλιο",
+  "notifMentionedPost": "σε ανέφερε σε ένα post",
+  "notifMentionedDm": "σε ανέφερε σε μήνυμα",
   "timeMinutesAgo": "{n}λ πριν",
   "timeHoursAgo": "{n}ω πριν",
   "timeDaysAgo": "{n}η πριν",

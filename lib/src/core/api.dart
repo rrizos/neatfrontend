@@ -128,11 +128,14 @@ Uri followersEndpoint(String username) =>
 Uri followingEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/profiles/$username/following/');
 Uri get suggestionsEndpoint => Uri.parse('$apiBaseUrl/api/auth/suggestions/');
-Uri searchUsersEndpoint([String query = '']) {
+Uri searchUsersEndpoint([String query = '', bool connectionsOnly = false]) {
   final uri = Uri.parse('$apiBaseUrl/api/auth/search/');
   final q = query.trim();
-  if (q.isEmpty) return uri;
-  return uri.replace(queryParameters: {'q': q});
+  final params = <String, String>{
+    if (q.isNotEmpty) 'q': q,
+    if (connectionsOnly) 'connections_only': '1',
+  };
+  return params.isEmpty ? uri : uri.replace(queryParameters: params);
 }
 Uri get notificationsEndpoint =>
     Uri.parse('$apiBaseUrl/api/auth/notifications/');

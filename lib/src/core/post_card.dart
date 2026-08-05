@@ -755,7 +755,12 @@ class _FullscreenMediaViewerState extends State<_FullscreenMediaViewer> {
               return InteractiveViewer(
                 minScale: 0.5,
                 maxScale: 4.0,
-                child: Center(child: _FeedMedia(url: item.url, fit: BoxFit.contain)),
+                child: Center(
+                  child: GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: _FeedMedia(url: item.url, fit: BoxFit.contain),
+                  ),
+                ),
               );
             },
           ),

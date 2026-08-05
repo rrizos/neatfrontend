@@ -154,7 +154,7 @@ class _MentionSuggestionsState extends State<MentionSuggestions> {
   Future<void> _search(String query) async {
     setState(() => _loading = true);
     try {
-      final res = await http.get(searchUsersEndpoint(query), headers: authGetHeaders(widget.token));
+      final res = await http.get(searchUsersEndpoint(query, true), headers: authGetHeaders(widget.token));
       if (!mounted || _activeQuery != query) return;
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
@@ -194,59 +194,103 @@ class _MentionSuggestionsState extends State<MentionSuggestions> {
   Widget build(BuildContext context) {
     if (_activeQuery == null) return const SizedBox.shrink();
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff1a1a1a);
-    final borderColor = isLight ? const Color(0xffe0e0e0) : const Color(0xff2a2a2a);
-    final textColor = isLight ? Colors.black : Colors.white;
-    final subColor = isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a);
+    final bg = isLight ? Colors.white : const Color(0xff1e1e1e);
+    final dividerColor = isLight ? const Color(0xfff0f0f0) : const Color(0xff2a2a2a);
+    final topBorderColor = isLight ? const Color(0xffe0e0e0) : const Color(0xff303030);
+    final textColor = isLight ? const Color(0xff111111) : Colors.white;
+    final subColor = isLight ? const Color(0xff8b95a3) : const Color(0xff888888);
+    final avatarBg = isLight ? const Color(0xffedeff2) : const Color(0xff2c2c2c);
+    final highlightColor = isLight ? const Color(0xfff7f8fa) : const Color(0xff252525);
 
     Widget body;
     if (_loading) {
-      body = const Padding(
-        padding: EdgeInsets.symmetric(vertical: 14),
-        child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+      body = SizedBox(
+        height: 56,
+        child: Center(
+          child: SizedBox(
+            width: 16, height: 16,
+            child: CircularProgressIndicator(strokeWidth: 1.8, color: isLight ? const Color(0xff3897f0) : const Color(0xff3897f0)),
+          ),
+        ),
       );
     } else if (_results.isEmpty) {
-      body = Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Center(child: Text(AppLocalizations.of(context).noMatchesInTown, style: TextStyle(fontSize: 12, color: subColor))),
+      body = SizedBox(
+        height: 48,
+        child: Center(
+          child: Text(
+            AppLocalizations.of(context).noMatchesInTown,
+            style: TextStyle(fontSize: 13, color: subColor),
+          ),
+        ),
       );
     } else {
-      body = ListView.builder(
+      body = ListView.separated(
         shrinkWrap: true,
-        padding: EdgeInsets.zero,
+        padding: const EdgeInsets.symmetric(vertical: 4),
         itemCount: _results.length,
+        separatorBuilder: (_, i) => Divider(height: 1, thickness: 1, color: dividerColor, indent: 56, endIndent: 0),
         itemBuilder: (_, i) {
           final u = _results[i];
           final bytes = decodeAvatarUrl(u.avatarUrl);
-          return ListTile(
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-            leading: CircleAvatar(
-              radius: 15,
-              backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-              child: bytes == null
-                  ? Text(
-                      initialFor(u.username),
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: textColor),
-                    )
-                  : null,
-            ),
-            title: Text('@${u.username}', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: textColor)),
-            subtitle: u.fullName.isNotEmpty
-                ? Text(u.fullName, style: TextStyle(fontSize: 12, color: subColor))
-                : null,
+          return InkWell(
             onTap: () => _select(u),
+            highlightColor: highlightColor,
+            splashColor: Colors.transparent,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: avatarBg,
+                    foregroundImage: bytes != null ? MemoryImage(bytes) : null,
+                    child: bytes == null
+                        ? Text(
+                            initialFor(u.username),
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: textColor),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '@${u.username}',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: textColor, height: 1.2),
+                        ),
+                        if (u.fullName.isNotEmpty) ...[
+                          const SizedBox(height: 1),
+                          Text(
+                            u.fullName,
+                            style: TextStyle(fontSize: 12.5, color: subColor, height: 1.2),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           );
         },
       );
     }
 
     return Container(
-      constraints: const BoxConstraints(maxHeight: 200),
+      constraints: const BoxConstraints(maxHeight: 220),
       decoration: BoxDecoration(
         color: bg,
-        border: Border(top: BorderSide(color: borderColor)),
+        border: Border(top: BorderSide(color: topBorderColor, width: 0.8)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isLight ? 0.06 : 0.25),
+            blurRadius: 12,
+            offset: const Offset(0, -3),
+          ),
+        ],
       ),
       child: body,
     );
