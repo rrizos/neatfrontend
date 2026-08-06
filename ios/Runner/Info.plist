@@ -59,6 +59,14 @@
 	     Refusing it just leaves you picking from the map by hand. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Neat can use your location once, while you are choosing your city, to find which city you are in. Your location is never stored or shared, and Neat never tracks you in the background.</string>
+	<!-- Required even though Neat never asks for "Always": the geolocator
+	     plugin's iOS code references requestAlwaysAuthorization, and App Store
+	     Connect rejects the upload over the mere reference (ITMS-90683)
+	     regardless of whether the app calls it. CityLocator only ever requests
+	     when-in-use, so this prompt is never actually shown — the wording still
+	     has to describe the access honestly if it ever were. -->
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Neat can use your location once, while you are choosing your city, to find which city you are in. Your location is never stored or shared, and Neat never uses your location in the background.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Neat needs access to your photo library to send photos.</string>
 	<key>NSCameraUsageDescription</key>

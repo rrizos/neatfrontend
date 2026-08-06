@@ -23,6 +23,6 @@ SPEC CHECKSUMS:
   flutter_local_notifications: 395056b3175ba4f08480a7c5de30cd36d69827e4
   flutter_secure_storage: 1ed9476fba7e7a782b22888f956cce43e2c62f13
 
-PODFILE CHECKSUM: a645ea86ac595f0f827d3f0960f1a10dbb82ca48
+PODFILE CHECKSUM: efcc95576c0fb359d4a5cbca7a39a1bf4de5ad2f
 
 COCOAPODS: 1.16.2
