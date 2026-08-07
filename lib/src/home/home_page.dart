@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show Random;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
@@ -97,6 +98,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final _composePollControllers = <TextEditingController>[];
   int _unreadMessages = 0;
   bool _hasOfficialEvents = false;
+  String? _returningToCity;
   bool _showInlineProfile = false;
   String _inlineProfileUsername = '';
   int? _inlinePostId;
@@ -892,11 +894,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       });
       return;
     }
+    final homeCity = widget.session.user.city;
+    // Do NOT set _loading here — it triggers the early-return guard in build()
+    // which bypasses the Stack, making the overlay invisible.
     setState(() {
+      _returningToCity = homeCity;
       _activeCity = null;
       _nav = 0;
       _showInlineProfile = false;
       _inlinePostId = null;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    if (!mounted) return;
+    setState(() {
+      _returningToCity = null;
       _loading = true;
     });
     await _load();
@@ -1959,10 +1970,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     final isLight = Theme.of(context).brightness == Brightness.light;
 
+    final returningCity = _returningToCity;
+
     return Scaffold(
       backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
       extendBody: _isIOS26,
-      body: SafeArea(
+      body: Stack(
+        children: [
+          SafeArea(
         child: Column(
           children: [
             _TopBar(
@@ -2087,6 +2102,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
           ],
         ),
+      ),
+          if (returningCity != null)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const NeatLoader(size: 72, color: Colors.white),
+                    const SizedBox(height: 24),
+                    Text(
+                      AppLocalizations.of(context).returningToCity(returningCity),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
       // iOS 26: native UITabBar is added as a subview in SceneDelegate.
       // A transparent SizedBox(49) tells Flutter's layout how much bottom
@@ -2388,6 +2426,12 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
             ],
+            _iconWithDot(
+              isLight: isLight,
+              showDot: hasOfficialEvents,
+              onTap: onEventsTap,
+              icon: Icons.calendar_month_outlined,
+            ),
             if (activeCity == null) ...[
               _iconWithDot(
                 isLight: isLight,
@@ -3230,11 +3274,14 @@ class _ViralViewState extends State<_ViralView> {
   Future<void> _loadSuggestions() async {
     if (mounted) setState(() => _loadingSuggestions = true);
     try {
-      final res = await http.get(suggestionsEndpoint, headers: authGetHeaders(widget.token));
+      final uri = suggestionsEndpoint.replace(
+        queryParameters: {'_': DateTime.now().millisecondsSinceEpoch.toString()},
+      );
+      final res = await http.get(uri, headers: authGetHeaders(widget.token));
       if (!mounted) return;
       if (res.statusCode != 200) { setState(() => _loadingSuggestions = false); return; }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final users = (decoded['users'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>().map(UserProfile.fromJson).toList();
+      final users = (decoded['users'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>().map(UserProfile.fromJson).toList()..shuffle(Random());
       setState(() { _suggestedUsers = users; _loadingSuggestions = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingSuggestions = false);

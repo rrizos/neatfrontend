@@ -7,10 +7,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/neat_loader.dart';
 import 'city_locator.dart';
@@ -234,6 +236,8 @@ class _CityMapViewState extends State<CityMapView> {
 
   // ── UI state ──────────────────────────────────────────────────────────────
   GreeceCity? _activeCity;
+  String? _joiningCityName;
+  Map<String, double> _cityHeat = {};
 
   // Bumped whenever the card is dismissed, to build a fresh platform view.
   //
@@ -262,9 +266,8 @@ class _CityMapViewState extends State<CityMapView> {
     super.initState();
     _iosHandlerOwner = this;
     _iosChannel.setMethodCallHandler(_onNativeCall);
-    // Sign-up only: offer to preselect the city you are actually in. Every
-    // failure path inside leaves the plain map, which is the old behaviour.
     if (widget.isSignUp) unawaited(_preselectCurrentCity());
+    if (!widget.isSignUp) unawaited(_fetchCityHeat());
   }
 
   /// How long the map is given to reach the detected city before the card
@@ -383,6 +386,35 @@ class _CityMapViewState extends State<CityMapView> {
     if (!mounted || epoch != _mapEpoch) return;
     map.onPinTap = _onCityPinTapped;
     setState(() => _androidMap = map);
+    _pushHeatToAndroid();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // City heat
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Future<void> _fetchCityHeat() async {
+    try {
+      final res = await http.get(cityHeatEndpoint, headers: authGetHeaders(widget.token));
+      if (!mounted || res.statusCode != 200) return;
+      final raw = jsonDecode(res.body) as Map<String, dynamic>;
+      _cityHeat = raw.map((k, v) => MapEntry(k, (v as num).toDouble()));
+      _pushHeatToAndroid();
+      _pushHeatToIos();
+    } catch (_) {}
+  }
+
+  void _pushHeatToAndroid() {
+    final map = _androidMap;
+    if (map == null || !map.ready.value) return;
+    map.controller
+        .runJavaScript('NeatMap.updateHeat(${jsonEncode(_cityHeat)})')
+        .catchError((_) {});
+  }
+
+  void _pushHeatToIos() {
+    if (kIsWeb || !Platform.isIOS) return;
+    _iosChannel.invokeMethod<void>('updateHeat', _cityHeat).catchError((_) {});
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -434,9 +466,15 @@ class _CityMapViewState extends State<CityMapView> {
   void _joinCity() {
     final city = _activeCity;
     if (city == null) return;
-    setState(() => _activeCity = null);
+    setState(() {
+      _activeCity = null;
+      _joiningCityName = city.name;
+    });
     _resetNativeMap();
-    widget.onCitySelected(city.name);
+    Future<void>.delayed(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      widget.onCitySelected(city.name);
+    });
   }
 
   // Called on every card-close path — dismiss AND join — to zoom the map
@@ -491,6 +529,28 @@ class _CityMapViewState extends State<CityMapView> {
               ),
             ),
           ),
+
+        if (_joiningCityName != null)
+          Positioned.fill(
+            child: ColoredBox(
+              color: Colors.black,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  NeatLoader(size: 72, color: Colors.white),
+                  const SizedBox(height: 24),
+                  Text(
+                    AppLocalizations.of(context).joiningCity(_joiningCityName!),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -513,7 +573,7 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
     'cities': [
       for (final c in greeceCities)
         if (c.name.trim().toLowerCase() != home)
-          {'name': c.name, 'lat': c.latitude, 'lng': c.longitude},
+          {'name': c.name, 'lat': c.latitude, 'lng': c.longitude, 'tier': c.tier},
     ],
   });
   final bg = isDark ? '#0a0a0a' : '#f2f2f7';
@@ -544,8 +604,17 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
     'use strict';
     var NeatMap = (function () {
       var map = null;
+      var allPinsRef = [];
       var userTouched = false;
       var settleTimer = null;
+
+      function heatToColor(h) {
+        if (!h || h < 0.25) return '#34C759';
+        if (h < 0.5)  return '#FFCC00';
+        if (h < 0.75) return '#FF9500';
+        return '#FF3B30';
+      }
+
       /* Set once focusCity() has aimed the camera somewhere deliberate. From
          then on the home-framing retries below must only re-apply the fence,
          never the country-wide region: their whole job is to correct a camera
@@ -645,8 +714,10 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
           config.cities.forEach(function (c) {
             var pin = new mapkit.MarkerAnnotation(
               new mapkit.Coordinate(c.lat, c.lng),
-              { title: c.name, color: '#34C759', calloutEnabled: false }
+              { title: c.name, color: heatToColor(c.heat), calloutEnabled: false }
             );
+            pin._neatTier = c.tier || 3;
+            pin._neatName = c.name;
             pin.addEventListener('select', function () {
               // Mirror iOS: the pin stays selected (raised) while its card is
               // open; reset() deselects it when the card closes. While the
@@ -658,8 +729,26 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
               ));
               post({ event: 'pin', city: c.name });
             });
+            allPinsRef.push(pin);
             map.addAnnotation(pin);
           });
+
+          function updatePinVisibility() {
+            try {
+              var span = map.region.span.latitudeDelta;
+              if (!span || isNaN(span) || span <= 0) return;
+              // tier 1 always visible; tier 2 at delta < 5; tier 3 at delta < 2.5
+              var maxTier = span < 2.5 ? 3 : (span < 5 ? 2 : 1);
+              allPinsRef.forEach(function (p) {
+                p.visible = p._neatTier <= maxTier;
+              });
+            } catch (e) {}
+          }
+          map.addEventListener('region-change-end', updatePinVisibility);
+          // region-change-end only fires for animated region changes, not instant
+          // map.region = ... assignments. Call directly after the map settles so
+          // the initial overview (latitudeDelta 7.5 → maxTier 1) hides tier 2/3.
+          [300, 800, 2000].forEach(function (ms) { setTimeout(updatePinVisibility, ms); });
 
           post({ event: 'ready' });
         } catch (e) {
@@ -730,7 +819,16 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
         catch (e) { try { map.region = overview(); } catch (e2) {} }
       }
 
-      return { start: start, reset: reset, focusCity: focusCity };
+      function updateHeat(heatMap) {
+        allPinsRef.forEach(function (p) {
+          var h = heatMap[p._neatName];
+          if (h !== undefined) {
+            try { p.color = heatToColor(h); } catch (e) {}
+          }
+        });
+      }
+
+      return { start: start, reset: reset, focusCity: focusCity, updateHeat: updateHeat };
     })();
   </script>
 ''');
@@ -812,6 +910,7 @@ class _MapLayer extends StatelessWidget {
                     'name': c.name,
                     'latitude': c.latitude,
                     'longitude': c.longitude,
+                    'tier': c.tier,
                   })
               .toList(),
           'isDark': isDark,

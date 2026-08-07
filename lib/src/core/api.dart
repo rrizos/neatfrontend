@@ -198,6 +198,8 @@ Uri messageReportEndpoint(int conversationId, int messageId) =>
     Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/report/');
 Uri conversationDeleteEndpoint(int conversationId) =>
     Uri.parse('$apiBaseUrl/api/messages/$conversationId/delete/');
+Uri get cityHeatEndpoint => Uri.parse('$apiBaseUrl/api/posts/city-heat/');
+Uri get neatPassEndpoint => Uri.parse('$apiBaseUrl/api/auth/neat-pass/');
 
 const jsonHeaders = {
   'Content-Type': 'application/json; charset=utf-8',

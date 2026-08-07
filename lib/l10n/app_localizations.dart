@@ -2617,6 +2617,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Tap to remove'**
   String get tapToRemoveReaction;
+
+  /// No description provided for @addBio.
+  ///
+  /// In en, this message translates to:
+  /// **'Add bio'**
+  String get addBio;
+
+  /// No description provided for @joiningCity.
+  ///
+  /// In en, this message translates to:
+  /// **'Joining {city}...'**
+  String joiningCity(String city);
+
+  /// No description provided for @returningToCity.
+  ///
+  /// In en, this message translates to:
+  /// **'Returning to {city}...'**
+  String returningToCity(String city);
+
+  /// No description provided for @neatPass.
+  ///
+  /// In en, this message translates to:
+  /// **'Neat Pass'**
+  String get neatPass;
+
+  /// No description provided for @neatPoints.
+  ///
+  /// In en, this message translates to:
+  /// **'Neat Points'**
+  String get neatPoints;
+
+  /// No description provided for @neatPassHowToEarn.
+  ///
+  /// In en, this message translates to:
+  /// **'Appear in the Virals top-10 to earn Neat Points.'**
+  String get neatPassHowToEarn;
+
+  /// No description provided for @neatPassCurrentPoints.
+  ///
+  /// In en, this message translates to:
+  /// **'Points Balance'**
+  String get neatPassCurrentPoints;
 }
 
 class _AppLocalizationsDelegate

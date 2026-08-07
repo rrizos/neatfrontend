@@ -10,7 +10,26 @@ class GreeceCity {
   final double latitude;
   final double longitude;
   final String? imageUrl;
+
+  /// 1 = large (always visible), 2 = medium (second zoom), 3 = small (closest zoom)
+  int get tier {
+    if (_tier1Cities.contains(name)) return 1;
+    if (_tier2Cities.contains(name)) return 2;
+    return 3;
+  }
 }
+
+const _tier1Cities = {
+  'Αθήνα', 'Θεσσαλονίκη', 'Πάτρα', 'Ηράκλειο', 'Λάρισα',
+};
+
+const _tier2Cities = {
+  'Βόλος', 'Ιωάννινα', 'Χανιά', 'Ρόδος', 'Καβάλα', 'Καλαμάτα',
+  'Τρίκαλα', 'Σέρρες', 'Αγρίνιο', 'Βέροια', 'Κατερίνη', 'Λαμία',
+  'Ξάνθη', 'Κέρκυρα', 'Χαλκίδα', 'Αλεξανδρούπολη', 'Κοζάνη',
+  'Δράμα', 'Κομοτηνή', 'Κόρινθος', 'Μύκονος', 'Σαντορίνη',
+  'Ζάκυνθος', 'Κεφαλονιά', 'Ρέθυμνο',
+};
 
 const List<GreeceCity> greeceCities = [
   GreeceCity(

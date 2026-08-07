@@ -20,6 +20,7 @@ import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../messages/messages_page.dart';
 import '../settings/settings_page.dart';
+import 'neat_pass_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
@@ -857,7 +858,19 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ),
               icon: Icon(Icons.admin_panel_settings_rounded, color: isLight ? Colors.black : Colors.white),
             ),
-          if (profile.username == widget.currentUser.username)
+          if (profile.username == widget.currentUser.username) ...[
+            IconButton(
+              tooltip: AppLocalizations.of(context).neatPass,
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => NeatPassPage(
+                    token: widget.token,
+                    currentUser: widget.currentUser,
+                  ),
+                ),
+              ),
+              icon: Icon(Icons.credit_card_rounded, color: isLight ? Colors.black : Colors.white),
+            ),
             IconButton(
               tooltip: AppLocalizations.of(context).settings,
               onPressed: () => Navigator.of(context).push(
@@ -872,6 +885,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ),
               icon: Icon(Icons.settings_rounded, color: isLight ? Colors.black : Colors.white),
             ),
+          ],
           if (!isOwn)
             IconButton(
               tooltip: AppLocalizations.of(context).moreOptions,
@@ -965,6 +979,38 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                           profile.bio,
                           style: TextStyle(
                             color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
+                          ),
+                        ),
+                      ] else if (isOwn) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: GestureDetector(
+                            onTap: _openEditProfile,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: isLight ? Colors.black : Colors.white,
+                                  width: 1.0,
+                                ),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.add, size: 13, color: isLight ? Colors.black : Colors.white),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    AppLocalizations.of(context).addBio,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: isLight ? Colors.black : Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ],

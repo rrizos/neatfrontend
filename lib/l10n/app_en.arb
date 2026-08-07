@@ -487,5 +487,15 @@
   "auditChainBroken": "Audit chain broken from entry #{id} — a record was altered or removed outside the application.",
   "@auditChainBroken": { "placeholders": { "id": { "type": "String" } } },
   "reactionsTitle": "Reactions",
-  "tapToRemoveReaction": "Tap to remove"
+  "tapToRemoveReaction": "Tap to remove",
+
+  "addBio": "Add bio",
+  "joiningCity": "Joining {city}...",
+  "@joiningCity": { "placeholders": { "city": { "type": "String" } } },
+  "returningToCity": "Returning to {city}...",
+  "@returningToCity": { "placeholders": { "city": { "type": "String" } } },
+  "neatPass": "Neat Pass",
+  "neatPoints": "Neat Points",
+  "neatPassHowToEarn": "Appear in the Virals top-10 to earn Neat Points.",
+  "neatPassCurrentPoints": "Points Balance"
 }

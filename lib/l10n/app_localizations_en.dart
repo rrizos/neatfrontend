@@ -1399,4 +1399,30 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tapToRemoveReaction => 'Tap to remove';
+
+  @override
+  String get addBio => 'Add bio';
+
+  @override
+  String joiningCity(String city) {
+    return 'Joining $city...';
+  }
+
+  @override
+  String returningToCity(String city) {
+    return 'Returning to $city...';
+  }
+
+  @override
+  String get neatPass => 'Neat Pass';
+
+  @override
+  String get neatPoints => 'Neat Points';
+
+  @override
+  String get neatPassHowToEarn =>
+      'Appear in the Virals top-10 to earn Neat Points.';
+
+  @override
+  String get neatPassCurrentPoints => 'Points Balance';
 }

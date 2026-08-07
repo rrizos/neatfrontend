@@ -1408,4 +1408,30 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get tapToRemoveReaction => 'Πατήστε για αφαίρεση';
+
+  @override
+  String get addBio => 'Προσθέσε bio';
+
+  @override
+  String joiningCity(String city) {
+    return 'Μπαίνεις στην $city...';
+  }
+
+  @override
+  String returningToCity(String city) {
+    return 'Επιστροφή στην $city...';
+  }
+
+  @override
+  String get neatPass => 'Neat Pass';
+
+  @override
+  String get neatPoints => 'Neat Points';
+
+  @override
+  String get neatPassHowToEarn =>
+      'Εμφανίσου στο top-10 των Virals για να κερδίσεις Neat Points.';
+
+  @override
+  String get neatPassCurrentPoints => 'Υπόλοιπο Πόντων';
 }

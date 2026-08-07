@@ -436,5 +436,13 @@
   "actionFailedStatusShort": "Η ενέργεια απέτυχε ({status})",
   "auditChainBroken": "Η αλυσίδα ελέγχου έσπασε από την εγγραφή #{id} — μια εγγραφή τροποποιήθηκε ή αφαιρέθηκε εκτός της εφαρμογής.",
   "reactionsTitle": "Αντιδράσεις",
-  "tapToRemoveReaction": "Πατήστε για αφαίρεση"
+  "tapToRemoveReaction": "Πατήστε για αφαίρεση",
+
+  "addBio": "Προσθέσε bio",
+  "joiningCity": "Μπαίνεις στην {city}...",
+  "returningToCity": "Επιστροφή στην {city}...",
+  "neatPass": "Neat Pass",
+  "neatPoints": "Neat Points",
+  "neatPassHowToEarn": "Εμφανίσου στο top-10 των Virals για να κερδίσεις Neat Points.",
+  "neatPassCurrentPoints": "Υπόλοιπο Πόντων"
 }
