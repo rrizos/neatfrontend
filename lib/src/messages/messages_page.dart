@@ -16,6 +16,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:record/record.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
@@ -41,9 +42,13 @@ const _kDivLgt    = Color(0xffe0e0e0);
 
 // ─── Message-type prefixes ────────────────────────────────────────────────────
 
-const _kPostPrefix  = '__neat_post__:';
-const _kImagePrefix = '__neat_image__:';
-const _kVoicePrefix = '__neat_voice__:';
+const _kPostPrefix        = '__neat_post__:';
+const _kImagePrefix       = '__neat_image__:';
+const _kImageReplayPrefix = '__neat_imgreplay__:';
+const _kImageOncePrefix   = '__neat_imgonce__:';
+const _kVoicePrefix       = '__neat_voice__:';
+
+enum _PhotoMode { keep, replay, once }
 const _kReplyPrefix = '__neat_reply__:';
 
 // ─── Image helpers ────────────────────────────────────────────────────────────
@@ -725,6 +730,12 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
 
   bool _open = false;
 
+  // Accumulate delta (screen coords) to classify gesture without localPosition drift
+  double _accumDx = 0;
+  double _accumDy = 0;
+  bool _hTracking = false;
+  bool _vTracking = false;
+
   @override
   void initState() {
     super.initState();
@@ -745,11 +756,7 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
     }
   }
 
-  void _onDragUpdate(DragUpdateDetails d) {
-    _ctrl.value = (_ctrl.value - d.delta.dx / _actionWidth).clamp(0.0, 1.0);
-  }
-
-  void _onDragEnd(DragEndDetails d) {
+  void _settle() {
     if (_ctrl.value > 0.5) {
       _ctrl.animateTo(1.0, curve: Curves.easeOut);
       if (!_open) {
@@ -759,9 +766,7 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
     } else {
       _ctrl.animateTo(0.0, curve: Curves.easeOut);
       if (_open) {
-        if (widget.openSwipeId.value == widget.summary.id) {
-          widget.openSwipeId.value = null;
-        }
+        if (widget.openSwipeId.value == widget.summary.id) widget.openSwipeId.value = null;
         setState(() => _open = false);
       }
     }
@@ -778,9 +783,36 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
   @override
   Widget build(BuildContext context) {
     final bg = widget.isLight ? _kBgLgt : _kBgDark;
-    return GestureDetector(
-      onHorizontalDragUpdate: _onDragUpdate,
-      onHorizontalDragEnd: _onDragEnd,
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (e) {
+        _accumDx = 0;
+        _accumDy = 0;
+        _hTracking = false;
+        _vTracking = false;
+        _ctrl.stop();
+      },
+      onPointerMove: (e) {
+        if (_vTracking) return;
+        _accumDx += e.delta.dx;
+        _accumDy += e.delta.dy.abs();
+        if (!_hTracking) {
+          if (_accumDx.abs() < 5 && _accumDy < 5) return;
+          if (_accumDy >= _accumDx.abs() || _accumDx > 0) { _vTracking = true; return; }
+          _hTracking = true;
+        }
+        _ctrl.value = (_ctrl.value - e.delta.dx / _actionWidth).clamp(0.0, 1.0);
+      },
+      onPointerUp: (_) {
+        if (_hTracking) _settle();
+        _hTracking = false;
+        _vTracking = false;
+      },
+      onPointerCancel: (_) {
+        if (_hTracking) _ctrl.animateTo(0.0, curve: Curves.easeOut);
+        _hTracking = false;
+        _vTracking = false;
+      },
       child: Stack(
         clipBehavior: Clip.hardEdge,
         children: [
@@ -1974,6 +2006,15 @@ class _ConversationPageState extends State<ConversationPage>
   Future<void> _sendImage(Uint8List bytes) =>
       _sendRaw('$_kImagePrefix${base64Encode(bytes)}');
 
+  Future<void> _sendImageWithMode(Uint8List bytes, _PhotoMode mode) {
+    final prefix = switch (mode) {
+      _PhotoMode.once   => _kImageOncePrefix,
+      _PhotoMode.replay => _kImageReplayPrefix,
+      _PhotoMode.keep   => _kImagePrefix,
+    };
+    return _sendRaw('$prefix${base64Encode(bytes)}');
+  }
+
   Future<void> _sendVoice(Uint8List bytes, int durationSecs) =>
       _sendRaw('$_kVoicePrefix${base64Encode(bytes)}|$durationSecs');
 
@@ -2446,6 +2487,7 @@ class _ConversationPageState extends State<ConversationPage>
               sending: _sending,
               onSendText: _sendText,
               onSendImage: _sendImage,
+              onSendImageWithMode: _sendImageWithMode,
               onSendVoice: _sendVoice,
               replyTo: _replyTo,
               onClearReply: _clearReply,
@@ -2589,21 +2631,19 @@ class _MessageRow extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (final g in groups)
-              Padding(
-                padding: const EdgeInsets.only(right: 3),
-                child: Text(g.key, style: const TextStyle(fontSize: 14)),
+            for (int gi = 0; gi < groups.length; gi++) ...[
+              if (gi > 0) const SizedBox(width: 3),
+              Text(groups[gi].key, style: const TextStyle(fontSize: 14)),
+            ],
+            for (int ri = 0; ri < reactors.length; ri++) ...[
+              const SizedBox(width: 3),
+              _avatar(
+                username: reactors[ri],
+                url: reactors[ri] == otherUsername ? otherAvatarUrl : currentAvatarUrl,
+                radius: 8,
+                isLight: isLight,
               ),
-            for (final username in reactors)
-              Padding(
-                padding: const EdgeInsets.only(right: 3),
-                child: _avatar(
-                  username: username,
-                  url: username == otherUsername ? otherAvatarUrl : currentAvatarUrl,
-                  radius: 8,
-                  isLight: isLight,
-                ),
-              ),
+            ],
           ],
         ),
       ),
@@ -3062,6 +3102,7 @@ class _Composer extends StatefulWidget {
     required this.sending,
     required this.onSendText,
     required this.onSendImage,
+    required this.onSendImageWithMode,
     required this.onSendVoice,
     this.replyTo,
     this.onClearReply,
@@ -3074,6 +3115,7 @@ class _Composer extends StatefulWidget {
   final bool sending;
   final VoidCallback onSendText;
   final Future<void> Function(Uint8List) onSendImage;
+  final Future<void> Function(Uint8List, _PhotoMode) onSendImageWithMode;
   final Future<void> Function(Uint8List, int) onSendVoice;
   final MessageItem? replyTo;
   final VoidCallback? onClearReply;
@@ -3116,12 +3158,22 @@ class _ComposerState extends State<_Composer> {
     try {
       final xfile = await ImagePicker().pickImage(
         source: source,
-        imageQuality: 70,
+        imageQuality: 85,
         maxWidth: 1200,
+        maxHeight: 1200,
       );
-      if (xfile == null) return;
+      if (xfile == null || !mounted) return;
       final bytes = await xfile.readAsBytes();
-      await widget.onSendImage(bytes);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => _PhotoPreviewPage(
+            bytes: bytes,
+            onSend: (mode) => widget.onSendImageWithMode(bytes, mode),
+          ),
+        ),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4543,6 +4595,164 @@ class _FullEmojiPicker extends StatelessWidget {
                 onTap: () => onSelect(_kAllEmojis[i]),
                 child: Center(child: Text(_kAllEmojis[i], style: const TextStyle(fontSize: 24))),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Photo preview (Instagram-style) ──────────────────────────────────────────
+
+class _PhotoPreviewPage extends StatefulWidget {
+  const _PhotoPreviewPage({required this.bytes, required this.onSend});
+  final Uint8List bytes;
+  final void Function(_PhotoMode mode) onSend;
+  @override
+  State<_PhotoPreviewPage> createState() => _PhotoPreviewPageState();
+}
+
+class _PhotoPreviewPageState extends State<_PhotoPreviewPage> {
+  _PhotoMode _mode = _PhotoMode.keep;
+
+  Future<void> _download() async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/neat_photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await File(path).writeAsBytes(widget.bytes);
+      await Share.shareXFiles([XFile(path)]);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // Full-screen image
+          SizedBox.expand(
+            child: Image.memory(widget.bytes, fit: BoxFit.contain),
+          ),
+          // Top bar
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.download_rounded, color: Colors.white, size: 28),
+                    onPressed: _download,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Bottom bar
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _PhotoModeOption(
+                          label: 'Διατήρηση στη συνομιλία',
+                          selected: _mode == _PhotoMode.keep,
+                          onTap: () => setState(() => _mode = _PhotoMode.keep),
+                        ),
+                        const SizedBox(height: 8),
+                        _PhotoModeOption(
+                          label: 'Να επιτρέπεται η επαναπροβολή',
+                          selected: _mode == _PhotoMode.replay,
+                          onTap: () => setState(() => _mode = _PhotoMode.replay),
+                        ),
+                        const SizedBox(height: 8),
+                        _PhotoModeOption(
+                          label: 'Προβολή μια φορά',
+                          selected: _mode == _PhotoMode.once,
+                          onTap: () => setState(() => _mode = _PhotoMode.once),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        widget.onSend(_mode);
+                      },
+                      child: Container(
+                        width: 56,
+                        height: 56,
+                        decoration: const BoxDecoration(
+                          color: Color(0xff0095f6),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.send_rounded, color: Colors.white, size: 26),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PhotoModeOption extends StatelessWidget {
+  const _PhotoModeOption({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              color: selected ? Colors.white : Colors.transparent,
+            ),
+            child: selected
+                ? const Icon(Icons.check, size: 13, color: Colors.black)
+                : null,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
             ),
           ),
         ],

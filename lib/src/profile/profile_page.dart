@@ -20,7 +20,6 @@ import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../messages/messages_page.dart';
 import '../settings/settings_page.dart';
-import 'neat_pass_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
@@ -860,18 +859,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ),
           if (profile.username == widget.currentUser.username) ...[
             IconButton(
-              tooltip: AppLocalizations.of(context).neatPass,
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => NeatPassPage(
-                    token: widget.token,
-                    currentUser: widget.currentUser,
-                  ),
-                ),
-              ),
-              icon: Icon(Icons.credit_card_rounded, color: isLight ? Colors.black : Colors.white),
-            ),
-            IconButton(
               tooltip: AppLocalizations.of(context).settings,
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
@@ -1649,6 +1636,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
       source: ImageSource.gallery,
       imageQuality: 88,
       maxWidth: 1400,
+      maxHeight: 1400,
     );
     if (picked == null || !mounted) return;
     final bytes = await picked.readAsBytes();

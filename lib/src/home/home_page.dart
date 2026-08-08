@@ -2426,12 +2426,6 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
             ],
-            _iconWithDot(
-              isLight: isLight,
-              showDot: hasOfficialEvents,
-              onTap: onEventsTap,
-              icon: Icons.calendar_month_outlined,
-            ),
             if (activeCity == null) ...[
               _iconWithDot(
                 isLight: isLight,

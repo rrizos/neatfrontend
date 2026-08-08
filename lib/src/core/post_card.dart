@@ -1315,11 +1315,14 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                widget.post.author,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: isLight ? Colors.black : Colors.white,
+                              Flexible(
+                                child: Text(
+                                  widget.post.author,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: isLight ? Colors.black : Colors.white,
+                                  ),
                                 ),
                               ),
                               if (widget.post.authorVerified) ...[
