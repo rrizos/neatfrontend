@@ -1,6 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' show ImageFilter;
+import 'dart:io' show Platform;
+import 'dart:ui' show ImageByteFormat, ImageFilter;
+import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
+import 'package:image/image.dart' as img;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -20,6 +24,33 @@ import '../core/report_post_sheet.dart';
 import '../core/share_sheet.dart';
 import '../messages/messages_page.dart';
 import '../settings/settings_page.dart';
+
+// Runs in a separate isolate — decodes and re-encodes with EXIF rotation baked in.
+Uint8List _fixExifAndEncode(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return bytes;
+  return Uint8List.fromList(img.encodeJpg(decoded, quality: 95));
+}
+
+// Converts raw RGBA bytes (from RepaintBoundary) to a high-quality JPEG.
+class _RgbaData {
+  const _RgbaData({required this.bytes, required this.width, required this.height});
+  final Uint8List bytes;
+  final int width;
+  final int height;
+}
+
+Uint8List _rgbaToJpeg(_RgbaData d) {
+  final image = img.Image.fromBytes(
+    width: d.width,
+    height: d.height,
+    bytes: d.bytes.buffer,
+    format: img.Format.uint8,
+    numChannels: 4,
+    order: img.ChannelOrder.rgba,
+  );
+  return Uint8List.fromList(img.encodeJpg(image, quality: 95));
+}
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
@@ -1634,16 +1665,28 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   Future<void> _pickAvatar() async {
     final picked = await widget.imagePicker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 88,
-      maxWidth: 1400,
-      maxHeight: 1400,
+      imageQuality: 95,
     );
     if (picked == null || !mounted) return;
-    final bytes = await picked.readAsBytes();
+    final rawBytes = await picked.readAsBytes();
     if (!mounted) return;
-    final mime = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+    // On Android imageQuality alone doesn't bake EXIF into pixels — fix it.
+    // On iOS imageQuality: 95 already re-encodes with correct orientation.
+    final fixed = Platform.isAndroid
+        ? await compute(_fixExifAndEncode, rawBytes)
+        : rawBytes;
+    if (!mounted) return;
+    Uint8List? cropped;
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => _CropAvatarPage(
+        bytes: fixed,
+        onCrop: (b) => cropped = b,
+      ),
+    ));
+    if (cropped == null || !mounted) return;
     setState(() {
-      _avatarUrl = 'data:image/$mime;base64,${base64Encode(bytes)}';
+      _avatarUrl = 'data:image/jpeg;base64,${base64Encode(cropped!)}';
     });
   }
 
@@ -2532,4 +2575,152 @@ class _ProfileTabBarDelegate extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(_ProfileTabBarDelegate old) =>
       old.tabBar != tabBar || old.bg != bg;
+}
+
+// ─── Avatar crop page ─────────────────────────────────────────────────────────
+
+class _CropAvatarPage extends StatefulWidget {
+  const _CropAvatarPage({required this.bytes, required this.onCrop});
+  final Uint8List bytes;
+  final ValueChanged<Uint8List> onCrop;
+  @override
+  State<_CropAvatarPage> createState() => _CropAvatarPageState();
+}
+
+class _CropAvatarPageState extends State<_CropAvatarPage> {
+  final _repaintKey = GlobalKey();
+  bool _processing = false;
+
+  Future<void> _confirm() async {
+    if (_processing || !mounted) return;
+    setState(() => _processing = true);
+    try {
+      final boundary =
+          _repaintKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final pixelRatio = MediaQuery.devicePixelRatioOf(context) * 1.5;
+      final uiImage = await boundary.toImage(pixelRatio: pixelRatio);
+      final byteData = await uiImage.toByteData(format: ImageByteFormat.rawRgba);
+      if (byteData == null || !mounted) return;
+      final jpeg = await compute(
+        _rgbaToJpeg,
+        _RgbaData(
+          bytes: byteData.buffer.asUint8List(),
+          width: uiImage.width,
+          height: uiImage.height,
+        ),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      widget.onCrop(jpeg);
+    } catch (_) {
+      if (mounted) setState(() => _processing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cropSize = MediaQuery.sizeOf(context).width * 0.88;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // Capture target — square crop area
+          Center(
+            child: RepaintBoundary(
+              key: _repaintKey,
+              child: ClipRect(
+                child: SizedBox.square(
+                  dimension: cropSize,
+                  child: InteractiveViewer(
+                    minScale: 1.0,
+                    maxScale: 8.0,
+                    child: Image.memory(
+                      widget.bytes,
+                      fit: BoxFit.cover,
+                      width: cropSize,
+                      height: cropSize,
+                      gaplessPlayback: true,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // Dark overlay with circular hole
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: _CropOverlayPainter(cropSize: cropSize),
+              ),
+            ),
+          ),
+          // Buttons
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  _processing
+                      ? const Padding(
+                          padding: EdgeInsets.all(10),
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2),
+                          ),
+                        )
+                      : GestureDetector(
+                          onTap: _confirm,
+                          child: Container(
+                            width: 44,
+                            height: 44,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.check_rounded,
+                                color: Colors.black, size: 24),
+                          ),
+                        ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CropOverlayPainter extends CustomPainter {
+  const _CropOverlayPainter({required this.cropSize});
+  final double cropSize;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final r = cropSize / 2;
+    final path = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..addOval(Rect.fromCircle(center: center, radius: r))
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(path, Paint()..color = Colors.black.withValues(alpha: 0.65));
+    canvas.drawCircle(
+      center,
+      r,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.4)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CropOverlayPainter old) => old.cropSize != cropSize;
 }
