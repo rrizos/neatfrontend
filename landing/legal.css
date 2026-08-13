@@ -6,6 +6,12 @@
   --ink: #eef1fb;
   --ink-soft: #a7b0d0;
   --blue: #5089ff;
+  /* Same value the landing page uses. Kept here because the pages that share
+     this stylesheet need an accent for destructive actions (the delete-account
+     button, the danger row in the safety portal) — an undefined custom property
+     makes the whole declaration invalid, which left that button transparent
+     with near-black text on a near-black card. */
+  --coral: #ff8a81;
   --paper: #0a0d18;
   --paper-dim: #0f1424;
   --line: rgba(238, 241, 251, 0.10);

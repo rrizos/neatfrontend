@@ -23,8 +23,52 @@
     padding: 6px 12px; border-radius: 18px; font: 700 12px/1 var(--sans); color: var(--ink-soft);
   }
   .lang-switch button[aria-pressed="true"] { background: var(--blue); color: #fff; }
+
+  /* Greek is what a browser with no JavaScript gets. */
+  .doc-lang[data-lang="en"], .t-lang[data-lang="en"] { display: none; }
+  html[data-lang="en"] .doc-lang[data-lang="en"] { display: block; }
+  html[data-lang="en"] .t-lang[data-lang="en"] { display: inline; }
+  html[data-lang="en"] .doc-lang[data-lang="el"],
+  html[data-lang="en"] .t-lang[data-lang="el"] { display: none; }
   .doc-lang[hidden] { display: none; }
 </style>
+<script>
+(function () {
+  try {
+    var q = new URLSearchParams(location.search).get('lang');
+    var saved = null;
+    try { saved = localStorage.getItem('neatLang'); } catch (e) {}
+    if (saved !== 'el' && saved !== 'en') saved = null;
+
+    var country = '';
+    var m = document.cookie.match(/(?:^|;\s*)neat_country=([A-Za-z]{2})(?:;|$)/);
+    if (m) country = m[1].toUpperCase();
+
+    var lang;
+    if (q === 'en' || q === 'el') {
+      lang = q;
+    } else if (saved) {
+      lang = saved;
+    } else if (country) {
+      lang = country === 'GR' ? 'el' : 'en';
+    } else {
+      var greek = false;
+      var langs = navigator.languages || [navigator.language || ''];
+      for (var i = 0; i < langs.length; i++) {
+        if (String(langs[i]).toLowerCase().indexOf('el') === 0) { greek = true; break; }
+      }
+      if (!greek) {
+        try {
+          greek = Intl.DateTimeFormat().resolvedOptions().timeZone === 'Europe/Athens';
+        } catch (e) {}
+      }
+      lang = greek ? 'el' : 'en';
+    }
+    document.documentElement.lang = lang;
+    document.documentElement.setAttribute('data-lang', lang);
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
 
@@ -410,34 +454,51 @@
 
 <footer class="site">
   <div class="wrap">
-    <div class="foot-copy">© 2026 Neat. Με αγάπη για κάθε ελληνική πόλη.</div>
+    <div class="foot-copy">
+      <span class="t-lang" data-lang="el">© 2026 Neat. Με αγάπη για κάθε ελληνική πόλη.</span>
+      <span class="t-lang" data-lang="en">© 2026 Neat. Made with love for every Greek city.</span>
+    </div>
     <div class="foot-links">
-      <a href="/">Αρχική</a>
-      <a href="/terms">Όροι Χρήσης</a>
-      <a href="/privacy">Απόρρητο</a>
-      <a href="mailto:neatgreece@gmail.com">Επικοινωνία</a>
+      <a href="/"><span class="t-lang" data-lang="el">Αρχική</span><span class="t-lang" data-lang="en">Home</span></a>
+      <a href="/terms"><span class="t-lang" data-lang="el">Όροι Χρήσης</span><span class="t-lang" data-lang="en">Terms of Use</span></a>
+      <a href="/privacy"><span class="t-lang" data-lang="el">Απόρρητο</span><span class="t-lang" data-lang="en">Privacy</span></a>
+      <a href="/safetyportal"><span class="t-lang" data-lang="el">Ασφάλεια</span><span class="t-lang" data-lang="en">Safety</span></a>
+      <a href="/deleteaccount"><span class="t-lang" data-lang="el">Διαγραφή λογαριασμού</span><span class="t-lang" data-lang="en">Delete account</span></a>
+      <a href="mailto:neatgreece@gmail.com"><span class="t-lang" data-lang="el">Επικοινωνία</span><span class="t-lang" data-lang="en">Contact</span></a>
     </div>
   </div>
 </footer>
 
 <script>
-  // Greek is the default; ?lang=en (or the switch) shows the English original.
-  const docs = document.querySelectorAll('.doc-lang');
-  const buttons = document.querySelectorAll('[data-set-lang]');
+(function () {
+  var TITLE = {"el": "Πολιτική Απορρήτου — Neat", "en": "Privacy Policy — Neat"};
+  var DESC = {"el": "Πώς το Neat συλλέγει, χρησιμοποιεί και προστατεύει τα δεδομένα σου.", "en": "How Neat collects, uses and protects your data."};
+  var buttons = document.querySelectorAll('[data-set-lang]');
+  var desc = document.querySelector('meta[name="description"]');
 
-  function setLang(lang, push) {
-    docs.forEach(d => { d.hidden = d.dataset.lang !== lang; });
-    buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.setLang === lang)));
+  function setLang(lang, remember) {
     document.documentElement.lang = lang;
-    if (push) {
-      const url = new URL(location.href);
+    document.documentElement.setAttribute('data-lang', lang);
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].setAttribute('aria-pressed', String(buttons[i].dataset.setLang === lang));
+    }
+    document.title = TITLE[lang];
+    if (desc) desc.setAttribute('content', DESC[lang]);
+    if (remember) {
+      // Shared with the landing page, so the choice holds across the site.
+      try { localStorage.setItem('neatLang', lang); } catch (e) {}
+      var url = new URL(location.href);
       if (lang === 'el') url.searchParams.delete('lang'); else url.searchParams.set('lang', lang);
       history.replaceState(null, '', url);
     }
   }
 
-  buttons.forEach(b => b.addEventListener('click', () => setLang(b.dataset.setLang, true)));
-  setLang(new URLSearchParams(location.search).get('lang') === 'en' ? 'en' : 'el', false);
+  for (var i = 0; i < buttons.length; i++) {
+    buttons[i].addEventListener('click', function () { setLang(this.dataset.setLang, true); });
+  }
+
+  setLang(document.documentElement.getAttribute('data-lang') === 'en' ? 'en' : 'el', false);
+})();
 </script>
 </body>
 </html>
