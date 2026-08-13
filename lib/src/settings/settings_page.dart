@@ -4,6 +4,7 @@ import '../core/http_client.dart' as http;
 import '../../l10n/app_localizations.dart';
 import '../app.dart';
 import '../core/api.dart';
+import '../core/code_push_service.dart';
 import '../core/legal_links.dart';
 import 'blocked_accounts_page.dart';
 
@@ -116,6 +117,7 @@ class SettingsPage extends StatelessWidget {
               showChevron: false,
               onTap: () => _confirmDeleteAccount(context),
             ),
+            const _BuildFooter(),
           ],
         ),
       ),
@@ -242,6 +244,48 @@ class SettingsPage extends StatelessWidget {
     if (!context.mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
     await onLogout();
+  }
+}
+
+/// The build the user is actually running, in small grey type at the end of
+/// the list.
+///
+/// With over-the-air updates the store version no longer identifies the code
+/// on a device — two people on 2.0.2 can be running different Dart. The patch
+/// number is the missing half, and it is the one thing worth asking for when
+/// someone reports a bug. Nothing is shown when there is no patch (a fresh
+/// store install, or any build the updater isn't part of), so the line stays
+/// quiet until it has something to say.
+class _BuildFooter extends StatefulWidget {
+  const _BuildFooter();
+
+  @override
+  State<_BuildFooter> createState() => _BuildFooterState();
+}
+
+class _BuildFooterState extends State<_BuildFooter> {
+  int? _patch;
+
+  @override
+  void initState() {
+    super.initState();
+    CodePushService.instance.currentPatchNumber().then((patch) {
+      if (mounted) setState(() => _patch = patch);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final patch = _patch;
+    if (patch == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+      child: Text(
+        'patch $patch',
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: Color(0xff8a8a8a), fontSize: 12),
+      ),
+    );
   }
 }
 

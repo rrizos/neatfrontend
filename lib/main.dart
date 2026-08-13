@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/giphy_flutter_sdk.dart';
 
 import 'src/app.dart';
+import 'src/core/code_push_service.dart';
 import 'src/core/link_preview.dart';
 import 'src/core/pinned_http.dart';
 import 'src/core/push_service.dart';
@@ -42,6 +43,11 @@ void main() {
     // so cards paint from it rather than re-earning every one over the
     // network. A slow or failed read only means a slower start.
     unawaited(LinkPreviewService.instance.restore());
+
+    // Fire-and-forget for the same reason: a code-push patch is booted on the
+    // next cold start, so there is nothing to wait for now — and a slow
+    // network must never be something the first frame is behind.
+    unawaited(CodePushService.instance.checkForUpdate());
   }
   runApp(const NeatApp());
 }
