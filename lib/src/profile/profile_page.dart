@@ -1,9 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:io' show Platform;
-import 'dart:ui' show ImageByteFormat, ImageFilter;
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/foundation.dart' show compute;
-import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:image/image.dart' as img;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -26,31 +24,60 @@ import '../core/share_sheet.dart';
 import '../messages/messages_page.dart';
 import '../settings/settings_page.dart';
 
-// Runs in a separate isolate — decodes and re-encodes with EXIF rotation baked in.
+// Decodes bytes applying EXIF rotation, re-encodes at q100 (near-lossless intermediate).
 Uint8List _fixExifAndEncode(Uint8List bytes) {
   final decoded = img.decodeImage(bytes);
   if (decoded == null) return bytes;
-  return Uint8List.fromList(img.encodeJpg(decoded, quality: 95));
+  return Uint8List.fromList(img.encodeJpg(decoded, quality: 100));
 }
 
-// Converts raw RGBA bytes (from RepaintBoundary) to a high-quality JPEG.
-class _RgbaData {
-  const _RgbaData({required this.bytes, required this.width, required this.height});
+class _CropParams {
+  const _CropParams({
+    required this.bytes,
+    required this.cropSize,
+    required this.scale,
+    required this.tx,
+    required this.ty,
+  });
   final Uint8List bytes;
-  final int width;
-  final int height;
+  final double cropSize;
+  final double scale;
+  final double tx;
+  final double ty;
 }
 
-Uint8List _rgbaToJpeg(_RgbaData d) {
-  final image = img.Image.fromBytes(
-    width: d.width,
-    height: d.height,
-    bytes: d.bytes.buffer,
-    format: img.Format.uint8,
-    numChannels: 4,
-    order: img.ChannelOrder.rgba,
-  );
-  return Uint8List.fromList(img.encodeJpg(image, quality: 95));
+// Crops the EXIF-corrected image directly from pixels — no screen-capture quality loss.
+Uint8List _cropAndEncode(_CropParams p) {
+  final decoded = img.decodeImage(p.bytes);
+  if (decoded == null) return p.bytes;
+
+  final imgW = decoded.width.toDouble();
+  final imgH = decoded.height.toDouble();
+
+  // dp per source pixel: the child is laid out at the size that just covers
+  // the crop square, so one ratio maps the whole picture.
+  final coverScale = p.cropSize / (imgW < imgH ? imgW : imgH);
+
+  // Visible rectangle in child-widget (dp) coords from the InteractiveViewer transform
+  final leftW = -p.tx / p.scale;
+  final topW  = -p.ty / p.scale;
+  final sizeW =  p.cropSize / p.scale;
+
+  // Map to source image pixels. No centre-crop offset to add back: the child
+  // is the entire image now, not the square BoxFit.cover left of it, which is
+  // what lets it be dragged before it has been zoomed.
+  int x  = (leftW / coverScale).round().clamp(0, decoded.width - 1);
+  int y  = (topW / coverScale).round().clamp(0, decoded.height - 1);
+  int sz = (sizeW / coverScale).round();
+  sz = sz.clamp(1, (decoded.width - x) < (decoded.height - y)
+      ? decoded.width - x
+      : decoded.height - y);
+
+  final cropped = img.copyCrop(decoded, x: x, y: y, width: sz, height: sz);
+  final out = cropped.width > 1200
+      ? img.copyResize(cropped, width: 1200, height: 1200)
+      : cropped;
+  return Uint8List.fromList(img.encodeJpg(out, quality: 95));
 }
 
 class ProfilePage extends StatefulWidget {
@@ -1679,11 +1706,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     if (picked == null || !mounted) return;
     final rawBytes = await picked.readAsBytes();
     if (!mounted) return;
-    // On Android imageQuality alone doesn't bake EXIF into pixels — fix it.
-    // On iOS imageQuality: 95 already re-encodes with correct orientation.
-    final fixed = Platform.isAndroid
-        ? await compute(_fixExifAndEncode, rawBytes)
-        : rawBytes;
+    // Always decode+re-encode to bake EXIF rotation into pixels on all platforms.
+    final fixed = await compute(_fixExifAndEncode, rawBytes);
     if (!mounted) return;
     Uint8List? cropped;
     await Navigator.of(context).push<void>(MaterialPageRoute(
@@ -2597,8 +2621,7 @@ class _CropAvatarPage extends StatefulWidget {
 }
 
 class _CropAvatarPageState extends State<_CropAvatarPage> {
-  final _repaintKey = GlobalKey();
-  final _viewer = TransformationController();
+  final _transformCtrl = TransformationController();
   bool _processing = false;
 
   /// The picture's own aspect ratio (width / height), once decoded.
@@ -2606,10 +2629,9 @@ class _CropAvatarPageState extends State<_CropAvatarPage> {
   /// Needed before anything can be drawn: the photo is laid out at the size
   /// that *covers* the crop square — wider than the square for a landscape
   /// shot, taller for a portrait one — and it is that overflow which gives
-  /// the drag something to move. Sizing it to the square instead (what
-  /// BoxFit.cover did here before) centre-crops the picture during layout, so
-  /// there is nothing left outside the frame and dragging an unzoomed photo
-  /// did nothing at all.
+  /// the drag something to move. Sizing it to the square instead centre-crops
+  /// the picture during layout, so there was nothing left outside the frame
+  /// and dragging an unzoomed photo did nothing at all.
   double? _aspect;
 
   @override
@@ -2636,12 +2658,6 @@ class _CropAvatarPageState extends State<_CropAvatarPage> {
     }
   }
 
-  @override
-  void dispose() {
-    _viewer.dispose();
-    super.dispose();
-  }
-
   static double _cropSizeOf(BuildContext context) =>
       MediaQuery.sizeOf(context).width * 0.88;
 
@@ -2654,7 +2670,7 @@ class _CropAvatarPageState extends State<_CropAvatarPage> {
   /// Centres the photo in the crop square — the framing everyone expects to
   /// start from, and the one BoxFit.cover used to give for free.
   void _centre(Size child, double cropSize) {
-    _viewer.value = Matrix4.identity()
+    _transformCtrl.value = Matrix4.identity()
       ..translateByDouble(
         -(child.width - cropSize) / 2,
         -(child.height - cropSize) / 2,
@@ -2663,22 +2679,28 @@ class _CropAvatarPageState extends State<_CropAvatarPage> {
       );
   }
 
+  @override
+  void dispose() {
+    _transformCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _confirm() async {
     if (_processing || !mounted) return;
     setState(() => _processing = true);
     try {
-      final boundary =
-          _repaintKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-      final pixelRatio = MediaQuery.devicePixelRatioOf(context) * 1.5;
-      final uiImage = await boundary.toImage(pixelRatio: pixelRatio);
-      final byteData = await uiImage.toByteData(format: ImageByteFormat.rawRgba);
-      if (byteData == null || !mounted) return;
+      final m = _transformCtrl.value;
+      final scale = m.getMaxScaleOnAxis();
+      final t = m.getTranslation();
+      final cropSize = _cropSizeOf(context);
       final jpeg = await compute(
-        _rgbaToJpeg,
-        _RgbaData(
-          bytes: byteData.buffer.asUint8List(),
-          width: uiImage.width,
-          height: uiImage.height,
+        _cropAndEncode,
+        _CropParams(
+          bytes: widget.bytes,
+          cropSize: cropSize,
+          scale: scale,
+          tx: t.x,
+          ty: t.y,
         ),
       );
       if (!mounted) return;
@@ -2693,40 +2715,37 @@ class _CropAvatarPageState extends State<_CropAvatarPage> {
   Widget build(BuildContext context) {
     final cropSize = _cropSizeOf(context);
     final aspect = _aspect;
-    final child =
-        aspect == null ? Size.square(cropSize) : _childSizeFor(aspect, cropSize);
-
+    final child = aspect == null
+        ? Size.square(cropSize)
+        : _childSizeFor(aspect, cropSize);
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Capture target — square crop area
+          // Square crop area — InteractiveViewer transform is read on confirm
           Center(
-            child: RepaintBoundary(
-              key: _repaintKey,
-              child: ClipRect(
-                child: SizedBox.square(
-                  dimension: cropSize,
-                  child: aspect == null
-                      ? const ColoredBox(color: Colors.black)
-                      : InteractiveViewer(
-                          // Unconstrained, so the child keeps its own
-                          // (oversized) dimensions instead of being squeezed
-                          // into the viewport. Panning is still fenced by the
-                          // child's edges, so the frame can never show a gap.
-                          constrained: false,
-                          transformationController: _viewer,
-                          minScale: 1.0,
-                          maxScale: 8.0,
-                          child: Image.memory(
-                            widget.bytes,
-                            fit: BoxFit.fill,
-                            width: child.width,
-                            height: child.height,
-                            gaplessPlayback: true,
-                          ),
+            child: ClipRect(
+              child: SizedBox.square(
+                dimension: cropSize,
+                child: aspect == null
+                    ? const ColoredBox(color: Colors.black)
+                    : InteractiveViewer(
+                        // Unconstrained, so the child keeps its own
+                        // (oversized) dimensions instead of being squeezed
+                        // into the viewport. Panning is still fenced by the
+                        // child's edges, so the frame can never show a gap.
+                        constrained: false,
+                        transformationController: _transformCtrl,
+                        minScale: 1.0,
+                        maxScale: 8.0,
+                        child: Image.memory(
+                          widget.bytes,
+                          fit: BoxFit.fill,
+                          width: child.width,
+                          height: child.height,
+                          gaplessPlayback: true,
                         ),
-                ),
+                      ),
               ),
             ),
           ),
