@@ -126,7 +126,27 @@ class _AndroidMap {
     return _build(homeCity: homeCity, isDark: isDark);
   }
 
-  static Future<_AndroidMap> _build({required String homeCity, required bool isDark}) async {
+  /// A one-off map for the onboarding hero: framed tight on Greece, never
+  /// cached, and never handed the prewarmed instance.
+  static Future<_AndroidMap> buildHero({required bool isDark}) => _build(
+        homeCity: '',
+        isDark: isDark,
+        // Matches MapSnapshot.overview on iOS, so the two platforms open on
+        // the same picture.
+        centerLat: 38.6,
+        centerLng: 24.0,
+        spanLat: 5.2,
+        spanLng: 5.2,
+      );
+
+  static Future<_AndroidMap> _build({
+    required String homeCity,
+    required bool isDark,
+    double centerLat = 39.0,
+    double centerLng = 22.9,
+    double spanLat = 7.5,
+    double spanLng = 7.5,
+  }) async {
     if (_mapkitJs == null) {
       try {
         _mapkitJs = await rootBundle.loadString('assets/mapkit.js');
@@ -154,7 +174,15 @@ class _AndroidMap {
       unawaited(platform.setOverScrollMode(WebViewOverScrollMode.never));
     }
     unawaited(controller.loadHtmlString(
-      _androidMapPage(homeCity: homeCity, isDark: isDark, inlineMapkitJs: _mapkitJs),
+      _androidMapPage(
+        homeCity: homeCity,
+        isDark: isDark,
+        inlineMapkitJs: _mapkitJs,
+        centerLat: centerLat,
+        centerLng: centerLng,
+        spanLat: spanLat,
+        spanLng: spanLng,
+      ),
       // Must match the origin the MapKit JWT was issued for.
       baseUrl: 'https://netnest.net',
     ));
@@ -178,6 +206,69 @@ class _AndroidMap {
       case 'error':
         debugPrint('[map] js: ${decoded['message']}');
     }
+  }
+}
+
+/// A still map of Greece for the onboarding heroes, on Android.
+///
+/// iOS renders those from `MKMapSnapshotter` ([CityMapSnapshot]); Apple ships
+/// no equivalent for Android, so the hero was simply absent there — the
+/// spectator and city-setup screens opened with their copy and no map above
+/// it. This is the same MapKit page the map tab uses, framed tighter and with
+/// every touch blocked, so it behaves as the picture it is meant to be.
+///
+/// Built fresh rather than taken from the prewarm cache: that instance
+/// belongs to the map tab, and handing it over here would leave the tab to
+/// build its own from cold at the moment it is opened.
+class AndroidCityMapHero extends StatefulWidget {
+  const AndroidCityMapHero({super.key, required this.isDark});
+
+  final bool isDark;
+
+  /// Whether this platform needs it — everywhere else has the snapshot.
+  static bool get isSupported => !kIsWeb && Platform.isAndroid;
+
+  @override
+  State<AndroidCityMapHero> createState() => _AndroidCityMapHeroState();
+}
+
+class _AndroidCityMapHeroState extends State<AndroidCityMapHero> {
+  _AndroidMap? _map;
+
+  @override
+  void initState() {
+    super.initState();
+    _build();
+  }
+
+  @override
+  void didUpdateWidget(AndroidCityMapHero old) {
+    super.didUpdateWidget(old);
+    if (old.isDark != widget.isDark) _build();
+  }
+
+  Future<void> _build() async {
+    final map = await _AndroidMap.buildHero(isDark: widget.isDark);
+    if (!mounted) return;
+    setState(() => _map = map);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final placeholder = ColoredBox(
+      color: widget.isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7),
+    );
+    final map = _map;
+    if (map == null) return placeholder;
+    return ValueListenableBuilder<bool>(
+      valueListenable: map.ready,
+      builder: (context, ready, child) => ready ? child! : placeholder,
+      // No gesture recognizers and no hit testing: a hero is scenery, and the
+      // page under it has its own scrolling and buttons to get on with.
+      child: IgnorePointer(
+        child: WebViewWidget(controller: map.controller),
+      ),
+    );
   }
 }
 
@@ -495,6 +586,7 @@ class _CityMapViewState extends State<CityMapView> {
   @override
   Widget build(BuildContext context) {
     final city = _activeCity;
+    final isDark = _brightness == Brightness.dark;
     return Stack(
       children: [
         Positioned.fill(
@@ -503,7 +595,7 @@ class _CityMapViewState extends State<CityMapView> {
             key: ValueKey(_mapGeneration),
             androidMap: _androidMap,
             homeCity: widget.homeCity,
-            isDark: _brightness == Brightness.dark,
+            isDark: isDark,
           ),
         ),
 
@@ -532,17 +624,20 @@ class _CityMapViewState extends State<CityMapView> {
 
         if (_joiningCityName != null)
           Positioned.fill(
+            // Follows the theme. This covers the whole screen while the city
+            // loads, so leaving it black meant a light-mode user watched the
+            // app go dark for a second and come back.
             child: ColoredBox(
-              color: Colors.black,
+              color: isDark ? Colors.black : Colors.white,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  NeatLoader(size: 72, color: Colors.white),
+                  NeatLoader(size: 72, color: isDark ? Colors.white : Colors.black),
                   const SizedBox(height: 24),
                   Text(
                     AppLocalizations.of(context).joiningCity(_joiningCityName!),
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black,
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
                     ),
@@ -565,15 +660,32 @@ class _CityMapViewState extends State<CityMapView> {
 // boots without any network; the CDN is only a fallback.
 // ─────────────────────────────────────────────────────────────────────────────
 
-String _androidMapPage({required String homeCity, required bool isDark, String? inlineMapkitJs}) {
+String _androidMapPage({
+  required String homeCity,
+  required bool isDark,
+  String? inlineMapkitJs,
+  // The opening framing. The hero screens want Greece tighter than the map
+  // tab does, because they show it in a short strip rather than a full page.
+  double centerLat = 39.0,
+  double centerLng = 22.9,
+  double spanLat = 7.5,
+  double spanLng = 7.5,
+}) {
   final home = homeCity.trim().toLowerCase();
   final config = jsonEncode({
     'token': _kMapKitToken,
     'dark': isDark,
+    'center': [centerLat, centerLng],
+    'span': [spanLat, spanLng],
     'cities': [
       for (final c in greeceCities)
         if (c.name.trim().toLowerCase() != home)
-          {'name': c.name, 'lat': c.latitude, 'lng': c.longitude, 'tier': c.tier},
+          {
+            'name': c.name,
+            'lat': c.latitude,
+            'lng': c.longitude,
+            'priority': c.displayPriority,
+          },
     ],
   });
   final bg = isDark ? '#0a0a0a' : '#f2f2f7';
@@ -605,6 +717,8 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
     var NeatMap = (function () {
       var map = null;
       var allPinsRef = [];
+      /* The same pins, best known first — the order decluttering walks. */
+      var rankedPins = [];
       var userTouched = false;
       var settleTimer = null;
 
@@ -627,10 +741,12 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
         try { NeatBridge.postMessage(JSON.stringify(payload)); } catch (e) {}
       }
 
+      var homeRegion = { center: [39.0, 22.9], span: [7.5, 7.5] };
+
       function overview() {
         return new mapkit.CoordinateRegion(
-          new mapkit.Coordinate(39.0, 22.9),
-          new mapkit.CoordinateSpan(7.5, 7.5)
+          new mapkit.Coordinate(homeRegion.center[0], homeRegion.center[1]),
+          new mapkit.CoordinateSpan(homeRegion.span[0], homeRegion.span[1])
         );
       }
 
@@ -686,6 +802,9 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
 
       function start(config) {
         try {
+          if (config.center && config.span) {
+            homeRegion = { center: config.center, span: config.span };
+          }
           mapkit.init({
             authorizationCallback: function (done) { done(config.token); }
           });
@@ -716,7 +835,7 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
               new mapkit.Coordinate(c.lat, c.lng),
               { title: c.name, color: heatToColor(c.heat), calloutEnabled: false }
             );
-            pin._neatTier = c.tier || 3;
+            pin._neatPriority = c.priority || 400;
             pin._neatName = c.name;
             pin.addEventListener('select', function () {
               // Mirror iOS: the pin stays selected (raised) while its card is
@@ -733,22 +852,59 @@ String _androidMapPage({required String homeCity, required bool isDark, String? 
             map.addAnnotation(pin);
           });
 
+          rankedPins = allPinsRef.slice().sort(function (a, b) {
+            return b._neatPriority - a._neatPriority;
+          });
+
+          /* Show as many cities as the screen can hold.
+             ────────────────────────────────────────────────────────────────
+             Every pin is projected to a screen point and taken in order of
+             priority; a pin is shown unless its marker would overlap one
+             already placed, in which case it waits for a zoom that gives the
+             pair room. The result is a map that fills up as you go in — the
+             small towns are there the moment they stop fighting a city for
+             the same patch of screen, rather than at a zoom threshold
+             somebody guessed in advance. Mirrors applyDeclutter() in
+             NativeCityMap.swift, so both platforms fill up alike.
+
+             The gaps are the marker's own footprint in CSS px — taller than
+             it is wide, because it is a balloon, and treating it as a circle
+             would waste the horizontal room a wide country on a narrow screen
+             has least of. Smaller than the iOS numbers: MapKit JS draws
+             smaller pins. */
+          var PIN_GAP_X = 32;
+          var PIN_GAP_Y = 40;
+          var PIN_MARGIN = 80;       /* keep pins just off-screen placed too */
+
           function updatePinVisibility() {
             try {
-              var span = map.region.span.latitudeDelta;
-              if (!span || isNaN(span) || span <= 0) return;
-              // tier 1 always visible; tier 2 at delta < 5; tier 3 at delta < 2.5
-              var maxTier = span < 2.5 ? 3 : (span < 5 ? 2 : 1);
-              allPinsRef.forEach(function (p) {
-                p.visible = p._neatTier <= maxTier;
+              var w = window.innerWidth;
+              var h = window.innerHeight;
+              if (!w || !h) return;
+              var placed = [];
+              rankedPins.forEach(function (p) {
+                var pt = map.convertCoordinateToPointOnPage(p.coordinate);
+                if (!pt) { p.visible = false; return; }
+                var show =
+                  pt.x > -PIN_MARGIN && pt.x < w + PIN_MARGIN &&
+                  pt.y > -PIN_MARGIN && pt.y < h + PIN_MARGIN;
+                for (var i = 0; show && i < placed.length; i++) {
+                  var dx = (pt.x - placed[i].x) / PIN_GAP_X;
+                  var dy = (pt.y - placed[i].y) / PIN_GAP_Y;
+                  if (dx * dx + dy * dy < 1) show = false;
+                }
+                if (show) placed.push(pt);
+                p.visible = show;
               });
             } catch (e) {}
           }
           map.addEventListener('region-change-end', updatePinVisibility);
-          // region-change-end only fires for animated region changes, not instant
-          // map.region = ... assignments. Call directly after the map settles so
-          // the initial overview (latitudeDelta 7.5 → maxTier 1) hides tier 2/3.
+          // region-change-end only fires for animated region changes, not
+          // instant `map.region = ...` assignments, and the projection is
+          // meaningless until the page has a real size — so run it again as
+          // the map settles into its first layout.
           [300, 800, 2000].forEach(function (ms) { setTimeout(updatePinVisibility, ms); });
+          window.addEventListener('resize', updatePinVisibility);
 
           post({ event: 'ready' });
         } catch (e) {
@@ -910,7 +1066,7 @@ class _MapLayer extends StatelessWidget {
                     'name': c.name,
                     'latitude': c.latitude,
                     'longitude': c.longitude,
-                    'tier': c.tier,
+                    'priority': c.displayPriority,
                   })
               .toList(),
           'isDark': isDark,

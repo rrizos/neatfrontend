@@ -504,6 +504,9 @@ class MessageItem {
     required this.created,
     this.reactions = const {},
     this.edited = false,
+    this.photoMode = '',
+    this.opensLeft = 0,
+    this.openedByOther = false,
   });
 
   final int id;
@@ -512,6 +515,35 @@ class MessageItem {
   final DateTime created;
   final Map<String, List<String>> reactions;
   final bool edited;
+
+  /// '' for an ordinary message, or 'once' / 'replay' for a photo the sender
+  /// made temporary. A message with a mode never carries its picture in
+  /// [text] — the server hands those over only through the open endpoint, and
+  /// only to the recipient, which is what makes the promise real.
+  final String photoMode;
+
+  /// How many times *you* may still open a temporary photo. Everyone in the
+  /// conversation has their own allowance, the sender included, so this is
+  /// answered per viewer rather than shared.
+  final int opensLeft;
+
+  /// Whether somebody else has opened it — what "Opened" means on the
+  /// sender's side, and independent of whether you have spent your own.
+  final bool openedByOther;
+
+  bool get isTemporaryPhoto => photoMode.isNotEmpty;
+
+  MessageItem copyWith({String? text, int? opensLeft, bool? openedByOther}) => MessageItem(
+        id: id,
+        sender: sender,
+        text: text ?? this.text,
+        created: created,
+        reactions: reactions,
+        edited: edited,
+        photoMode: photoMode,
+        opensLeft: opensLeft ?? this.opensLeft,
+        openedByOther: openedByOther ?? this.openedByOther,
+      );
 
   String? reactionFor(String username) {
     for (final entry in reactions.entries) {
@@ -559,6 +591,9 @@ class MessageItem {
           DateTime.now(),
       reactions: reactions,
       edited: json['edited'] == true,
+      photoMode: json['photo_mode']?.toString() ?? '',
+      opensLeft: parseInt(json['opens_left']),
+      openedByOther: json['opened_by_other'] == true,
     );
   }
 }

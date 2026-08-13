@@ -497,5 +497,16 @@
   "neatPass": "Neat Pass",
   "neatPoints": "Neat Points",
   "neatPassHowToEarn": "Appear in the Virals top-10 to earn Neat Points.",
-  "neatPassCurrentPoints": "Points Balance"
+  "neatPassCurrentPoints": "Points Balance",
+
+  "photoViewOnce": "View once",
+  "photoAllowReplay": "Allow replay",
+  "photoKeepInChat": "Keep in chat",
+  "photoLabel": "Photo",
+  "photoTapToView": "Tap to view",
+  "photoReplay": "Replay",
+  "photoOpened": "Opened",
+  "photoSentOnce": "Sent · View once",
+  "photoSentReplay": "Sent · Allow replay",
+  "photoUnavailable": "This photo is no longer available"
 }

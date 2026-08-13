@@ -1434,4 +1434,34 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get neatPassCurrentPoints => 'Υπόλοιπο Πόντων';
+
+  @override
+  String get photoViewOnce => 'Προβολή μία φορά';
+
+  @override
+  String get photoAllowReplay => 'Επαναπροβολή';
+
+  @override
+  String get photoKeepInChat => 'Διατήρηση στη συνομιλία';
+
+  @override
+  String get photoLabel => 'Φωτογραφία';
+
+  @override
+  String get photoTapToView => 'Πάτησε για προβολή';
+
+  @override
+  String get photoReplay => 'Επανάληψη';
+
+  @override
+  String get photoOpened => 'Ανοίχτηκε';
+
+  @override
+  String get photoSentOnce => 'Στάλθηκε · Προβολή μία φορά';
+
+  @override
+  String get photoSentReplay => 'Στάλθηκε · Επαναπροβολή';
+
+  @override
+  String get photoUnavailable => 'Η φωτογραφία δεν είναι πλέον διαθέσιμη';
 }

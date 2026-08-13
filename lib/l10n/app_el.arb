@@ -444,5 +444,16 @@
   "neatPass": "Neat Pass",
   "neatPoints": "Neat Points",
   "neatPassHowToEarn": "Εμφανίσου στο top-10 των Virals για να κερδίσεις Neat Points.",
-  "neatPassCurrentPoints": "Υπόλοιπο Πόντων"
+  "neatPassCurrentPoints": "Υπόλοιπο Πόντων",
+
+  "photoViewOnce": "Προβολή μία φορά",
+  "photoAllowReplay": "Επαναπροβολή",
+  "photoKeepInChat": "Διατήρηση στη συνομιλία",
+  "photoLabel": "Φωτογραφία",
+  "photoTapToView": "Πάτησε για προβολή",
+  "photoReplay": "Επανάληψη",
+  "photoOpened": "Ανοίχτηκε",
+  "photoSentOnce": "Στάλθηκε · Προβολή μία φορά",
+  "photoSentReplay": "Στάλθηκε · Επαναπροβολή",
+  "photoUnavailable": "Η φωτογραφία δεν είναι πλέον διαθέσιμη"
 }

@@ -17,10 +17,12 @@ import 'package:giphy_flutter_sdk/dto/giphy_theme.dart';
 import '../core/http_client.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
+import '../core/avatar_store.dart';
 import '../core/link_preview.dart';
 import '../core/media_cache.dart';
 import '../core/mentions.dart';
@@ -41,9 +43,40 @@ import '../profile/profile_page.dart';
 // large city feed and mapping every entry to a FeedPost is CPU work that would
 // otherwise block the UI isolate (janking the frame on load/refresh). Must stay
 // a pure top-level function with no captured state for `compute` to accept it.
-List<FeedPost> _parseFeedPosts(String body) {
-  final decoded = jsonDecode(body) as List<dynamic>;
-  return decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList();
+/// One page of the feed, as the server sends it.
+class _FeedPage {
+  const _FeedPage(this.posts, {this.hasMore = false});
+  final List<FeedPost> posts;
+  final bool hasMore;
+}
+
+/// Parses either shape the feed can arrive in.
+///
+/// The current one is `{posts, avatars, has_more}`: a page rather than the
+/// whole city, and each author's avatar sent once by name instead of copied
+/// into every post they have ever made. The bare list is what a server that
+/// predates that sends, and what the cache on disk may still hold.
+_FeedPage _parseFeedPosts(String body) {
+  final decoded = jsonDecode(body);
+  if (decoded is List) {
+    return _FeedPage(
+      decoded.whereType<Map<String, dynamic>>().map(FeedPost.fromJson).toList(),
+    );
+  }
+  final page = decoded as Map<String, dynamic>;
+  final avatars = (page['avatars'] as Map<String, dynamic>? ?? const {});
+  final posts = (page['posts'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .map((json) {
+        // Put each author's picture back on their posts, so everything
+        // downstream sees the same FeedPost it always did.
+        final author = json['author']?.toString() ?? '';
+        final avatar = avatars[author]?.toString() ?? '';
+        if (avatar.isNotEmpty) json['avatarUrl'] = avatar;
+        return FeedPost.fromJson(json);
+      })
+      .toList();
+  return _FeedPage(posts, hasMore: page['has_more'] == true);
 }
 
 class HomePage extends StatefulWidget {
@@ -250,17 +283,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_postsCacheKey);
       if (raw == null || !mounted) return;
-      final posts = await compute(_parseFeedPosts, raw);
+      final page = await compute(_parseFeedPosts, raw);
       if (mounted) {
         setState(() {
           _posts
             ..clear()
-            ..addAll(posts);
+            ..addAll(page.posts);
           _loading = false;
         });
       }
     } catch (_) {}
   }
+
+  /// Whether the server said there are posts older than the ones we hold.
+  bool _hasOlderPosts = false;
+  bool _loadingOlderPosts = false;
 
   Future<void> _load() async {
     try {
@@ -269,13 +306,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         headers: authGetHeaders(widget.session.token),
       );
       if (res.statusCode == 401) return widget.onLogout();
-      final posts = await compute(_parseFeedPosts, res.body);
+      final page = await compute(_parseFeedPosts, res.body);
       unawaited(_saveCachedPosts(res.body));
       if (!mounted) return;
       setState(() {
         _posts
           ..clear()
-          ..addAll(posts);
+          ..addAll(page.posts);
+        _hasOlderPosts = page.hasMore;
         _loading = false;
         _isOffline = false;
       });
@@ -1867,9 +1905,41 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 );
               },
             ),
+          // Reaching the end of the page asks for the next one, so the feed
+          // keeps going instead of stopping at whatever the first request
+          // happened to bring back.
+          if (posts.isNotEmpty && _hasOlderPosts)
+            SliverToBoxAdapter(
+              child: _FeedPageLoader(onVisible: _loadOlderPosts),
+            ),
         ],
       ),
     );
+  }
+
+  /// Fetches the page of posts older than the last one on screen.
+  Future<void> _loadOlderPosts() async {
+    if (_loadingOlderPosts || !_hasOlderPosts || _posts.isEmpty) return;
+    _loadingOlderPosts = true;
+    try {
+      final res = await http.get(
+        postsEndpoint(city: _activeCity, before: _posts.last.id),
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (res.statusCode != 200 || !mounted) return;
+      final page = await compute(_parseFeedPosts, res.body);
+      if (!mounted) return;
+      // The feed can have been refreshed out from under this request.
+      final known = _posts.map((p) => p.id).toSet();
+      setState(() {
+        _posts.addAll(page.posts.where((p) => !known.contains(p.id)));
+        _hasOlderPosts = page.hasMore;
+      });
+    } catch (_) {
+      // Leave _hasOlderPosts alone — the page is still there, the network isn't.
+    } finally {
+      _loadingOlderPosts = false;
+    }
   }
 
   Widget _buildViralPostCard(FeedPost post, {required bool interactive}) {
@@ -2806,7 +2876,7 @@ class _ViralViewState extends State<_ViralView> {
         headers: authGetHeaders(widget.token),
       );
       if (res.statusCode != 200) return null;
-      return await compute(_parseFeedPosts, res.body);
+      return (await compute(_parseFeedPosts, res.body)).posts;
     } catch (_) {
       return null;
     }
@@ -3299,8 +3369,8 @@ class _ViralViewState extends State<_ViralView> {
     try {
       final res = await http.get(postsEndpoint(city: widget.currentUser.city), headers: authGetHeaders(widget.token));
       if (!mounted || res.statusCode != 200) return;
-      final posts = await compute(_parseFeedPosts, res.body);
-      if (mounted) setState(() => _cityPosts = posts);
+      final page = await compute(_parseFeedPosts, res.body);
+      if (mounted) setState(() => _cityPosts = page.posts);
     } catch (_) {}
   }
 
@@ -3454,7 +3524,7 @@ class _ViralViewState extends State<_ViralView> {
     final user = _historyUsers[q];
     if (user != null) {
       // ── User profile entry ─────────────────────────────────────────────
-      final bytes = decodeAvatarUrl(user.avatarUrl);
+      final bytes = decodeAvatarUrl(AvatarStore.resolve(user.username, user.avatarUrl));
       final displayName =
           user.fullName.isNotEmpty ? user.fullName : user.username;
       return InkWell(
@@ -3694,7 +3764,7 @@ class _ViralViewState extends State<_ViralView> {
   }
 
   Widget _buildPostRow(FeedPost post, bool isLight) {
-    final bytes = decodeAvatarUrl(post.avatarUrl);
+    final bytes = decodeAvatarUrl(AvatarStore.resolve(post.author, post.avatarUrl));
     final muted = isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280);
     return InkWell(
       onTap: () => widget.onOpenUserProfile(post.author),
@@ -3769,7 +3839,7 @@ class _ViralViewState extends State<_ViralView> {
   }
 
   Widget _buildPersonRow(UserProfile user, bool isLight) {
-    final bytes = decodeAvatarUrl(user.avatarUrl);
+    final bytes = decodeAvatarUrl(AvatarStore.resolve(user.username, user.avatarUrl));
     final displayName = user.fullName.isNotEmpty ? user.fullName : user.username;
     return InkWell(
       onTap: () => _openProfile(user),
@@ -3849,7 +3919,7 @@ class _ViralViewState extends State<_ViralView> {
   }
 
   Widget _buildSuggestionCard(UserProfile user, bool isLight) {
-    final bytes = decodeAvatarUrl(user.avatarUrl);
+    final bytes = decodeAvatarUrl(AvatarStore.resolve(user.username, user.avatarUrl));
     final displayName = user.fullName.isNotEmpty ? user.fullName : user.username;
     return GestureDetector(
       onTap: () => widget.onOpenUserProfile(user.username),
@@ -4964,7 +5034,7 @@ class _CommentSheetState extends State<_CommentSheet> {
   }
 
   Widget _tile(BuildContext context, FeedComment c, bool isReply, bool isLight, {int? parentCommentId}) {
-    final bytes = decodeAvatarUrl(c.avatarUrl);
+    final bytes = decodeAvatarUrl(AvatarStore.resolve(c.author, c.avatarUrl));
     final isNetworkImg = c.imageUrl.startsWith('http');
     final imgBytes = (!isNetworkImg && c.imageUrl.isNotEmpty) ? decodeAvatarUrl(c.imageUrl) : null;
     final isLiked = _liked[c.id] ?? c.liked;
@@ -5248,7 +5318,7 @@ class _CommentSheetState extends State<_CommentSheet> {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final userBytes = decodeAvatarUrl(widget.session.user.avatarUrl);
+    final userBytes = decodeAvatarUrl(AvatarStore.resolve(widget.session.user.username, widget.session.user.avatarUrl));
     final previewBytes = _imageUrl.isNotEmpty ? decodeAvatarUrl(_imageUrl) : null;
     final hasGif = _gifUrl.isNotEmpty;
 
@@ -5574,6 +5644,30 @@ class _SlashPainterSmall extends CustomPainter {
   }
   @override
   bool shouldRepaint(_SlashPainterSmall old) => old.color != color;
+}
+
+/// The strip at the end of the feed that asks for the next page.
+///
+/// Uses the same VisibilityDetector the feed already relies on for video
+/// autoplay, so "the reader has reached the bottom" is measured the same way
+/// everywhere rather than by guessing at scroll offsets.
+class _FeedPageLoader extends StatelessWidget {
+  const _FeedPageLoader({required this.onVisible});
+  final VoidCallback onVisible;
+
+  @override
+  Widget build(BuildContext context) {
+    return VisibilityDetector(
+      key: const Key('feed-page-loader'),
+      onVisibilityChanged: (info) {
+        if (info.visibleFraction > 0) onVisible();
+      },
+      child: const Padding(
+        padding: EdgeInsets.symmetric(vertical: 22),
+        child: Center(child: NeatLoader(size: 34, color: Color(0xff8e8e8e))),
+      ),
+    );
+  }
 }
 
 class _OfflineBanner extends StatelessWidget {

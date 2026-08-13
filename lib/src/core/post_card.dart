@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../l10n/app_localizations.dart';
+import 'avatar_store.dart';
 import 'api.dart';
 import 'icons.dart';
 import 'link_preview.dart';
@@ -24,7 +25,11 @@ final _globalMuted = ValueNotifier<bool>(true);
 
 final _avatarCache = <String, Uint8List?>{};
 
-Uint8List? decodeAvatarUrl(String value) {
+Uint8List? decodeAvatarUrl(String rawValue) {
+  // Anything still carrying the URL of an avatar that has since been replaced
+  // gets the new one — the alternative is refetching every post, comment and
+  // conversation the moment somebody changes their picture.
+  final value = AvatarStore.replacementFor(rawValue) ?? rawValue;
   if (!value.startsWith('data:')) return null;
   if (_avatarCache.containsKey(value)) return _avatarCache[value];
   final comma = value.indexOf(',');
@@ -108,7 +113,7 @@ class PostAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bytes = decodeAvatarUrl(avatarUrl);
+    final bytes = decodeAvatarUrl(AvatarStore.resolve(username, avatarUrl));
     return CircleAvatar(
       backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
       foregroundImage: bytes != null ? MemoryImage(bytes) : null,
@@ -707,10 +712,35 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
 
 // ── Fullscreen media viewer (swipeable, images + videos) ─────────────────────
 
+/// Opens a photo held in memory in the app's own photo page.
+///
+/// The same widget, route and transition a post's picture opens in — a DM
+/// photo is a photo, and there is no reason for it to behave differently from
+/// one in the feed. Bytes rather than a URL because direct-message media is
+/// stored in the message itself, never fetched from a media host.
+Future<void> openPhotoViewer(BuildContext context, Uint8List bytes) {
+  return Navigator.of(context).push<void>(
+    PageRouteBuilder<void>(
+      opaque: true,
+      pageBuilder: (_, _, _) =>
+          _FullscreenMediaViewer(media: const [], initialIndex: 0, bytes: bytes),
+      transitionsBuilder: (_, animation, _, child) =>
+          FadeTransition(opacity: animation, child: child),
+    ),
+  );
+}
+
 class _FullscreenMediaViewer extends StatefulWidget {
-  const _FullscreenMediaViewer({required this.media, required this.initialIndex});
+  const _FullscreenMediaViewer({
+    required this.media,
+    required this.initialIndex,
+    this.bytes,
+  });
   final List<MediaItem> media;
   final int initialIndex;
+
+  /// A single in-memory image, used instead of [media] when set.
+  final Uint8List? bytes;
 
   @override
   State<_FullscreenMediaViewer> createState() => _FullscreenMediaViewerState();
@@ -733,9 +763,25 @@ class _FullscreenMediaViewerState extends State<_FullscreenMediaViewer> {
     super.dispose();
   }
 
+  /// One page of the viewer: the zoomable, tap-to-dismiss photo every image
+  /// gets here, whether it came from a post's URL or a message's bytes.
+  Widget _photoPage(Widget image) {
+    return InteractiveViewer(
+      minScale: 0.5,
+      maxScale: 4.0,
+      child: Center(
+        child: GestureDetector(
+          onTap: () => Navigator.of(context).pop(),
+          child: image,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final single = widget.media.length == 1;
+    final bytes = widget.bytes;
+    final single = bytes != null || widget.media.length == 1;
     final topPad = MediaQuery.of(context).padding.top;
     final botPad = MediaQuery.of(context).padding.bottom;
 
@@ -743,27 +789,23 @@ class _FullscreenMediaViewerState extends State<_FullscreenMediaViewer> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          PageView.builder(
-            controller: _ctrl,
-            itemCount: widget.media.length,
-            onPageChanged: (i) => setState(() => _current = i),
-            itemBuilder: (_, i) {
-              final item = widget.media[i];
-              if (item.isVideo) {
-                return _FeedVideoPlayer(url: item.url, fullscreen: true);
-              }
-              return InteractiveViewer(
-                minScale: 0.5,
-                maxScale: 4.0,
-                child: Center(
-                  child: GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: _FeedMedia(url: item.url, fit: BoxFit.contain),
-                  ),
-                ),
-              );
-            },
-          ),
+          if (bytes != null)
+            _photoPage(Image.memory(bytes, fit: BoxFit.contain))
+          else
+            PageView.builder(
+              controller: _ctrl,
+              itemCount: widget.media.length,
+              onPageChanged: (i) => setState(() => _current = i),
+              itemBuilder: (_, i) {
+                final item = widget.media[i];
+                if (item.isVideo) {
+                  return _FeedVideoPlayer(url: item.url, fullscreen: true);
+                }
+                return _photoPage(
+                  _FeedMedia(url: item.url, fit: BoxFit.contain),
+                );
+              },
+            ),
           // Close button
           Positioned(
             top: topPad + 12,
@@ -922,7 +964,7 @@ class _LikersSheetState extends State<_LikersSheet> {
         itemCount: users.length,
         itemBuilder: (_, i) {
           final u = users[i];
-          final bytes = decodeAvatarUrl(u.avatarUrl);
+          final bytes = decodeAvatarUrl(AvatarStore.resolve(u.username, u.avatarUrl));
           final isSelf = u.username == widget.currentUsername;
           final isFollowing = _following.contains(u.username);
           return ListTile(

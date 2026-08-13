@@ -11,30 +11,48 @@ class GreeceCity {
   final double longitude;
   final String? imageUrl;
 
-  /// 1 = large (always visible), 2 = medium (second zoom), 3 = small (closest zoom)
-  int get tier {
-    if (_tier1Cities.contains(name)) return 1;
-    if (_tier2Cities.contains(name)) return 2;
-    return 3;
+  /// Who wins when two pins would land on top of each other.
+  ///
+  /// Both maps show *every* city they can fit and only drop a pin when it
+  /// would collide with one already placed — so how many cities you see is a
+  /// question of how much room the screen has, not of a zoom step somebody
+  /// picked in advance. This number is the whole tie-break: Θεσσαλονίκη keeps
+  /// its spot and the town next door waits for you to zoom in far enough that
+  /// they both fit, rather than the two of them drawing over each other.
+  ///
+  /// The scale is MapKit's (0-1000), and the ordering of the lists below is
+  /// the ranking — first is best known.
+  int get displayPriority {
+    final rank = _majorCities.indexOf(name);
+    if (rank >= 0) return 1000 - rank;
+    final mid = _midCities.indexOf(name);
+    if (mid >= 0) return 700 - mid;
+    // Everything else, ordered by its position in the list below purely so
+    // that two neighbouring villages resolve the same way every time.
+    final index = greeceCities.indexWhere((c) => c.name == name);
+    return 400 - (index < 0 ? 0 : index);
   }
 }
 
-const _tier1Cities = {
+/// Ordered by how well known the place is — the order is the ranking used by
+/// [GreeceCity.displayPriority], so it is meaningful, not alphabetical.
+const _majorCities = <String>[
   // Big mainland cities
   'Αθήνα', 'Θεσσαλονίκη', 'Πάτρα', 'Λάρισα', 'Βόλος', 'Ιωάννινα',
-  'Λαμία', 'Καλαμάτα', 'Αλεξανδρούπολη', 'Καβάλα', 'Κόρινθος', 'Χαλκίδα',
+  'Χαλκίδα', 'Καβάλα', 'Καλαμάτα', 'Σέρρες', 'Αλεξανδρούπολη', 'Κατερίνη',
+  'Τρίκαλα', 'Λαμία', 'Κομοτηνή', 'Ξάνθη', 'Βέροια', 'Κοζάνη',
+  'Αγρίνιο', 'Δράμα', 'Τρίπολη', 'Κόρινθος',
   // Major islands / island capitals
   'Ηράκλειο', 'Χανιά', 'Ρόδος', 'Κέρκυρα', 'Μύκονος', 'Σαντορίνη',
-};
+  'Ρέθυμνο', 'Λέσβος', 'Ζάκυνθος', 'Κεφαλονιά',
+];
 
-const _tier2Cities = {
-  'Τρίκαλα', 'Σέρρες', 'Αγρίνιο', 'Βέροια', 'Κατερίνη',
-  'Ξάνθη', 'Κοζάνη', 'Δράμα', 'Κομοτηνή',
-  'Ζάκυνθος', 'Κεφαλονιά', 'Ρέθυμνο', 'Λέσβος', 'Χίος', 'Σάμος',
-  'Κως', 'Σύρος', 'Νάξος', 'Πάρος', 'Μήλος',
-  'Τρίπολη', 'Σπάρτη', 'Ναύπλιο', 'Άρτα', 'Πρέβεζα', 'Λευκάδα',
-  'Καστοριά', 'Φλώρινα',
-};
+const _midCities = <String>[
+  'Κως', 'Χίος', 'Σάμος', 'Σύρος', 'Νάξος', 'Πάρος', 'Μήλος', 'Αίγινα',
+  'Ναύπλιο', 'Σπάρτη', 'Άργος', 'Πύργος', 'Αίγιο', 'Ναύπακτος', 'Μεσολόγγι',
+  'Καρδίτσα', 'Λιβαδειά', 'Θήβα', 'Λευκάδα', 'Πρέβεζα', 'Άρτα',
+  'Καστοριά', 'Φλώρινα', 'Πτολεμαΐδα', 'Έδεσσα', 'Νάουσα', 'Κιλκίς',
+];
 
 const List<GreeceCity> greeceCities = [
   GreeceCity(

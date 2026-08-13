@@ -13,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
+import '../core/avatar_store.dart';
 import '../core/neat_loader.dart';
 import '../core/legacy_nav_bar.dart';
 import '../core/media_cache.dart';
@@ -804,6 +805,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         imagePicker: _imagePicker,
         onSaved: (updated) {
           if (!mounted) return;
+          // Publish the new picture before anything rebuilds, so the feed,
+          // your own posts, your comments and the chat list show it on this
+          // frame rather than whenever each of them next refetches.
+          AvatarStore.update(
+            username: updated.username,
+            previousUrl: _profile?.avatarUrl ?? '',
+            url: updated.avatarUrl,
+          );
           setState(() => _profile = updated);
           widget.onSessionUpdated(
             AuthSession(token: widget.token, user: updated),
@@ -2589,7 +2598,70 @@ class _CropAvatarPage extends StatefulWidget {
 
 class _CropAvatarPageState extends State<_CropAvatarPage> {
   final _repaintKey = GlobalKey();
+  final _viewer = TransformationController();
   bool _processing = false;
+
+  /// The picture's own aspect ratio (width / height), once decoded.
+  ///
+  /// Needed before anything can be drawn: the photo is laid out at the size
+  /// that *covers* the crop square — wider than the square for a landscape
+  /// shot, taller for a portrait one — and it is that overflow which gives
+  /// the drag something to move. Sizing it to the square instead (what
+  /// BoxFit.cover did here before) centre-crops the picture during layout, so
+  /// there is nothing left outside the frame and dragging an unzoomed photo
+  /// did nothing at all.
+  double? _aspect;
+
+  @override
+  void initState() {
+    super.initState();
+    _measure();
+  }
+
+  Future<void> _measure() async {
+    try {
+      final image = await decodeImageFromList(widget.bytes);
+      if (!mounted) return;
+      final aspect = image.width / image.height;
+      image.dispose();
+      // Framed before the first build that shows the viewer, so the photo is
+      // never seen sitting in the corner on its way to the middle.
+      final cropSize = _cropSizeOf(context);
+      _centre(_childSizeFor(aspect, cropSize), cropSize);
+      setState(() => _aspect = aspect);
+    } catch (_) {
+      // Undecodable here means Image.memory can't draw it either; fall back to
+      // a square so the page still comes up rather than spinning forever.
+      if (mounted) setState(() => _aspect = 1.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _viewer.dispose();
+    super.dispose();
+  }
+
+  static double _cropSizeOf(BuildContext context) =>
+      MediaQuery.sizeOf(context).width * 0.88;
+
+  /// The photo at the size that just covers the square crop frame: the long
+  /// side overflows, and that overflow is what there is to drag.
+  static Size _childSizeFor(double aspect, double cropSize) => aspect >= 1
+      ? Size(cropSize * aspect, cropSize)
+      : Size(cropSize, cropSize / aspect);
+
+  /// Centres the photo in the crop square — the framing everyone expects to
+  /// start from, and the one BoxFit.cover used to give for free.
+  void _centre(Size child, double cropSize) {
+    _viewer.value = Matrix4.identity()
+      ..translateByDouble(
+        -(child.width - cropSize) / 2,
+        -(child.height - cropSize) / 2,
+        0,
+        1,
+      );
+  }
 
   Future<void> _confirm() async {
     if (_processing || !mounted) return;
@@ -2619,7 +2691,11 @@ class _CropAvatarPageState extends State<_CropAvatarPage> {
 
   @override
   Widget build(BuildContext context) {
-    final cropSize = MediaQuery.sizeOf(context).width * 0.88;
+    final cropSize = _cropSizeOf(context);
+    final aspect = _aspect;
+    final child =
+        aspect == null ? Size.square(cropSize) : _childSizeFor(aspect, cropSize);
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
@@ -2631,17 +2707,25 @@ class _CropAvatarPageState extends State<_CropAvatarPage> {
               child: ClipRect(
                 child: SizedBox.square(
                   dimension: cropSize,
-                  child: InteractiveViewer(
-                    minScale: 1.0,
-                    maxScale: 8.0,
-                    child: Image.memory(
-                      widget.bytes,
-                      fit: BoxFit.cover,
-                      width: cropSize,
-                      height: cropSize,
-                      gaplessPlayback: true,
-                    ),
-                  ),
+                  child: aspect == null
+                      ? const ColoredBox(color: Colors.black)
+                      : InteractiveViewer(
+                          // Unconstrained, so the child keeps its own
+                          // (oversized) dimensions instead of being squeezed
+                          // into the viewport. Panning is still fenced by the
+                          // child's edges, so the frame can never show a gap.
+                          constrained: false,
+                          transformationController: _viewer,
+                          minScale: 1.0,
+                          maxScale: 8.0,
+                          child: Image.memory(
+                            widget.bytes,
+                            fit: BoxFit.fill,
+                            width: child.width,
+                            height: child.height,
+                            gaplessPlayback: true,
+                          ),
+                        ),
                 ),
               ),
             ),

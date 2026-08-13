@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -20,9 +21,13 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
+import '../core/avatar_store.dart';
 import '../core/link_preview.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
+import '../core/neat_loader.dart';
+import 'dm_media.dart';
+import '../core/post_card.dart';
 import '../core/realtime_service.dart';
 import '../core/report_post_sheet.dart';
 
@@ -44,12 +49,50 @@ const _kDivLgt    = Color(0xffe0e0e0);
 
 const _kPostPrefix        = '__neat_post__:';
 const _kImagePrefix       = '__neat_image__:';
-const _kImageReplayPrefix = '__neat_imgreplay__:';
-const _kImageOncePrefix   = '__neat_imgonce__:';
-const _kVoicePrefix       = '__neat_voice__:';
 
-enum _PhotoMode { keep, replay, once }
+/// How long a sent photo lives, in the recipient's hands.
+///
+/// The wire values are the server's (`Message.PHOTO_MODES`); [keep] sends
+/// nothing at all, which is what an ordinary photo has always been.
+enum _PhotoMode {
+  keep(''),
+  once('once'),
+  replay('replay');
+
+  const _PhotoMode(this.wire);
+  final String wire;
+
+  /// How many times each person may open one — mirrors `Message.OPEN_BUDGET`
+  /// on the server, and is what the sender's own bubble starts with before
+  /// the server's copy of the message arrives.
+  int get budget => switch (this) {
+        _PhotoMode.keep => 0,
+        _PhotoMode.once => 1,
+        _PhotoMode.replay => 2,
+      };
+
+  static _PhotoMode fromWire(String value) => switch (value) {
+        'once' => _PhotoMode.once,
+        'replay' => _PhotoMode.replay,
+        _ => _PhotoMode.keep,
+      };
+}
+
+const _kVoicePrefix       = '__neat_voice__:';
 const _kReplyPrefix = '__neat_reply__:';
+
+/// Photos sent by a build that offered "view once" / "allow replay".
+///
+/// Those two modes were only ever a prefix: nothing on either side ever read
+/// them back, so a photo sent that way reached the other person as a wall of
+/// base64 text instead of a picture — and stayed that way in the history.
+/// They are no longer sent (see [_PhotoPreviewPage]), but the messages are
+/// still in people's conversations, so they are still read here and shown as
+/// what they always were: an ordinary photo.
+const _kLegacyImagePrefixes = [
+  '__neat_imgreplay__:',
+  '__neat_imgonce__:',
+];
 
 // ─── Image helpers ────────────────────────────────────────────────────────────
 
@@ -77,7 +120,7 @@ Widget _avatar({
   // Decode avatars at the circle's physical size instead of full resolution.
   // radius*2 logical px × a 3.0 max device-pixel-ratio cap covers all phones;
   // over-decoding on the rare DPR>3 screen is harmless.
-  final base = _imgProvider(url);
+  final base = _imgProvider(AvatarStore.resolve(username, url));
   final avatarImage = base == null
       ? null
       : ResizeImage(base, width: (radius * 2 * 3).round());
@@ -188,9 +231,21 @@ Map<String, dynamic>? _parsePost(String t) {
   } catch (_) { return null; }
 }
 
+/// The prefix [t] carries if it is a photo message at all, legacy ones
+/// included. Everything that has to recognise a photo — the bubble, the
+/// inbox preview, the reply quote — goes through this.
+String? _imagePrefixOf(String t) {
+  if (t.startsWith(_kImagePrefix)) return _kImagePrefix;
+  for (final prefix in _kLegacyImagePrefixes) {
+    if (t.startsWith(prefix)) return prefix;
+  }
+  return null;
+}
+
 Uint8List? _parseImage(String t) {
-  if (!t.startsWith(_kImagePrefix)) return null;
-  try { return base64Decode(t.substring(_kImagePrefix.length)); }
+  final prefix = _imagePrefixOf(t);
+  if (prefix == null) return null;
+  try { return base64Decode(t.substring(prefix.length)); }
   catch (_) { return null; }
 }
 
@@ -259,6 +314,7 @@ class _MessagesPageState extends State<MessagesPage> {
   final ValueNotifier<int?> _openSwipeId = ValueNotifier(null);
   Timer? _presenceTimer;
   Timer? _inboxPollTimer;
+  Timer? _inboxRefreshDebounce;
   StreamSubscription<RealtimeEvent>? _realtimeSub;
 
   @override
@@ -276,7 +332,7 @@ class _MessagesPageState extends State<MessagesPage> {
       // push event just triggers an immediate refetch of the inbox; the
       // slow timer below is purely a safety net in case an event is ever
       // missed (a dropped connection during the reconnect window, etc).
-      _realtimeSub = widget.realtime?.events.listen((_) => _load());
+      _realtimeSub = widget.realtime?.events.listen(_onRealtimeEvent);
       _inboxPollTimer = Timer.periodic(const Duration(seconds: 25), (_) => _load());
     }
   }
@@ -285,6 +341,7 @@ class _MessagesPageState extends State<MessagesPage> {
   void dispose() {
     _presenceTimer?.cancel();
     _inboxPollTimer?.cancel();
+    _inboxRefreshDebounce?.cancel();
     _realtimeSub?.cancel();
     _search.dispose();
     _openSwipeId.dispose();
@@ -319,6 +376,21 @@ class _MessagesPageState extends State<MessagesPage> {
     try {
       await _secureStorage.write(key: 'neat_inbox_cache', value: jsonEncode(raw));
     } catch (_) {}
+  }
+
+  /// Refetches the inbox when something in it actually changed.
+  ///
+  /// Every event used to trigger a reload, and "someone is typing" fires
+  /// repeatedly while a person types — so one chatty conversation could keep
+  /// the inbox fetching continuously for a dot that the next refresh would
+  /// have carried anyway. Everything else still refreshes, coalesced so a
+  /// burst (a message plus its read receipt, say) costs one request.
+  void _onRealtimeEvent(RealtimeEvent event) {
+    if (event.type == 'typing') return;
+    _inboxRefreshDebounce?.cancel();
+    _inboxRefreshDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) _load();
+    });
   }
 
   Future<void> _loadInboxCache() async {
@@ -572,7 +644,7 @@ class _InboxRow extends StatelessWidget {
     final me  = summary.lastSender == currentUsername;
     if (msg.isEmpty) return 'Πάτησε για να ξεκινήσεις συνομιλία';
     if (msg.startsWith(_kPostPrefix))  return me ? 'Έστειλες μια δημοσίευση'    : 'Έστειλε μια δημοσίευση';
-    if (msg.startsWith(_kImagePrefix)) return me ? 'Έστειλες μια φωτογραφία'    : 'Έστειλε μια φωτογραφία';
+    if (_imagePrefixOf(msg) != null)   return me ? 'Έστειλες μια φωτογραφία'    : 'Έστειλε μια φωτογραφία';
     if (msg.startsWith(_kVoicePrefix)) return me ? 'Έστειλες ένα ηχητικό μήνυμα' : 'Έστειλε ένα ηχητικό μήνυμα';
     if (msg.startsWith(_kReplyPrefix)) return me ? 'Απάντησες'                  : 'Απάντησε';
     return me ? 'Εσύ: $msg' : msg;
@@ -1286,6 +1358,9 @@ class _ConversationPageState extends State<ConversationPage>
     with SingleTickerProviderStateMixin {
   final _composer = TextEditingController();
   final _scroll   = ScrollController();
+  /// Whether the server said there are messages before the ones we hold.
+  bool _hasOlder = false;
+  bool _loadingOlder = false;
   List<MessageItem> _messages = [];
   bool _loading = true;
   bool _sending = false;
@@ -1460,7 +1535,9 @@ class _ConversationPageState extends State<ConversationPage>
                 title: Text(AppLocalizations.of(context).copy, style: TextStyle(color: fgClr)),
                 onTap: () { Navigator.of(sheetCtx).pop(); _copyMessage(msg); },
               ),
-            if (mine && _isPlainText(msg.text))
+            // A temporary photo has no text to edit — its bubble is empty by
+            // design — so "Edit" there would turn the picture into a sentence.
+            if (mine && !msg.isTemporaryPhoto && _isPlainText(msg.text))
               ListTile(
                 leading: Icon(Icons.edit_outlined, color: fgClr),
                 title: Text(AppLocalizations.of(context).edit, style: TextStyle(color: fgClr)),
@@ -1652,6 +1729,7 @@ class _ConversationPageState extends State<ConversationPage>
     _otherLastActive = widget.otherLastActive;
     _loadCache();
     _load(initial: true);
+    _scroll.addListener(_onScroll);
     if (kIsWeb) {
       _pingPresence();
       _presenceTimer   = Timer.periodic(const Duration(seconds: 30), (_) => _pingPresence());
@@ -1681,6 +1759,7 @@ class _ConversationPageState extends State<ConversationPage>
     _composer.removeListener(_onComposerChanged);
     if (_iTyping) _sendTypingSignal(false);
     _composer.dispose();
+    _scroll.removeListener(_onScroll);
     _scroll.dispose();
     super.dispose();
   }
@@ -1907,31 +1986,38 @@ class _ConversationPageState extends State<ConversationPage>
           .map(MessageItem.fromJson)
           .toList();
       if (!mounted) return;
-      // Merge: keep locally-cached OPTIMISTIC (negative-ID) messages the server
-      // didn't return yet — a real (positive-ID) message missing from the
-      // server's response means it was deleted server-side, not "pending", so
-      // it must NOT be preserved here (otherwise deletes would never stick).
-      // For optimistic entries, also drop them if the server returned a
-      // matching sender+text — that means the send was confirmed and the
-      // real message has a new positive ID. Without this check, re-entering
-      // the DM would show the message twice.
+      // The response is the newest page, not the whole history (a thread of
+      // photos was megabytes, and that download was the delay between tapping
+      // a notification and seeing what someone said). So "missing from the
+      // response" only means "deleted" for messages inside the page: anything
+      // older than its first message is simply on a page we didn't ask for,
+      // and stays.
+      final oldestInPage = msgs.isEmpty ? null : msgs.first.id;
       final serverIds   = msgs.map((m) => m.id).toSet();
       final serverKeys  = msgs.map((m) => '${m.sender}\x00${m.text}').toSet();
-      final localOnly   = _messages
+      final olderPages  = oldestInPage == null
+          ? const <MessageItem>[]
+          : _messages.where((m) => m.id > 0 && m.id < oldestInPage).toList();
+      // Optimistic (negative-ID) messages the server hasn't echoed back yet.
+      // Dropped once it returns a matching sender+text — the send is confirmed
+      // and the real message has a positive id — and dropped anyway after a
+      // while, since one that never arrives clearly failed to send and would
+      // otherwise linger forever as an undeletable phantom.
+      final pending = _messages
           .where((m) => m.id < 0)
           .where((m) => !serverIds.contains(m.id))
           .where((m) => !serverKeys.contains('${m.sender}\x00${m.text}'))
-          // An optimistic (negative-ID) message the server still hasn't echoed back after
-          // this long clearly failed to send (e.g. a send error the client didn't catch) —
-          // drop it so it doesn't linger forever as an unremovable, undeletable phantom.
           .where((m) => DateTime.now().difference(m.created) < const Duration(seconds: 20))
           .toList();
-      final merged = [...msgs, ...localOnly]
+      final merged = [...olderPages, ...msgs, ...pending]
         ..sort((a, b) => a.created.compareTo(b.created));
       final otherReadAt = DateTime.tryParse(conv?['otherLastReadAt']?.toString() ?? '');
       setState(() {
         _messages = merged;
         _loading = false;
+        // Only the freshest page reports this; loading older pages updates it
+        // separately (see _loadOlder).
+        if (olderPages.isEmpty) _hasOlder = body['has_more'] == true;
         if (conv != null) _blocked = conv['viewerBlockedOther'] == true;
         if (otherReadAt != null) _otherLastReadAt = otherReadAt;
       });
@@ -1943,15 +2029,71 @@ class _ConversationPageState extends State<ConversationPage>
     }
   }
 
-  Future<void> _sendRaw(String text, {bool clearInput = false}) async {
+  /// Fetches the page before the oldest message on screen.
+  ///
+  /// Free of scroll gymnastics: the list is `reverse: true`, so older messages
+  /// are appended at its far end and nothing already visible moves.
+  Future<void> _loadOlder() async {
+    if (_loadingOlder || !_hasOlder) return;
+    final oldest = _messages.where((m) => m.id > 0).fold<int?>(
+      null,
+      (lowest, m) => lowest == null || m.id < lowest ? m.id : lowest,
+    );
+    if (oldest == null) return;
+
+    setState(() => _loadingOlder = true);
+    try {
+      final res = await http.get(
+        messageConversationEndpoint(widget.conversationId, before: oldest),
+        headers: authGetHeaders(widget.token),
+      );
+      if (!mounted) return;
+      if (res.statusCode != 200) return;
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final older = (body['messages'] as List? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(MessageItem.fromJson)
+          .toList();
+      setState(() {
+        _messages = [...older, ..._messages]
+          ..sort((a, b) => a.created.compareTo(b.created));
+        _hasOlder = body['has_more'] == true;
+      });
+    } catch (_) {
+      // Leave _hasOlder alone: the page is still there, the network wasn't.
+    } finally {
+      if (mounted) setState(() => _loadingOlder = false);
+    }
+  }
+
+  /// Pulls the next page in as the oldest message on screen comes into view,
+  /// so scrolling back through a conversation never stops at a wall.
+  void _onScroll() {
+    if (!_scroll.hasClients || !_hasOlder || _loadingOlder) return;
+    final position = _scroll.position;
+    // reverse: true — maxScrollExtent is the far end, which is the top.
+    if (position.pixels > position.maxScrollExtent - 600) _loadOlder();
+  }
+
+  Future<void> _sendRaw(
+    String text, {
+    bool clearInput = false,
+    _PhotoMode photoMode = _PhotoMode.keep,
+  }) async {
     if (text.isEmpty || _sending) return;
     if (clearInput) _composer.clear();
 
+    final temporary = photoMode != _PhotoMode.keep;
     final opt = MessageItem(
       id: -DateTime.now().millisecondsSinceEpoch,
       sender: widget.currentUsername,
-      text: text,
+      // A temporary photo shows the sender the same thing the server will
+      // send back a moment later — the state of the photo, not the photo.
+      // Holding the bytes locally would make their own copy outlive it.
+      text: temporary ? '' : text,
       created: DateTime.now(),
+      photoMode: photoMode.wire,
+      opensLeft: photoMode.budget,
     );
     final newList = [..._messages, opt];
     setState(() { _messages = newList; _sending = true; });
@@ -1962,7 +2104,12 @@ class _ConversationPageState extends State<ConversationPage>
       final res = await http.post(
         messageConversationEndpoint(widget.conversationId),
         headers: authJsonHeaders(widget.token),
-        body: jsonEncode({'text': text}),
+        body: jsonEncode({
+          'text': text,
+          // Harmless on a server that predates temporary photos: it ignores
+          // the field and the photo is simply kept in the chat.
+          if (temporary) 'photo_mode': photoMode.wire,
+        }),
       );
       if (res.statusCode == 401) return widget.onLogout();
       if (res.statusCode != 201) {
@@ -2003,16 +2150,54 @@ class _ConversationPageState extends State<ConversationPage>
     return _sendRaw(text, clearInput: true);
   }
 
-  Future<void> _sendImage(Uint8List bytes) =>
-      _sendRaw('$_kImagePrefix${base64Encode(bytes)}');
+  Future<void> _sendImage(Uint8List bytes, [_PhotoMode mode = _PhotoMode.keep]) =>
+      _sendRaw('$_kImagePrefix${base64Encode(bytes)}', photoMode: mode);
 
-  Future<void> _sendImageWithMode(Uint8List bytes, _PhotoMode mode) {
-    final prefix = switch (mode) {
-      _PhotoMode.once   => _kImageOncePrefix,
-      _PhotoMode.replay => _kImageReplayPrefix,
-      _PhotoMode.keep   => _kImagePrefix,
-    };
-    return _sendRaw('$prefix${base64Encode(bytes)}');
+  /// Spends one of the recipient's viewings and shows them the picture.
+  ///
+  /// The bytes exist nowhere on this device until now — this call is what
+  /// fetches them, and on the last allowed viewing the server drops them, so
+  /// there is nothing to come back to.
+  Future<void> _openTemporaryPhoto(MessageItem message) async {
+    final l10n = AppLocalizations.of(context);
+    try {
+      final res = await http.post(
+        messageOpenEndpoint(widget.conversationId, message.id),
+        headers: authJsonHeaders(widget.token),
+      );
+      if (res.statusCode == 401) return widget.onLogout();
+      if (!mounted) return;
+      if (res.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.photoUnavailable)),
+        );
+        // A refusal is nearly always "already opened", so bring the bubble
+        // in line with the server rather than leaving it inviting a tap.
+        _replaceMessage(message.copyWith(opensLeft: 0));
+        return;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final bytes = _parseImage(body['photo']?.toString() ?? '');
+      final updated = body['message'];
+      if (updated is Map<String, dynamic>) {
+        _replaceMessage(MessageItem.fromJson(updated));
+      }
+      if (bytes == null || bytes.isEmpty) return;
+      await openPhotoViewer(context, bytes);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.photoUnavailable)),
+        );
+      }
+    }
+  }
+
+  void _replaceMessage(MessageItem message) {
+    if (!mounted) return;
+    final index = _messages.indexWhere((m) => m.id == message.id);
+    if (index < 0) return;
+    setState(() => _messages[index] = message);
   }
 
   Future<void> _sendVoice(Uint8List bytes, int durationSecs) =>
@@ -2023,7 +2208,7 @@ class _ConversationPageState extends State<ConversationPage>
 
   bool _isPlainText(String text) =>
       !text.startsWith(_kPostPrefix) &&
-      !text.startsWith(_kImagePrefix) &&
+      _imagePrefixOf(text) == null &&
       !text.startsWith(_kVoicePrefix) &&
       !text.startsWith(_kReplyPrefix);
 
@@ -2150,6 +2335,7 @@ class _ConversationPageState extends State<ConversationPage>
   }
 
   String _replyPreview(MessageItem msg) {
+    if (msg.isTemporaryPhoto) return '📷 Photo';
     if (_parseImage(msg.text) != null) return '📷 Photo';
     if (_parseVoice(msg.text) != null) return '🎤 Voice message';
     if (_parsePost(msg.text) != null) return '📎 Post';
@@ -2437,6 +2623,7 @@ class _ConversationPageState extends State<ConversationPage>
                                         _TimeDivider(time: msg.created, isLight: isLight),
                                       _MessageRow(
                                         message: msg,
+                                        conversationId: widget.conversationId,
                                         mine: mine,
                                         isLast: isLast,
                                         showRead: showRead,
@@ -2465,6 +2652,20 @@ class _ConversationPageState extends State<ConversationPage>
                                         onTapReactions: msg.reactions.values.any((l) => l.isNotEmpty)
                                             ? () => _showReactionSheet(msg)
                                             : null,
+                                        // Both sides have their own
+                                        // viewings, so both can spend them —
+                                        // what greys the bubble out is your
+                                        // own allowance running out, not
+                                        // theirs.
+                                        // id > 0: a photo you have just sent
+                                        // has no server-side id yet, and
+                                        // there is nothing to open until the
+                                        // send comes back.
+                                        onOpenTemporaryPhoto: msg.isTemporaryPhoto &&
+                                                msg.opensLeft > 0 &&
+                                                msg.id > 0
+                                            ? () => _openTemporaryPhoto(msg)
+                                            : null,
                                       ),
                                     ],
                                   ),
@@ -2487,7 +2688,6 @@ class _ConversationPageState extends State<ConversationPage>
               sending: _sending,
               onSendText: _sendText,
               onSendImage: _sendImage,
-              onSendImageWithMode: _sendImageWithMode,
               onSendVoice: _sendVoice,
               replyTo: _replyTo,
               onClearReply: _clearReply,
@@ -2522,9 +2722,12 @@ class _MessageRow extends StatelessWidget {
     this.showRead = false,
     this.onTapQuote,
     this.onTapReactions,
+    this.onOpenTemporaryPhoto,
+    required this.conversationId,
   });
 
   final MessageItem message;
+  final int conversationId;
   final bool mine;
   final bool isLast;
   final bool showRead;
@@ -2542,22 +2745,44 @@ class _MessageRow extends StatelessWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onTapQuote;
   final VoidCallback? onTapReactions;
+  final VoidCallback? onOpenTemporaryPhoto;
 
   Widget _content() {
+    // Checked before anything else: a temporary photo has no payload to
+    // parse, so every branch below would fall through to an empty bubble.
+    if (message.isTemporaryPhoto) {
+      return _TemporaryPhotoBubble(
+        message: message,
+        mine: mine,
+        isLight: isLight,
+        onOpen: onOpenTemporaryPhoto,
+      );
+    }
+
     final replyData = _parseReply(message.text);
     if (replyData != null) {
       return _ReplyMessageBubble(replyData: replyData, mine: mine, isLast: isLast, isLight: isLight, token: token, onTapQuote: onTapQuote);
     }
 
-    final imgBytes  = _parseImage(message.text);
+    final imgBytes = _parseImage(message.text);
     if (imgBytes != null) {
-      return _ImageBubble(bytes: imgBytes, mine: mine, isLast: isLast);
+      // Empty means the server kept the bytes back for this build to fetch;
+      // non-empty is an older server, or the copy that came over the socket.
+      return _ImageBubble(
+        bytes: imgBytes.isEmpty ? null : imgBytes,
+        messageId: message.id,
+        conversationId: conversationId,
+        token: token,
+      );
     }
 
     final voiceData = _parseVoice(message.text);
     if (voiceData != null) {
       return _VoiceBubble(
-        bytes: voiceData.bytes,
+        bytes: voiceData.bytes.isEmpty ? null : voiceData.bytes,
+        messageId: message.id,
+        conversationId: conversationId,
+        token: token,
         durationSecs: voiceData.secs,
         mine: mine,
         isLast: isLast,
@@ -2787,67 +3012,225 @@ class _Bubble extends StatelessWidget {
 
 // ─── Image bubble ─────────────────────────────────────────────────────────────
 
-class _ImageBubble extends StatelessWidget {
-  const _ImageBubble({required this.bytes, required this.mine, required this.isLast});
-  final Uint8List bytes;
-  final bool mine;
-  final bool isLast;
+/// A photo in a conversation, drawn the way the feed draws one.
+///
+/// Same square frame, same 18px corners, same decode cap — and tapping it
+/// opens the app's photo page rather than a viewer of its own, so a picture
+/// looks and behaves identically wherever it turns up.
+///
+/// The bytes usually aren't in the message: threads are fetched without their
+/// media so a chat opens at once, and the picture is downloaded here, once,
+/// the first time this bubble is built. [DmMedia] keeps it after that, so
+/// scrolling past it again — or reopening the conversation tomorrow — costs
+/// nothing.
+class _ImageBubble extends StatefulWidget {
+  const _ImageBubble({
+    required this.bytes,
+    required this.messageId,
+    required this.conversationId,
+    required this.token,
+  });
+
+  /// The picture, when the message happened to carry it. Null means "fetch".
+  final Uint8List? bytes;
+  final int messageId;
+  final int conversationId;
+  final String token;
+
+  @override
+  State<_ImageBubble> createState() => _ImageBubbleState();
+}
+
+class _ImageBubbleState extends State<_ImageBubble> {
+  /// As wide as a chat photo can be without crowding the row's avatar and
+  /// margins, and never wider than the picture would be in the feed.
+  static const double _maxWidth = 260;
+
+  Uint8List? _bytes;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _bytes = widget.bytes ?? DmMedia.cached(widget.messageId);
+    if (_bytes == null) _fetch();
+  }
+
+  @override
+  void didUpdateWidget(_ImageBubble old) {
+    super.didUpdateWidget(old);
+    // A poll or socket update can hand the same bubble a different message.
+    if (old.messageId != widget.messageId) {
+      _bytes = widget.bytes ?? DmMedia.cached(widget.messageId);
+      _failed = false;
+      if (_bytes == null) _fetch();
+    }
+  }
+
+  Future<void> _fetch() async {
+    // Optimistic messages have no server-side id to fetch from; their bytes
+    // are always inline.
+    if (widget.messageId < 0) return;
+    final bytes = await DmMedia.load(
+      token: widget.token,
+      conversationId: widget.conversationId,
+      messageId: widget.messageId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _bytes = bytes;
+      _failed = bytes == null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final width = math.min(MediaQuery.sizeOf(context).width * 0.62, _maxWidth);
+    // Decoding a full-size photo to draw it at bubble size is what makes a
+    // conversation full of pictures expensive; the feed caps it the same way.
+    final decodeWidth = (width * MediaQuery.devicePixelRatioOf(context)).round();
+    final bytes = _bytes;
+
     return GestureDetector(
-      onTap: () => _openFullscreen(context),
+      onTap: bytes == null ? (_failed ? _retry : null) : () => openPhotoViewer(context, bytes),
       child: ClipRRect(
-        borderRadius: _bubbleRadius(mine, isLast),
-        child: Image.memory(bytes, width: 220, height: 220, fit: BoxFit.cover, gaplessPlayback: true),
+        borderRadius: BorderRadius.circular(18),
+        child: SizedBox.square(
+          dimension: width,
+          child: bytes != null
+              ? Image.memory(
+                  bytes,
+                  fit: BoxFit.cover,
+                  cacheWidth: decodeWidth,
+                  gaplessPlayback: true,
+                )
+              // The frame is the same size either way, so the bubble never
+              // resizes under the reader when the picture lands.
+              : ColoredBox(
+                  color: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
+                  child: Center(
+                    child: _failed
+                        ? Icon(Icons.refresh_rounded,
+                            color: isLight ? _kSubLgt : _kSubDark, size: 26)
+                        : const NeatLoader(size: 34, color: Color(0xff8e8e8e)),
+                  ),
+                ),
+        ),
       ),
     );
   }
 
-  void _openFullscreen(BuildContext context) {
-    Navigator.of(context).push(PageRouteBuilder(
-      opaque: false,
-      pageBuilder: (ctx, a1, a2) {
-        final topPad = MediaQuery.of(ctx).padding.top;
-        return Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
-            children: [
-              Center(
-                child: InteractiveViewer(
-                  minScale: 0.5,
-                  maxScale: 4.0,
-                  child: GestureDetector(
-                    onTap: () => Navigator.of(ctx).pop(),
-                    child: Image.memory(
-                      bytes,
-                      fit: BoxFit.contain,
-                      width: MediaQuery.of(ctx).size.width,
-                      height: MediaQuery.of(ctx).size.height,
-                    ),
+  void _retry() {
+    setState(() => _failed = false);
+    _fetch();
+  }
+}
+
+// ─── Temporary photo bubble ───────────────────────────────────────────────────
+
+/// A "view once" / "allow replay" photo, which is a state rather than a
+/// picture: the bytes are on the server until the recipient opens it, and
+/// gone from there afterwards.
+///
+/// So the bubble says what there is to know — whose it is, how it was sent,
+/// and whether it has been seen — and, for the recipient with a viewing left,
+/// invites the tap that spends it.
+class _TemporaryPhotoBubble extends StatelessWidget {
+  const _TemporaryPhotoBubble({
+    required this.message,
+    required this.mine,
+    required this.isLight,
+    this.onOpen,
+  });
+
+  final MessageItem message;
+  final bool mine;
+  final bool isLight;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final once = _PhotoMode.fromWire(message.photoMode) == _PhotoMode.once;
+    // "Spent" is always about you: the other person using their viewings
+    // leaves yours exactly where they were.
+    final spent = message.opensLeft <= 0;
+    final openable = onOpen != null && !spent;
+
+    final String label;
+    if (mine) {
+      // On your own photo the line reports the other side — that is the news
+      // — while the colour still follows your own remaining viewings.
+      label = message.openedByOther
+          ? l10n.photoOpened
+          : (once ? l10n.photoSentOnce : l10n.photoSentReplay);
+    } else if (spent) {
+      label = l10n.photoOpened;
+    } else if (once) {
+      label = l10n.photoTapToView;
+    } else {
+      // Second viewing of an "allow replay" photo — the replay it promised.
+      label = message.opensLeft == 1 ? l10n.photoReplay : l10n.photoTapToView;
+    }
+
+    final foreground = spent
+        ? (isLight ? _kSubLgt : _kSubDark)
+        : (mine ? Colors.white : (isLight ? Colors.black : Colors.white));
+    final background = spent
+        ? Colors.transparent
+        : (mine ? _kBlue : (isLight ? _kOtherLgt : _kOtherDark));
+    final border = spent
+        ? Border.all(color: isLight ? const Color(0xffd0d0d0) : const Color(0xff3a3a3a))
+        : null;
+
+    return GestureDetector(
+      onTap: openable ? onOpen : null,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: background,
+          border: border,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              spent
+                  ? Icons.visibility_off_rounded
+                  : (once ? Icons.looks_one_rounded : Icons.replay_rounded),
+              size: 18,
+              color: foreground,
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  l10n.photoLabel,
+                  style: TextStyle(
+                    color: foreground,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ),
-              Positioned(
-                top: topPad + 12,
-                right: 16,
-                child: GestureDetector(
-                  onTap: () => Navigator.of(ctx).pop(),
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      color: Colors.black54,
-                      shape: BoxShape.circle,
-                    ),
-                    padding: const EdgeInsets.all(8),
-                    child: const Icon(Icons.close, color: Colors.white, size: 22),
+                const SizedBox(height: 1),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: foreground.withValues(alpha: 0.75),
+                    fontSize: 12,
                   ),
                 ),
-              ),
-            ],
-          ),
-        );
-      },
-    ));
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -2856,12 +3239,21 @@ class _ImageBubble extends StatelessWidget {
 class _VoiceBubble extends StatefulWidget {
   const _VoiceBubble({
     required this.bytes,
+    required this.messageId,
+    required this.conversationId,
+    required this.token,
     required this.durationSecs,
     required this.mine,
     required this.isLast,
     required this.isLight,
   });
-  final Uint8List bytes;
+
+  /// The recording, when the message carried it. Null means it is fetched on
+  /// play — a voice note nobody listens to is never downloaded at all.
+  final Uint8List? bytes;
+  final int messageId;
+  final int conversationId;
+  final String token;
   final int durationSecs;
   final bool mine;
   final bool isLast;
@@ -2874,6 +3266,7 @@ class _VoiceBubble extends StatefulWidget {
 class _VoiceBubbleState extends State<_VoiceBubble> {
   late final AudioPlayer _player;
   bool _playing = false;
+  bool _loading = false;
   Duration _position = Duration.zero;
   String? _tempPath;
 
@@ -2902,11 +3295,28 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
   Future<void> _toggle() async {
     if (_playing) { await _player.pause(); return; }
     if (_tempPath == null) {
+      final bytes = widget.bytes ?? await _fetch();
+      if (bytes == null || !mounted) return;
       final dir = await getTemporaryDirectory();
       _tempPath = '${dir.path}/neat_play_${identityHashCode(this)}.aac';
-      await File(_tempPath!).writeAsBytes(widget.bytes);
+      await File(_tempPath!).writeAsBytes(bytes);
     }
     await _player.play(DeviceFileSource(_tempPath!));
+  }
+
+  /// Downloads the recording the first time play is pressed. The spinner
+  /// replaces the play triangle meanwhile, so a slow connection reads as
+  /// "loading" rather than "the button did nothing".
+  Future<Uint8List?> _fetch() async {
+    if (widget.messageId < 0) return null;
+    setState(() => _loading = true);
+    final bytes = await DmMedia.load(
+      token: widget.token,
+      conversationId: widget.conversationId,
+      messageId: widget.messageId,
+    );
+    if (mounted) setState(() => _loading = false);
+    return bytes;
   }
 
   @override
@@ -2927,10 +3337,18 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: fg,
-              size: 28,
+            SizedBox.square(
+              dimension: 28,
+              child: _loading
+                  ? Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: CircularProgressIndicator(strokeWidth: 2, color: fg),
+                    )
+                  : Icon(
+                      _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                      color: fg,
+                      size: 28,
+                    ),
             ),
             const SizedBox(width: 8),
             _WaveformBars(
@@ -3102,7 +3520,6 @@ class _Composer extends StatefulWidget {
     required this.sending,
     required this.onSendText,
     required this.onSendImage,
-    required this.onSendImageWithMode,
     required this.onSendVoice,
     this.replyTo,
     this.onClearReply,
@@ -3114,8 +3531,7 @@ class _Composer extends StatefulWidget {
   final bool isLight;
   final bool sending;
   final VoidCallback onSendText;
-  final Future<void> Function(Uint8List) onSendImage;
-  final Future<void> Function(Uint8List, _PhotoMode) onSendImageWithMode;
+  final Future<void> Function(Uint8List, _PhotoMode) onSendImage;
   final Future<void> Function(Uint8List, int) onSendVoice;
   final MessageItem? replyTo;
   final VoidCallback? onClearReply;
@@ -3170,7 +3586,7 @@ class _ComposerState extends State<_Composer> {
           fullscreenDialog: true,
           builder: (_) => _PhotoPreviewPage(
             bytes: bytes,
-            onSend: (mode) => widget.onSendImageWithMode(bytes, mode),
+            onSend: (mode) => widget.onSendImage(bytes, mode),
           ),
         ),
       );
@@ -3212,7 +3628,9 @@ class _ComposerState extends State<_Composer> {
     if (!mounted || url == null) return;
     try {
       final res = await http.get(Uri.parse(url));
-      if (res.statusCode == 200) await widget.onSendImage(res.bodyBytes);
+      if (res.statusCode == 200) {
+        await widget.onSendImage(res.bodyBytes, _PhotoMode.keep);
+      }
     } catch (_) {}
   }
 
@@ -4603,8 +5021,16 @@ class _FullEmojiPicker extends StatelessWidget {
   }
 }
 
-// ─── Photo preview (Instagram-style) ──────────────────────────────────────────
+// ─── Photo preview ────────────────────────────────────────────────────────────
 
+/// What you see between picking a photo and sending it: the photo, how long
+/// it should live, and send.
+///
+/// The lifetime is one button that cycles, the way Instagram's does — view
+/// once, allow replay, keep in chat — rather than three controls competing
+/// for the bottom of a picture. Whatever it says when you hit send is what
+/// the server is told and what it enforces; the modes are no longer a label
+/// on a message nobody could read.
 class _PhotoPreviewPage extends StatefulWidget {
   const _PhotoPreviewPage({required this.bytes, required this.onSend});
   final Uint8List bytes;
@@ -4616,7 +5042,18 @@ class _PhotoPreviewPage extends StatefulWidget {
 class _PhotoPreviewPageState extends State<_PhotoPreviewPage> {
   _PhotoMode _mode = _PhotoMode.keep;
 
-  Future<void> _download() async {
+  /// One press, one step round the ring — the whole point of the control.
+  void _cycleMode() {
+    setState(() {
+      _mode = switch (_mode) {
+        _PhotoMode.keep => _PhotoMode.once,
+        _PhotoMode.once => _PhotoMode.replay,
+        _PhotoMode.replay => _PhotoMode.keep,
+      };
+    });
+  }
+
+  Future<void> _save() async {
     try {
       final dir = await getTemporaryDirectory();
       final path = '${dir.path}/neat_photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
@@ -4627,86 +5064,78 @@ class _PhotoPreviewPageState extends State<_PhotoPreviewPage> {
 
   @override
   Widget build(BuildContext context) {
+    final pad = MediaQuery.paddingOf(context);
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Full-screen image
-          SizedBox.expand(
-            child: Image.memory(widget.bytes, fit: BoxFit.contain),
-          ),
-          // Top bar
-          SafeArea(
+          // The photo, whole and uncropped — what you are about to send, at
+          // the size the screen allows and nothing else on top of it.
+          Positioned.fill(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white, size: 28),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.download_rounded, color: Colors.white, size: 28),
-                    onPressed: _download,
-                  ),
-                ],
+              padding: EdgeInsets.only(
+                top: pad.top + 64,
+                bottom: pad.bottom + 96,
+              ),
+              child: Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Image.memory(widget.bytes, fit: BoxFit.contain),
+                ),
               ),
             ),
           ),
-          // Bottom bar
+
+          // Close, top-left. On its own, because leaving is the only thing
+          // you might want before you have decided anything.
           Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _PhotoModeOption(
-                          label: 'Διατήρηση στη συνομιλία',
-                          selected: _mode == _PhotoMode.keep,
-                          onTap: () => setState(() => _mode = _PhotoMode.keep),
-                        ),
-                        const SizedBox(height: 8),
-                        _PhotoModeOption(
-                          label: 'Να επιτρέπεται η επαναπροβολή',
-                          selected: _mode == _PhotoMode.replay,
-                          onTap: () => setState(() => _mode = _PhotoMode.replay),
-                        ),
-                        const SizedBox(height: 8),
-                        _PhotoModeOption(
-                          label: 'Προβολή μια φορά',
-                          selected: _mode == _PhotoMode.once,
-                          onTap: () => setState(() => _mode = _PhotoMode.once),
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        widget.onSend(_mode);
-                      },
-                      child: Container(
-                        width: 56,
-                        height: 56,
-                        decoration: const BoxDecoration(
-                          color: Color(0xff0095f6),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.send_rounded, color: Colors.white, size: 26),
-                      ),
-                    ),
-                  ],
+            top: pad.top + 10,
+            left: 8,
+            child: _PhotoIconButton(
+              icon: Icons.close_rounded,
+              onTap: () => Navigator.of(context).pop(),
+            ),
+          ),
+
+          // Save, lifetime, send. The lifetime button sits in the middle,
+          // between the two things it qualifies, and takes the width it needs
+          // for whichever label it is currently showing.
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: pad.bottom + 20,
+            child: Row(
+              children: [
+                _PhotoIconButton(icon: Icons.file_download_outlined, onTap: _save),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _PhotoModeButton(mode: _mode, onTap: _cycleMode),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    widget.onSend(_mode);
+                  },
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: const BoxDecoration(
+                      color: _kBlue,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.arrow_upward_rounded,
+                      color: Colors.white,
+                      size: 26,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -4715,14 +5144,71 @@ class _PhotoPreviewPageState extends State<_PhotoPreviewPage> {
   }
 }
 
-class _PhotoModeOption extends StatelessWidget {
-  const _PhotoModeOption({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-  final String label;
-  final bool selected;
+/// The lifetime control: one pill that steps through the three modes.
+///
+/// A single cycling button rather than a row of options, which is both how
+/// Instagram does it and the only version that fits under a photo without
+/// crowding it. The icon carries the meaning at a glance — a "1" for the one
+/// viewing, a replay arrow for the second, a chat bubble for the photo that
+/// simply stays — and the label spells it out.
+class _PhotoModeButton extends StatelessWidget {
+  const _PhotoModeButton({required this.mode, required this.onTap});
+  final _PhotoMode mode;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final (IconData icon, String label) = switch (mode) {
+      _PhotoMode.once => (Icons.looks_one_rounded, l10n.photoViewOnce),
+      _PhotoMode.replay => (Icons.replay_rounded, l10n.photoAllowReplay),
+      _PhotoMode.keep => (Icons.chat_bubble_rounded, l10n.photoKeepInChat),
+    };
+    // "Keep in chat" is the default and the unremarkable one; the two that
+    // change what the recipient gets are filled in, so a photo about to
+    // disappear never looks like an ordinary one.
+    final temporary = mode != _PhotoMode.keep;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: temporary ? Colors.white : Colors.white.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: temporary ? Colors.black : Colors.white),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: temporary ? Colors.black : Colors.white,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A round, faintly-filled glyph — legible over a photo of any colour without
+/// putting a solid button in front of it.
+class _PhotoIconButton extends StatelessWidget {
+  const _PhotoIconButton({required this.icon, required this.onTap});
+  final IconData icon;
   final VoidCallback onTap;
 
   @override
@@ -4730,33 +5216,16 @@ class _PhotoModeOption extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 20,
-            height: 20,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-              color: selected ? Colors.white : Colors.transparent,
-            ),
-            child: selected
-                ? const Icon(Icons.check, size: 13, color: Colors.black)
-                : null,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
-            ),
-          ),
-        ],
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.14),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: Colors.white, size: 24),
       ),
     );
   }
 }
+

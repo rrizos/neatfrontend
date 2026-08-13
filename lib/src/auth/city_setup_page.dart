@@ -89,7 +89,7 @@ class _CitySetupPageState extends State<CitySetupPage> {
         // No top SafeArea: the map runs under the status bar.
         body: Column(
           children: [
-            if (_mapImage != null || !_snapshotSettled)
+            if (_mapImage != null || !_snapshotSettled || AndroidCityMapHero.isSupported)
               _MapHero(
                 image: _mapImage,
                 background: background,
@@ -180,7 +180,11 @@ class _MapHero extends StatelessWidget {
           ColoredBox(
             color: isLight ? const Color(0xfff2f3f5) : const Color(0xff1a1c22),
           ),
-          if (image != null)
+          // Android has no snapshotter, so it draws the live map instead —
+          // held still and deaf to touches. See AndroidCityMapHero.
+          if (AndroidCityMapHero.isSupported)
+            AndroidCityMapHero(isDark: !isLight)
+          else if (image != null)
             Image.memory(
               image!,
               fit: BoxFit.cover,

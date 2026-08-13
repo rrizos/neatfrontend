@@ -1425,4 +1425,34 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get neatPassCurrentPoints => 'Points Balance';
+
+  @override
+  String get photoViewOnce => 'View once';
+
+  @override
+  String get photoAllowReplay => 'Allow replay';
+
+  @override
+  String get photoKeepInChat => 'Keep in chat';
+
+  @override
+  String get photoLabel => 'Photo';
+
+  @override
+  String get photoTapToView => 'Tap to view';
+
+  @override
+  String get photoReplay => 'Replay';
+
+  @override
+  String get photoOpened => 'Opened';
+
+  @override
+  String get photoSentOnce => 'Sent · View once';
+
+  @override
+  String get photoSentReplay => 'Sent · Allow replay';
+
+  @override
+  String get photoUnavailable => 'This photo is no longer available';
 }

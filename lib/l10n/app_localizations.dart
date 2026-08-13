@@ -2659,6 +2659,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Points Balance'**
   String get neatPassCurrentPoints;
+
+  /// No description provided for @photoViewOnce.
+  ///
+  /// In en, this message translates to:
+  /// **'View once'**
+  String get photoViewOnce;
+
+  /// No description provided for @photoAllowReplay.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow replay'**
+  String get photoAllowReplay;
+
+  /// No description provided for @photoKeepInChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep in chat'**
+  String get photoKeepInChat;
+
+  /// No description provided for @photoLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo'**
+  String get photoLabel;
+
+  /// No description provided for @photoTapToView.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to view'**
+  String get photoTapToView;
+
+  /// No description provided for @photoReplay.
+  ///
+  /// In en, this message translates to:
+  /// **'Replay'**
+  String get photoReplay;
+
+  /// No description provided for @photoOpened.
+  ///
+  /// In en, this message translates to:
+  /// **'Opened'**
+  String get photoOpened;
+
+  /// No description provided for @photoSentOnce.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent · View once'**
+  String get photoSentOnce;
+
+  /// No description provided for @photoSentReplay.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent · Allow replay'**
+  String get photoSentReplay;
+
+  /// No description provided for @photoUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This photo is no longer available'**
+  String get photoUnavailable;
 }
 
 class _AppLocalizationsDelegate

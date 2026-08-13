@@ -7,6 +7,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_localizations.dart';
+import 'core/avatar_store.dart';
 import 'auth/auth_gate.dart';
 import 'core/neat_loader.dart';
 import 'core/post_deep_link_page.dart';
@@ -161,9 +162,14 @@ class _NeatAppState extends State<NeatApp> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<Locale>(
-      valueListenable: NeatApp.localeNotifier,
-      builder: (context, locale, _) {
+    return ValueListenableBuilder<int>(
+      // Avatars live inside every payload that mentions a person, so a new
+      // profile picture has to reach screens that were built before it
+      // existed. See AvatarStore.
+      valueListenable: AvatarStore.revision,
+      builder: (context, _, _) => ValueListenableBuilder<Locale>(
+        valueListenable: NeatApp.localeNotifier,
+        builder: (context, locale, _) {
         if (_loading) {
           return MaterialApp(
             locale: locale,
@@ -193,8 +199,9 @@ class _NeatAppState extends State<NeatApp> {
                   themeMode: _themeMode,
                   onThemeModeChanged: _setTheme,
                 ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }

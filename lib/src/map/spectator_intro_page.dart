@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/onboarding_ui.dart';
+import 'city_map_view.dart' show AndroidCityMapHero;
 import 'greece_cities.dart';
 import 'map_snapshot.dart';
 
@@ -68,7 +69,7 @@ class _SpectatorIntroPageState extends State<SpectatorIntroPage> {
       // No top SafeArea: the map runs under the status bar.
       body: Column(
         children: [
-          if (_mapImage != null || !_snapshotSettled)
+          if (_mapImage != null || !_snapshotSettled || AndroidCityMapHero.isSupported)
             _CitiesHero(
               image: _mapImage,
               background: background,
@@ -152,7 +153,11 @@ class _CitiesHero extends StatelessWidget {
           ColoredBox(
             color: isLight ? const Color(0xfff2f3f5) : const Color(0xff1a1c22),
           ),
-          if (image != null)
+          // Android has no snapshotter, so it draws the live map instead —
+          // held still and deaf to touches. See AndroidCityMapHero.
+          if (AndroidCityMapHero.isSupported)
+            AndroidCityMapHero(isDark: !isLight)
+          else if (image != null)
             Image.memory(
               image!,
               fit: BoxFit.cover,

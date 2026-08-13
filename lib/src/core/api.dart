@@ -28,10 +28,12 @@ Uri linkPreviewEndpoint(String url) =>
 
 Uri postDetailEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/');
 
-Uri postsEndpoint({bool fresh = false, String? city}) {
+Uri postsEndpoint({bool fresh = false, String? city, int? before}) {
   final uri = Uri.parse('$apiBaseUrl/api/posts/');
   final params = <String, String>{};
   if (city != null && city.isNotEmpty) params['city'] = city;
+  // The page of posts older than this one; absent means the newest page.
+  if (before != null) params['before'] = '$before';
   if (fresh) {
     params['_'] = DateTime.now().millisecondsSinceEpoch.toString();
   }
@@ -186,8 +188,21 @@ Uri typingEndpoint(int conversationId) =>
     Uri.parse('$apiBaseUrl/api/messages/$conversationId/typing/');
 Uri get startConversationEndpoint =>
     Uri.parse('$apiBaseUrl/api/messages/start/');
-Uri messageConversationEndpoint(int id) =>
-    Uri.parse('$apiBaseUrl/api/messages/$id/');
+/// A conversation's newest messages, or — with [before] — the page of older
+/// ones ending just before that message id.
+Uri messageConversationEndpoint(int id, {int? before}) {
+  final uri = Uri.parse('$apiBaseUrl/api/messages/$id/');
+  if (before == null) return uri;
+  return uri.replace(queryParameters: {'before': '$before'});
+}
+/// The bytes of a photo or voice note, which threads no longer carry inline.
+Uri messageMediaEndpoint(int conversationId, int messageId) =>
+    Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/media/');
+
+/// Spends one viewing of a "view once" / "allow replay" photo and returns it.
+/// The only route to those bytes — see `message_open` in the backend.
+Uri messageOpenEndpoint(int conversationId, int messageId) =>
+    Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/open/');
 Uri messageReactEndpoint(int conversationId, int messageId) =>
     Uri.parse('$apiBaseUrl/api/messages/$conversationId/messages/$messageId/react/');
 Uri messageDeleteEndpoint(int conversationId, int messageId) =>
@@ -208,12 +223,19 @@ const jsonHeaders = {
   'Pragma': 'no-cache',
 };
 
+/// Marks this build as one that fetches DM media on demand rather than
+/// expecting it inline. The server keeps sending the old, heavy payloads to
+/// anything without it — see `_wants_lean_media` in dm_messages/views.py.
+const neatClientHeader = {'X-Neat-Client': '2'};
+
 Map<String, String> authJsonHeaders(String token) => {
   ...jsonHeaders,
+  ...neatClientHeader,
   'Authorization': 'Token $token',
 };
 
 Map<String, String> authGetHeaders(String token) => {
+  ...neatClientHeader,
   'Accept': 'application/json',
   'Cache-Control': 'no-cache',
   'Pragma': 'no-cache',

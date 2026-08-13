@@ -25,11 +25,29 @@ final class NativeCityMapFactory: NSObject, FlutterPlatformViewFactory {
   }
 }
 
+// MARK: - Annotation
+
+/// A city pin, carrying the two things that decide how it is drawn: who it
+/// beats when two pins want the same patch of screen, and how busy the city
+/// currently is.
+final class CityAnnotation: MKPointAnnotation {
+  /// 0-1000, sent from `GreeceCity.displayPriority`.
+  var priority: Int = 400
+  var heat: Double = 0
+}
+
 // MARK: - Platform View
 
 final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate {
   private let map = MKMapView()
   private var channel: FlutterMethodChannel?
+
+  /// Every city, best known first, whether or not it is currently on the map.
+  /// Decluttering adds and removes annotations rather than hiding their views:
+  /// MapKit only creates a view once an annotation is near the viewport, so a
+  /// hidden-view approach leaves pins that scroll into range visible again
+  /// regardless of what filtered them out.
+  private var allCities: [CityAnnotation] = []
 
   /// The map that incoming calls apply to.
   ///
@@ -63,10 +81,22 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     let v = mv.dequeueReusableAnnotationView(
       withIdentifier: "pin", for: annotation
     ) as! MKMarkerAnnotationView
-    v.markerTintColor = .systemGreen
+    v.markerTintColor = Self.heatColor(for: (annotation as? CityAnnotation)?.heat ?? 0)
     v.glyphImage = UIImage(systemName: "mappin")
     v.canShowCallout = false
+    // Spacing is decided in `applyDeclutter()`, which knows the pin's exact
+    // screen position; MapKit's own collision handling would only second-guess
+    // it with a different footprint, so every pin it is handed is required.
+    v.displayPriority = .required
     return v
+  }
+
+  /// Re-fills the map every time the camera settles: which cities fit depends
+  /// entirely on where the camera is now.
+  func mapView(_ mv: MKMapView, regionDidChangeAnimated animated: Bool) {
+    let span = mv.region.span.latitudeDelta
+    guard span > 0, !span.isNaN else { return }
+    applyDeclutter()
   }
 
   func mapView(_ mv: MKMapView, didSelect view: MKAnnotationView) {
@@ -198,6 +228,13 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
       if call.method == "updateColorScheme", let isDark = call.arguments as? Bool {
         target?.map.overrideUserInterfaceStyle = isDark ? .dark : .light
       }
+      if call.method == "updateHeat" {
+        // Values arrive as NSNumber over the channel, so read them loosely
+        // rather than forcing [String: Double] and dropping the lot on a
+        // single integer 0 or 1.
+        let raw = (call.arguments as? [String: Any]) ?? [:]
+        target?.updateHeat(raw.compactMapValues { ($0 as? NSNumber)?.doubleValue })
+      }
       result(nil)
     }
   }
@@ -208,18 +245,115 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
       let cities = dict["cities"] as? [[String: Any]]
     else { return }
 
-    let annotations: [MKPointAnnotation] = cities.compactMap { c in
+    allCities = cities.compactMap { c in
       guard
         let name = c["name"]      as? String,
         let lat  = c["latitude"]  as? Double,
         let lng  = c["longitude"] as? Double
       else { return nil }
-      let a = MKPointAnnotation()
+      let a = CityAnnotation()
       a.title = name
       a.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+      // An unlabelled city ranks below every labelled one rather than above.
+      a.priority = (c["priority"] as? Int) ?? 0
       return a
     }
-    map.addAnnotations(annotations)
+    // Best known first: decluttering walks this order and the first pin to
+    // claim a patch of screen keeps it.
+    allCities.sort { $0.priority > $1.priority }
+    applyDeclutter()
+
+    // The view is usually still frameless here, and a projection against a
+    // zero-size map places nothing — so try again as it settles into its real
+    // size. Each pass is idempotent, and the first region change takes over
+    // from there. (The Android page does the same, for the same reason.)
+    for delay in [0.3, 0.8, 2.0] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        self?.applyDeclutter()
+      }
+    }
+  }
+
+  // MARK: Decluttering
+
+  /// How far apart two pin centres have to be, in points — the marker's own
+  /// footprint, so pins may touch but never cover one another. Wider than it
+  /// is tall would be wrong here: a marker is a balloon, taller than it is
+  /// wide, and treating it as a circle wasted the horizontal room that Greece,
+  /// being a wide country on a narrow screen, has least of.
+  private static let minimumPinGapX: CGFloat = 38
+  private static let minimumPinGapY: CGFloat = 46
+
+  /// Pins beyond the edge are still placed, so panning a short way doesn't
+  /// pop a new one into existence at the moment it crosses the boundary.
+  private static let offscreenMargin: CGFloat = 80
+
+  /// Fills the map with every city that fits.
+  ///
+  /// Cities are taken best-known first and each one is kept unless its marker
+  /// would overlap one already placed — so Θεσσαλονίκη is always there and the
+  /// town beside it appears the moment the camera comes down far enough for
+  /// them both to have room. Nothing is gated on a zoom threshold: how much
+  /// you see is decided by how much space there is.
+  private func applyDeclutter() {
+    let bounds = map.bounds.insetBy(dx: -Self.offscreenMargin, dy: -Self.offscreenMargin)
+    guard bounds.width > 1, bounds.height > 1 else { return }
+
+    var placed: [CGPoint] = []
+    var wanted = Set<ObjectIdentifier>()
+
+    for city in allCities {
+      let point = map.convert(city.coordinate, toPointTo: map)
+      guard point.x.isFinite, point.y.isFinite, bounds.contains(point) else { continue }
+      let collides = placed.contains { other in
+        let dx = (point.x - other.x) / Self.minimumPinGapX
+        let dy = (point.y - other.y) / Self.minimumPinGapY
+        return dx * dx + dy * dy < 1
+      }
+      if collides { continue }
+      placed.append(point)
+      wanted.insert(ObjectIdentifier(city))
+    }
+
+    // Never pull a pin out from under an open card: its annotation is still
+    // selected, and removing it deselects with no way back to the card.
+    for annotation in map.selectedAnnotations {
+      wanted.insert(ObjectIdentifier(annotation))
+    }
+
+    let onMap = Set(map.annotations.compactMap { $0 as? CityAnnotation }.map { ObjectIdentifier($0) })
+    let toAdd = allCities.filter { wanted.contains(ObjectIdentifier($0)) && !onMap.contains(ObjectIdentifier($0)) }
+    let toRemove = allCities.filter { !wanted.contains(ObjectIdentifier($0)) && onMap.contains(ObjectIdentifier($0)) }
+
+    if !toRemove.isEmpty { map.removeAnnotations(toRemove) }
+    if !toAdd.isEmpty { map.addAnnotations(toAdd) }
+  }
+
+  // MARK: Heat
+
+  /// The same four bands the Android map uses, so a city reads identically on
+  /// both platforms.
+  static func heatColor(for heat: Double) -> UIColor {
+    if heat < 0.25 { return UIColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1) } // #34C759
+    if heat < 0.5  { return UIColor(red: 1.000, green: 0.800, blue: 0.000, alpha: 1) } // #FFCC00
+    if heat < 0.75 { return UIColor(red: 1.000, green: 0.584, blue: 0.000, alpha: 1) } // #FF9500
+    return UIColor(red: 1.000, green: 0.231, blue: 0.188, alpha: 1)                    // #FF3B30
+  }
+
+  /// Applies a city→heat map from Flutter and repaints the pins already drawn.
+  ///
+  /// Setting the annotation alone is not enough: MapKit hands out the view
+  /// once and does not revisit `viewFor` for an annotation it has already
+  /// placed, so a pin on screen would keep its old colour until it scrolled
+  /// out of range and back.
+  private func updateHeat(_ values: [String: Double]) {
+    for city in allCities {
+      guard let name = city.title else { continue }
+      city.heat = values[name] ?? 0
+      if let view = map.view(for: city) as? MKMarkerAnnotationView {
+        view.markerTintColor = Self.heatColor(for: city.heat)
+      }
+    }
   }
 }
 
