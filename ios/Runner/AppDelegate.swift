@@ -275,6 +275,16 @@ import UserNotifications
             bar.translatesAutoresizingMaskIntoConstraints = false
             bar.isHidden = true
 
+            // Match the app's dark/light background colors.
+            let darkBg  = UIColor(red: 10/255, green: 10/255, blue: 10/255, alpha: 1)
+            let lightBg = UIColor.white
+            let bg = UIColor { $0.userInterfaceStyle == .dark ? darkBg : lightBg }
+            let appearance = UITabBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = bg
+            bar.standardAppearance    = appearance
+            bar.scrollEdgeAppearance  = appearance
+
             rootView.addSubview(bar)
             NSLayoutConstraint.activate([
                 bar.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),

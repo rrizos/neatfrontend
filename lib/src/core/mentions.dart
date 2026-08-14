@@ -195,10 +195,10 @@ class _MentionSuggestionsState extends State<MentionSuggestions> {
   Widget build(BuildContext context) {
     if (_activeQuery == null) return const SizedBox.shrink();
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff1e1e1e);
+    final bg = isLight ? Colors.white : const Color(0xff141414);
     final dividerColor = isLight ? const Color(0xfff0f0f0) : const Color(0xff2a2a2a);
     final topBorderColor = isLight ? const Color(0xffe0e0e0) : const Color(0xff303030);
-    final textColor = isLight ? const Color(0xff111111) : Colors.white;
+    final textColor = isLight ? const Color(0xff0a0a0a) : Colors.white;
     final subColor = isLight ? const Color(0xff8b95a3) : const Color(0xff888888);
     final avatarBg = isLight ? const Color(0xffedeff2) : const Color(0xff2c2c2c);
     final highlightColor = isLight ? const Color(0xfff7f8fa) : const Color(0xff252525);

@@ -26,7 +26,7 @@ class SettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final isLight = themeMode == ThemeMode.light;
-    final bg = isLight ? Colors.white : const Color(0xff121212);
+    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
     final divider = isLight ? const Color(0xffd9dee6) : const Color(0xff242424);
     final sectionColor = isLight ? const Color(0xff616161) : const Color(0xffb3b3b3);
 

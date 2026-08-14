@@ -604,7 +604,7 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
     final isLight = widget.isLight;
     final bg = widget.onSurface
         ? Colors.white.withValues(alpha: 0.14)
-        : (isLight ? const Color(0xfff2f4f7) : const Color(0xff1c1c1e));
+        : (isLight ? const Color(0xfff2f4f7) : const Color(0xff141414));
     final border = widget.onSurface
         ? Colors.white.withValues(alpha: 0.22)
         : (isLight ? const Color(0xffe2e6ec) : const Color(0xff2c2c2e));

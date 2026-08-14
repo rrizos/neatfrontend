@@ -68,7 +68,7 @@ Future<WebViewController> _ensureAndroidSharedMapController() async {
   _androidSharedMapReady = ready;
   final ctrl = WebViewController()
     ..setJavaScriptMode(JavaScriptMode.unrestricted)
-    ..setBackgroundColor(const Color(0xff1a1a1b))
+    ..setBackgroundColor(const Color(0xff141414))
     ..setNavigationDelegate(NavigationDelegate(
       onPageFinished: (_) {
         if (!ready.isCompleted) ready.complete();
@@ -85,7 +85,7 @@ Future<WebViewController> _ensureAndroidSharedMapController() async {
 // mapkit finishes loading — the JS side queues the request and applies it as
 // soon as the map is ready.
 Future<void> _applyLocationToSharedMap(WebViewController ctrl, String location, bool isLight) async {
-  await ctrl.setBackgroundColor(isLight ? const Color(0xfff0f2f5) : const Color(0xff1a1a1b));
+  await ctrl.setBackgroundColor(isLight ? const Color(0xfff0f2f5) : const Color(0xff141414));
   await ctrl.runJavaScript('neatSetColorScheme(${!isLight});');
   final (:lat, :lon) = _parseCoords(location);
   if (lat != null && lon != null) {
@@ -393,7 +393,7 @@ class _EventsPageState extends State<EventsPage> {
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff111111),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -486,7 +486,7 @@ class _EventsPageState extends State<EventsPage> {
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff111111),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -543,7 +543,7 @@ class _EventsPageState extends State<EventsPage> {
       useRootNavigator: true,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff111111),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -646,16 +646,16 @@ class _EventsPageState extends State<EventsPage> {
     final visible = _tab == 0 ? _filteredOfficial : _community;
 
     return Scaffold(
-      backgroundColor: isLight ? Colors.white : const Color(0xff0f0f10),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       appBar: AppBar(
-        backgroundColor: isLight ? Colors.white : const Color(0xff0f0f10),
+        backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
         title: Row(
           children: [
             Container(
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                color: isLight ? Colors.white : const Color(0xff171717),
+                color: isLight ? Colors.white : const Color(0xff0a0a0a),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626)),
               ),
@@ -728,7 +728,7 @@ class _EventsPageState extends State<EventsPage> {
                         decoration: BoxDecoration(
                           color: sel
                               ? (isLight ? Colors.black : Colors.white)
-                              : (isLight ? Colors.white : const Color(0xff1e1e1e)),
+                              : (isLight ? Colors.white : const Color(0xff141414)),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
                             color: sel
@@ -820,7 +820,7 @@ class _EventsOfflineBanner extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      color: isLight ? const Color(0xfff5f5f5) : const Color(0xff1a1a1a),
+      color: isLight ? const Color(0xfff5f5f5) : const Color(0xff141414),
       child: Row(
         children: [
           Icon(Icons.wifi_off_rounded, size: 13,
@@ -1250,7 +1250,7 @@ class _EventCard extends StatelessWidget {
                               ? null
                               : () => _openUrl(event.ticketsUrl),
                           style: TextButton.styleFrom(
-                          backgroundColor: isLight ? const Color(0xffeef1f5) : const Color(0xff1d1d1d),
+                          backgroundColor: isLight ? const Color(0xffeef1f5) : const Color(0xff141414),
                           foregroundColor: isLight ? Colors.black : Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(
@@ -1639,7 +1639,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                         decoration: BoxDecoration(
                           color: sel
                               ? (isLight ? Colors.black : Colors.white)
-                              : (isLight ? Colors.white : const Color(0xff1e1e1e)),
+                              : (isLight ? Colors.white : const Color(0xff141414)),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
                             color: sel
@@ -1690,7 +1690,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 const SizedBox(height: 6),
                 Container(
                   decoration: BoxDecoration(
-                    color: isLight ? Colors.white : const Color(0xff1e1e1e),
+                    color: isLight ? Colors.white : const Color(0xff141414),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
@@ -1778,7 +1778,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 decoration: BoxDecoration(
-                  color: isLight ? Colors.white : const Color(0xff1a1a1b),
+                  color: isLight ? Colors.white : const Color(0xff141414),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: _showDateError
@@ -1822,7 +1822,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 decoration: BoxDecoration(
-                  color: isLight ? Colors.white : const Color(0xff1a1a1b),
+                  color: isLight ? Colors.white : const Color(0xff141414),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: _showTimeError
@@ -1918,7 +1918,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
         hintText: hint,
         hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
         filled: true,
-        fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
+        fillColor: isLight ? Colors.white : const Color(0xff141414),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(
@@ -2126,7 +2126,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
                               decoration: BoxDecoration(
                                 color: sel
                                     ? (isLight ? Colors.black : Colors.white)
-                                    : (isLight ? Colors.white : const Color(0xff1e1e1e)),
+                                    : (isLight ? Colors.white : const Color(0xff141414)),
                                 borderRadius: BorderRadius.circular(20),
                                 border: Border.all(
                                   color: sel
@@ -2188,7 +2188,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 decoration: BoxDecoration(
-                  color: isLight ? Colors.white : const Color(0xff1a1a1b),
+                  color: isLight ? Colors.white : const Color(0xff141414),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
@@ -2225,7 +2225,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 decoration: BoxDecoration(
-                  color: isLight ? Colors.white : const Color(0xff1a1a1b),
+                  color: isLight ? Colors.white : const Color(0xff141414),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),
@@ -2303,7 +2303,7 @@ class _EditEventSheetState extends State<_EditEventSheet> {
         hintText: hint,
         hintStyle: TextStyle(color: isLight ? const Color(0xff616161) : const Color(0xff8f8f8f)),
         filled: true,
-        fillColor: isLight ? Colors.white : const Color(0xff1a1a1b),
+        fillColor: isLight ? Colors.white : const Color(0xff141414),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(
@@ -2342,7 +2342,7 @@ class _CompactToggle extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: value ? Colors.white : const Color(0xff1a1a1b),
+            color: value ? Colors.white : const Color(0xff141414),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: value ? Colors.white : const Color(0xff2a2a2a),
@@ -2385,7 +2385,7 @@ class _ComposerAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xff171717),
+      color: const Color(0xff0a0a0a),
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
@@ -2719,7 +2719,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
       context: context,
       useRootNavigator: true,
       showDragHandle: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       builder: (sheetCtx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2968,7 +2968,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final event = widget.event;
     final official = event.eventType == 'official';
-    final dividerColor = isLight ? const Color(0xfff0f0f0) : const Color(0xff1e1e1e);
+    final dividerColor = isLight ? const Color(0xfff0f0f0) : const Color(0xff141414);
     final mutedColor = isLight ? const Color(0xff8f8f8f) : const Color(0xff6f6f6f);
     final userAvatar = _avatarImage(widget.currentUserAvatar);
     final previewBytes = _imageUrl.isNotEmpty ? decodeAvatarUrl(_imageUrl) : null;
@@ -3111,7 +3111,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                 useRootNavigator: true,
                                 isScrollControlled: true,
                                 useSafeArea: true,
-                                backgroundColor: isLight ? Colors.white : const Color(0xff111111),
+                                backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
                                 shape: const RoundedRectangleBorder(
                                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                                 ),
@@ -3162,7 +3162,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                               child: TextButton(
                                 onPressed: event.ticketsUrl.isEmpty ? null : () => _openUrl(event.ticketsUrl),
                                 style: TextButton.styleFrom(
-                                  backgroundColor: isLight ? const Color(0xffeef1f5) : const Color(0xff1d1d1d),
+                                  backgroundColor: isLight ? const Color(0xffeef1f5) : const Color(0xff141414),
                                   foregroundColor: isLight ? Colors.black : Colors.white,
                                   padding: const EdgeInsets.symmetric(vertical: 14),
                                   shape: RoundedRectangleBorder(
@@ -3464,7 +3464,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                               ),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                               filled: true,
-                              fillColor: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                              fillColor: isLight ? const Color(0xfff0f2f5) : const Color(0xff141414),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(24),
                                 borderSide: BorderSide.none,
@@ -3653,7 +3653,7 @@ class _EventMapViewState extends State<_EventMapView> {
     if (!mounted) return;
     final ctrl = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(widget.isLight ? const Color(0xfff0f2f5) : const Color(0xff1a1a1b))
+      ..setBackgroundColor(widget.isLight ? const Color(0xfff0f2f5) : const Color(0xff141414))
       ..setNavigationDelegate(NavigationDelegate(
         onWebResourceError: (e) => debugPrint('[eventmap] ${e.description}'),
       ))
@@ -3668,7 +3668,7 @@ class _EventMapViewState extends State<_EventMapView> {
   Widget build(BuildContext context) {
     if (kIsWeb || _ctrl == null) {
       return ColoredBox(
-        color: widget.isLight ? const Color(0xfff0f2f5) : const Color(0xff1a1a1b),
+        color: widget.isLight ? const Color(0xfff0f2f5) : const Color(0xff141414),
         child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
@@ -3783,7 +3783,7 @@ class _MapButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+          color: isLight ? const Color(0xfff0f2f5) : const Color(0xff141414),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a),

@@ -84,7 +84,7 @@ class LegacyNavBar extends StatelessWidget {
               ? const Color(0xff6d6d6d)
               : const Color(0xff8c8c8c),
           elevation: 0,
-          backgroundColor: isLight ? Colors.white : const Color(0xff151515),
+          backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
           iconSize: 26,
           selectedFontSize: 0,
           unselectedFontSize: 0,

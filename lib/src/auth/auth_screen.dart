@@ -149,7 +149,7 @@ Widget build(BuildContext context) {
 final l10n = AppLocalizations.of(context);
 final isLight = widget.themeMode == ThemeMode.light;
 return Scaffold(
-backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
 body: SafeArea(
 child: Center(
 child: SingleChildScrollView(
@@ -283,7 +283,7 @@ return InputDecoration(
 labelText: label,
 labelStyle: const TextStyle(color: Color(0xffb7b7b7)),
 filled: true,
-fillColor: isLight ? Colors.white : const Color(0xff1e1e1e),
+fillColor: isLight ? Colors.white : const Color(0xff141414),
 border: OutlineInputBorder(
   borderRadius: BorderRadius.circular(16),
   borderSide: BorderSide(color: isLight ? const Color(0xffd0d5dd) : const Color(0xff2a2a2a)),

@@ -339,8 +339,8 @@ class _ShareSheetState extends State<_ShareSheet> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff111111);
-    final surface = isLight ? const Color(0xfff3f4f6) : const Color(0xff1c1c1e);
+    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
+    final surface = isLight ? const Color(0xfff3f4f6) : const Color(0xff141414);
     final textColor = isLight ? Colors.black : Colors.white;
     final muted = isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af);
     final divider = isLight ? const Color(0xffe5e7eb) : const Color(0xff222222);
@@ -549,7 +549,7 @@ class _PostPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final textColor = isLight ? Colors.black : Colors.white;
     final muted = isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af);
-    final bg = isLight ? const Color(0xfff9fafb) : const Color(0xff1c1c1e);
+    final bg = isLight ? const Color(0xfff9fafb) : const Color(0xff141414);
     final border = isLight ? const Color(0xffe5e7eb) : const Color(0xff2a2a2a);
     // Prefer the media array URL (real network URL); fall back to imageUrl.
     final mediaUrl = post.media.isNotEmpty ? post.media.first.url : '';

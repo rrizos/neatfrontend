@@ -77,7 +77,7 @@ class _LandingPageState extends State<LandingPage> {
   @override
   Widget build(BuildContext context) {
     final isLight = widget.themeMode == ThemeMode.light;
-    final bg = isLight ? Colors.white : const Color(0xff121212);
+    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
     final fg = isLight ? Colors.black : Colors.white;
 
     return Scaffold(
@@ -127,7 +127,7 @@ class _LandingPageState extends State<LandingPage> {
                 style: FilledButton.styleFrom(
                   backgroundColor: isLight
                       ? const Color(0xffe0e0e0)
-                      : const Color(0xff1e1e1e),
+                      : const Color(0xff141414),
                   foregroundColor: fg,
                   minimumSize: const Size.fromHeight(52),
                   shape: RoundedRectangleBorder(

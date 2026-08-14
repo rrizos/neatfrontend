@@ -187,7 +187,7 @@ Future<void> _showReportSheet(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,
-    backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+    backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
     showDragHandle: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),

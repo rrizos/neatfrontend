@@ -467,7 +467,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     showModalBottomSheet(
       context: context,
       useRootNavigator: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       showDragHandle: true,
       builder: (_) => SafeArea(
         child: Column(
@@ -625,7 +625,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     showModalBottomSheet(
       context: context,
       useRootNavigator: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       showDragHandle: true,
       builder: (_) => SafeArea(
         child: Column(
@@ -893,7 +893,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return AbsorbPointer(
       absorbing: _autoNavigating,
       child: Scaffold(
-      backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       bottomNavigationBar: widget.onNavTap == null
           ? null
           : LegacyNavBar(
@@ -903,7 +903,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               avatarUrl: widget.currentUser.avatarUrl,
             ),
       appBar: AppBar(
-        backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+        backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
         centerTitle: false,
         titleSpacing: 12,
         title: Text(
@@ -1150,7 +1150,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   Tab(icon: Icon(Icons.bookmark_border_rounded, size: 22)),
                 ],
               ),
-              isLight ? Colors.white : const Color(0xff121212),
+              isLight ? Colors.white : const Color(0xff0a0a0a),
             ),
           ),
         ],
@@ -1512,7 +1512,7 @@ class _MutualsRow extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: isLight ? Colors.white : const Color(0xff121212),
+                        color: isLight ? Colors.white : const Color(0xff0a0a0a),
                         width: 1.5,
                       ),
                     ),
@@ -1586,7 +1586,7 @@ class _EditorField extends StatelessWidget {
         filled: true,
         fillColor: Theme.of(context).brightness == Brightness.light
             ? Colors.white
-            : const Color(0xff171717),
+            : const Color(0xff0a0a0a),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
           borderSide: BorderSide(
@@ -1762,7 +1762,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     final avatarBytes = _dataUrlBytes(_avatarUrl);
     return Container(
       decoration: BoxDecoration(
-        color: isLight ? Colors.white : const Color(0xff111111),
+        color: isLight ? Colors.white : const Color(0xff0a0a0a),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: SafeArea(
@@ -1937,9 +1937,9 @@ class _SavedPostsPageState extends State<_SavedPostsPage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     return Scaffold(
       backgroundColor:
-          isLight ? Colors.white : const Color(0xff121212),
+          isLight ? Colors.white : const Color(0xff0a0a0a),
       appBar: AppBar(
-        backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+        backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
         iconTheme: IconThemeData(color: isLight ? Colors.black : Colors.white),
         title: Text(
           AppLocalizations.of(context).savedTitle,
@@ -1974,7 +1974,7 @@ class _SavedPostsPageState extends State<_SavedPostsPage> {
                 ),
                 filled: true,
                 fillColor:
-                    isLight ? Colors.white : const Color(0xff1a1a1b),
+                    isLight ? Colors.white : const Color(0xff141414),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide(
@@ -2254,7 +2254,7 @@ class _UserListPageState extends State<_UserListPage>
   void _showSortSheet(BuildContext context, bool isLight) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: isLight ? Colors.white : const Color(0xff1e1e1e),
+      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -2311,7 +2311,7 @@ class _UserListPageState extends State<_UserListPage>
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff121212);
+    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(

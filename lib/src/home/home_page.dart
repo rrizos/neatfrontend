@@ -1088,7 +1088,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       context: context,
       useRootNavigator: true,
       showDragHandle: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       isScrollControlled: true,
       builder: (sheetCtx) => SizedBox(
         height: MediaQuery.of(sheetCtx).size.height * 0.85,
@@ -1131,8 +1131,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       );
       if (!mounted) return;
       _hideNativeBar();
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ConversationPage(
+      await Navigator.of(context).push(PageRouteBuilder<void>(
+        opaque: false,
+        pageBuilder: (ctx, anim, secAnim) => ConversationPage(
           token: widget.session.token,
           currentUsername: widget.session.user.username,
           currentAvatarUrl: widget.session.user.avatarUrl,
@@ -1148,6 +1149,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           onOpenUserProfile: _pushProfileRoute,
           realtime: _realtime,
         ),
+        transitionsBuilder: (ctx, animation, secAnim, child) => SlideTransition(
+          position: Tween(begin: const Offset(1, 0), end: Offset.zero)
+              .animate(CurvedAnimation(parent: animation, curve: Curves.easeInOut)),
+          child: child,
+        ),
       ));
       _showNativeBar();
       _loadUnreadMessages();
@@ -1162,7 +1168,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       useRootNavigator: true,
       isScrollControlled: true,
       showDragHandle: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       builder: (_) => _CommentSheet(
         post: post,
         session: widget.session,
@@ -1201,7 +1207,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             Widget preview;
             if (item.isVideo) {
               preview = Container(
-                color: const Color(0xff1a1a1a),
+                color: const Color(0xff141414),
                 child: const Center(
                   child: Icon(Icons.videocam_rounded,
                       color: Colors.white54, size: 36),
@@ -1218,7 +1224,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 fadeInDuration: Duration.zero,
               );
             } else {
-              preview = const ColoredBox(color: Color(0xff1a1a1a));
+              preview = const ColoredBox(color: Color(0xff141414));
             }
             return SizedBox(
               width: size,
@@ -1264,7 +1270,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               Widget preview;
               if (item.isVideo) {
                 preview = Container(
-                  color: const Color(0xff1a1a1a),
+                  color: const Color(0xff141414),
                   child: const Center(
                     child: Icon(Icons.videocam_rounded,
                         color: Colors.white54, size: 48),
@@ -1281,7 +1287,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   fadeInDuration: Duration.zero,
                 );
               } else {
-                preview = const ColoredBox(color: Color(0xff1a1a1a));
+                preview = const ColoredBox(color: Color(0xff141414));
               }
               return ClipRRect(
                 borderRadius: BorderRadius.circular(18),
@@ -1355,7 +1361,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 canPop: !_posting,
                 child: Scaffold(
                 backgroundColor:
-                    isLight ? Colors.white : const Color(0xff111111),
+                    isLight ? Colors.white : const Color(0xff0a0a0a),
                 body: SafeArea(
                   bottom: false,
                   child: Column(
@@ -1690,7 +1696,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                         ? const Color(
                                                             0xffeef1f5)
                                                         : const Color(
-                                                            0xff1a1a1a),
+                                                            0xff141414),
                                                     borderRadius:
                                                         BorderRadius
                                                             .circular(999),
@@ -1760,7 +1766,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       context: context,
       useRootNavigator: true,
       showDragHandle: true,
-      backgroundColor: Theme.of(context).brightness == Brightness.light ? Colors.white : const Color(0xff141414),
+      backgroundColor: Theme.of(context).brightness == Brightness.light ? Colors.white : const Color(0xff0a0a0a),
       isScrollControlled: true,
       builder: (_) {
         return SafeArea(
@@ -2004,7 +2010,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           useRootNavigator: true,
           isScrollControlled: true,
           showDragHandle: true,
-          backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+          backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
           builder: (_) => _CommentSheet(
             post: post,
             session: widget.session,
@@ -2043,7 +2049,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final returningCity = _returningToCity;
 
     return Scaffold(
-      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff121212),
+      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff0a0a0a),
       extendBody: _isIOS26,
       body: Stack(
         children: [
@@ -2064,8 +2070,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               onMessagesTap: () async {
                 _hideNativeBar();
                 await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => MessagesPage(
+                  PageRouteBuilder<void>(
+                    opaque: false,
+                    pageBuilder: (ctx, anim, secAnim) => MessagesPage(
                       token: widget.session.token,
                       currentUsername: widget.session.user.username,
                       currentAvatarUrl: widget.session.user.avatarUrl,
@@ -2076,6 +2083,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       },
                       onOpenUserProfile: _pushProfileRoute,
                       realtime: _realtime,
+                    ),
+                    transitionsBuilder: (ctx, animation, secAnim, child) => SlideTransition(
+                      position: Tween(begin: const Offset(1, 0), end: Offset.zero)
+                          .animate(CurvedAnimation(parent: animation, curve: Curves.easeInOut)),
+                      child: child,
                     ),
                   ),
                 );
@@ -2285,7 +2297,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           unselectedItemColor:
               isLight ? const Color(0xff6d6d6d) : const Color(0xff8c8c8c),
           elevation: 0,
-          backgroundColor: isLight ? Colors.white : const Color(0xff151515),
+          backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
           iconSize: 26,
           selectedFontSize: 0,
           unselectedFontSize: 0,
@@ -2469,7 +2481,7 @@ class _TopBar extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                    color: isLight ? const Color(0xfff0f2f5) : const Color(0xff141414),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: isLight ? const Color(0xffe0e3e8) : const Color(0xff2a2a2a),
@@ -2642,7 +2654,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
     final isLight = Theme.of(context).brightness == Brightness.light;
     final activeClr   = isLight ? Colors.black   : Colors.white;
     final inactiveClr = isLight ? const Color(0xff888888) : Colors.white38;
-    final bg = isLight ? const Color(0xfff3f4f6) : const Color(0xff121212);
+    final bg = isLight ? const Color(0xfff3f4f6) : const Color(0xff0a0a0a);
 
     // Spectating: single centered city tab, no indicator
     if (!widget.showFollowing) {
@@ -3018,7 +3030,7 @@ class _ViralViewState extends State<_ViralView> {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff121212);
+    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
     final dividerColor = isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a);
     final muted = isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280);
     return Column(
@@ -3074,7 +3086,7 @@ class _ViralViewState extends State<_ViralView> {
                                 _loadViral();
                               },
                               offset: const Offset(0, 32),
-                              color: isLight ? Colors.white : const Color(0xff1e1e1e),
+                              color: isLight ? Colors.white : const Color(0xff141414),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               itemBuilder: (_) => [
                                 _scopeMenuItem(_homeCity, _ViralScope.myCity, isLight),
@@ -3087,7 +3099,7 @@ class _ViralViewState extends State<_ViralView> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
-                                  color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                                  color: isLight ? const Color(0xfff0f2f5) : const Color(0xff141414),
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(color: isLight ? const Color(0xffe0e3e8) : const Color(0xff3a3a3a)),
                                 ),
@@ -3114,7 +3126,7 @@ class _ViralViewState extends State<_ViralView> {
                                 _loadViral(autoWiden: false);
                               },
                               offset: const Offset(0, 32),
-                              color: isLight ? Colors.white : const Color(0xff1e1e1e),
+                              color: isLight ? Colors.white : const Color(0xff141414),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               itemBuilder: (_) => [
                                 _periodMenuItem('Ημερήσιο', _ViralPeriod.daily, isLight),
@@ -3124,7 +3136,7 @@ class _ViralViewState extends State<_ViralView> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
-                                  color: isLight ? const Color(0xfff0f2f5) : const Color(0xff1e1e1e),
+                                  color: isLight ? const Color(0xfff0f2f5) : const Color(0xff141414),
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(color: isLight ? const Color(0xffe0e3e8) : const Color(0xff3a3a3a)),
                                 ),
@@ -3158,7 +3170,7 @@ class _ViralViewState extends State<_ViralView> {
     return Container(
       height: 40,
       decoration: BoxDecoration(
-        color: isLight ? const Color(0xfff4f6f8) : const Color(0xff1a1a1a),
+        color: isLight ? const Color(0xfff4f6f8) : const Color(0xff141414),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a)),
       ),
@@ -3265,7 +3277,7 @@ class _ViralViewState extends State<_ViralView> {
                 )
               else
                 widget.buildPostCard(post, interactive: _scope == _ViralScope.myCity),
-              Divider(height: 1, color: isLight ? const Color(0xffe8eaed) : const Color(0xff1f1f1f)),
+              Divider(height: 1, color: isLight ? const Color(0xffe8eaed) : const Color(0xff141414)),
             ],
           );
         },
@@ -3653,7 +3665,7 @@ class _ViralViewState extends State<_ViralView> {
         // ── Tab bar ──────────────────────────────────────────────────────
         Container(
           decoration: BoxDecoration(
-            color: isLight ? Colors.white : const Color(0xff121212),
+            color: isLight ? Colors.white : const Color(0xff0a0a0a),
             border: Border(bottom: BorderSide(color: divider)),
           ),
           child: Row(
@@ -3927,7 +3939,7 @@ class _ViralViewState extends State<_ViralView> {
         width: 136,
         padding: const EdgeInsets.fromLTRB(12, 16, 12, 11),
         decoration: BoxDecoration(
-          color: isLight ? Colors.white : const Color(0xff131313),
+          color: isLight ? Colors.white : const Color(0xff0a0a0a),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isLight ? const Color(0xffe8eaed) : const Color(0xff242424),
@@ -4020,7 +4032,7 @@ class _ComposeAction extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: Material(
-        color: isLight ? Colors.white : const Color(0xff171717),
+        color: isLight ? Colors.white : const Color(0xff0a0a0a),
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           onTap: onTap,
@@ -4415,7 +4427,7 @@ class _NotifTile extends StatelessWidget {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final unreadBg =
         isLight ? const Color(0xffeff8ff) : const Color(0xff1a2535);
-    final bg = isLight ? Colors.white : const Color(0xff141414);
+    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
     final textColor = isLight ? Colors.black : Colors.white;
     const subColor = Color(0xff8e8e8e);
     final isFollowVerb = item.verb.contains("follow");
@@ -4963,7 +4975,7 @@ class _CommentSheetState extends State<_CommentSheet> {
       context: context,
       useRootNavigator: true,
       showDragHandle: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff141414),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       builder: (sheetCtx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -5548,7 +5560,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                               filled: true,
                               fillColor: isLight
                                   ? const Color(0xfff0f2f5)
-                                  : const Color(0xff1e1e1e),
+                                  : const Color(0xff141414),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(24),
                                 borderSide: BorderSide.none,
@@ -5678,7 +5690,7 @@ class _OfflineBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: isLight ? const Color(0xfff0f0f0) : const Color(0xff1e1e1e),
+      color: isLight ? const Color(0xfff0f0f0) : const Color(0xff141414),
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,

@@ -62,7 +62,7 @@ class _AppIntroPageState extends State<AppIntroPage> {
     final fg = onboardingFg(isLight);
 
     return Scaffold(
-      backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       body: SafeArea(
         child: Column(
           children: [

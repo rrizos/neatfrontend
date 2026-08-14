@@ -175,7 +175,7 @@ class _FeedMedia extends StatelessWidget {
         return Container(
           width: double.infinity,
           height: double.infinity,
-          color: isLight ? const Color(0xfff0f0f0) : const Color(0xff1e1e1e),
+          color: isLight ? const Color(0xfff0f0f0) : const Color(0xff141414),
           child: const Center(child: CircularProgressIndicator()),
         );
       },
@@ -184,7 +184,7 @@ class _FeedMedia extends StatelessWidget {
         return Container(
           width: double.infinity,
           height: double.infinity,
-          color: isLight ? const Color(0xfff0f0f0) : const Color(0xff1e1e1e),
+          color: isLight ? const Color(0xfff0f0f0) : const Color(0xff141414),
         );
       },
     );
@@ -944,7 +944,7 @@ class _LikersSheetState extends State<_LikersSheet> {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff111111);
+    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
     final textColor = isLight ? Colors.black : Colors.white;
     final users = _users;
 
@@ -1331,7 +1331,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       child: Container(
         decoration: BoxDecoration(
-          color: isLight ? Colors.white : const Color(0xff131313),
+          color: isLight ? Colors.white : const Color(0xff0a0a0a),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
         ),

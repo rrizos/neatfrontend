@@ -17,7 +17,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:record/record.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
@@ -306,7 +305,8 @@ class MessagesPage extends StatefulWidget {
   State<MessagesPage> createState() => _MessagesPageState();
 }
 
-class _MessagesPageState extends State<MessagesPage> {
+class _MessagesPageState extends State<MessagesPage>
+    with SingleTickerProviderStateMixin {
   List<ConversationSummary> _convs = [];
   bool _loading = true;
   bool _isOffline = false;
@@ -316,10 +316,16 @@ class _MessagesPageState extends State<MessagesPage> {
   Timer? _inboxPollTimer;
   Timer? _inboxRefreshDebounce;
   StreamSubscription<RealtimeEvent>? _realtimeSub;
+  // Full-screen swipe-back gesture state
+  double _swipeDx = 0;
+  late Animation<double> _swipeAnimInbox;
+  late final AnimationController _swipeCtrlInbox;
 
   @override
   void initState() {
     super.initState();
+    _swipeCtrlInbox = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+    _swipeAnimInbox = AlwaysStoppedAnimation(0);
     _loadInboxCache();
     _load();
     if (kIsWeb) {
@@ -339,6 +345,7 @@ class _MessagesPageState extends State<MessagesPage> {
 
   @override
   void dispose() {
+    _swipeCtrlInbox.dispose();
     _presenceTimer?.cancel();
     _inboxPollTimer?.cancel();
     _inboxRefreshDebounce?.cancel();
@@ -346,6 +353,28 @@ class _MessagesPageState extends State<MessagesPage> {
     _search.dispose();
     _openSwipeId.dispose();
     super.dispose();
+  }
+
+  void _snapBackInbox() {
+    _swipeAnimInbox = Tween<double>(begin: _swipeDx, end: 0)
+        .animate(CurvedAnimation(parent: _swipeCtrlInbox, curve: Curves.easeOut));
+    _swipeCtrlInbox.duration = const Duration(milliseconds: 220);
+    _swipeCtrlInbox.reset();
+    _swipeCtrlInbox.forward().whenComplete(() {
+      if (mounted) setState(() => _swipeDx = 0);
+    });
+  }
+
+  void _flyOutInbox() {
+    final sw = MediaQuery.sizeOf(context).width;
+    final ms = ((sw - _swipeDx) * 220 / sw).clamp(60.0, 220.0).toInt();
+    _swipeAnimInbox = Tween<double>(begin: _swipeDx, end: sw)
+        .animate(CurvedAnimation(parent: _swipeCtrlInbox, curve: Curves.easeIn));
+    _swipeCtrlInbox.duration = Duration(milliseconds: ms);
+    _swipeCtrlInbox.reset();
+    _swipeCtrlInbox.forward().whenComplete(() {
+      if (mounted) Navigator.of(context).pop();
+    });
   }
 
   Future<void> _pingPresence() async {
@@ -405,8 +434,9 @@ class _MessagesPageState extends State<MessagesPage> {
   }
 
   Future<void> _open(ConversationSummary s) async {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ConversationPage(
+    await Navigator.of(context).push(PageRouteBuilder<void>(
+      opaque: false, // allows previous route to show through during swipe-back
+      pageBuilder: (ctx, anim, secAnim) => ConversationPage(
         token: widget.token,
         currentUsername: widget.currentUsername,
         currentAvatarUrl: widget.currentAvatarUrl,
@@ -419,6 +449,11 @@ class _MessagesPageState extends State<MessagesPage> {
         onOpenPost: widget.onOpenPost,
         onOpenUserProfile: widget.onOpenUserProfile,
         realtime: widget.realtime,
+      ),
+      transitionsBuilder: (ctx, animation, secAnim, child) => SlideTransition(
+        position: Tween(begin: const Offset(1, 0), end: Offset.zero)
+            .animate(CurvedAnimation(parent: animation, curve: Curves.easeInOut)),
+        child: child,
       ),
     ));
     if (mounted) _load();
@@ -494,7 +529,30 @@ class _MessagesPageState extends State<MessagesPage> {
             c.otherUser.toLowerCase().contains(q) ||
             c.otherFullName.toLowerCase().contains(q)).toList();
 
-    return Scaffold(
+    return AnimatedBuilder(
+      animation: _swipeCtrlInbox,
+      builder: (context, child) => Transform.translate(
+        offset: Offset(_swipeCtrlInbox.isAnimating ? _swipeAnimInbox.value : _swipeDx, 0),
+        child: child!,
+      ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragUpdate: (d) {
+          if (_swipeCtrlInbox.isAnimating) _swipeCtrlInbox.stop();
+          if (d.delta.dx > 0 || _swipeDx > 0) {
+            setState(() => _swipeDx = (_swipeDx + d.delta.dx).clamp(0, double.infinity));
+          }
+        },
+        onHorizontalDragEnd: (d) {
+          final sw = MediaQuery.sizeOf(context).width;
+          if (_swipeDx > sw * 0.35 || (d.primaryVelocity ?? 0) > 400) {
+            _flyOutInbox();
+          } else {
+            _snapBackInbox();
+          }
+        },
+        onHorizontalDragCancel: _snapBackInbox,
+        child: Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor: bg,
@@ -620,7 +678,9 @@ class _MessagesPageState extends State<MessagesPage> {
           ],
         ),
       ),
-    );
+        ), // Scaffold
+      ), // GestureDetector
+    ); // AnimatedBuilder
   }
 }
 
@@ -802,12 +862,6 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
 
   bool _open = false;
 
-  // Accumulate delta (screen coords) to classify gesture without localPosition drift
-  double _accumDx = 0;
-  double _accumDy = 0;
-  bool _hTracking = false;
-  bool _vTracking = false;
-
   @override
   void initState() {
     super.initState();
@@ -855,36 +909,15 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
   @override
   Widget build(BuildContext context) {
     final bg = widget.isLight ? _kBgLgt : _kBgDark;
-    return Listener(
+    return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onPointerDown: (e) {
-        _accumDx = 0;
-        _accumDy = 0;
-        _hTracking = false;
-        _vTracking = false;
-        _ctrl.stop();
+      onHorizontalDragStart: (_) => _ctrl.stop(),
+      onHorizontalDragUpdate: (d) {
+        if (d.delta.dx > 0 && _ctrl.value == 0) return;
+        _ctrl.value = (_ctrl.value - d.delta.dx / _actionWidth).clamp(0.0, 1.0);
       },
-      onPointerMove: (e) {
-        if (_vTracking) return;
-        _accumDx += e.delta.dx;
-        _accumDy += e.delta.dy.abs();
-        if (!_hTracking) {
-          if (_accumDx.abs() < 5 && _accumDy < 5) return;
-          if (_accumDy >= _accumDx.abs() || _accumDx > 0) { _vTracking = true; return; }
-          _hTracking = true;
-        }
-        _ctrl.value = (_ctrl.value - e.delta.dx / _actionWidth).clamp(0.0, 1.0);
-      },
-      onPointerUp: (_) {
-        if (_hTracking) _settle();
-        _hTracking = false;
-        _vTracking = false;
-      },
-      onPointerCancel: (_) {
-        if (_hTracking) _ctrl.animateTo(0.0, curve: Curves.easeOut);
-        _hTracking = false;
-        _vTracking = false;
-      },
+      onHorizontalDragEnd: (_) => _settle(),
+      onHorizontalDragCancel: () => _ctrl.animateTo(0.0, curve: Curves.easeOut),
       child: Stack(
         clipBehavior: Clip.hardEdge,
         children: [
@@ -1355,7 +1388,7 @@ class ConversationPage extends StatefulWidget {
 }
 
 class _ConversationPageState extends State<ConversationPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _composer = TextEditingController();
   final _scroll   = ScrollController();
   /// Whether the server said there are messages before the ones we hold.
@@ -1396,6 +1429,10 @@ class _ConversationPageState extends State<ConversationPage>
   bool _hTracking = false;
   bool _vTracking = false;
   late final AnimationController _slideCtrl;
+  // Full-screen swipe-back gesture state
+  double _swipeDx = 0;
+  late Animation<double> _swipeAnim;
+  late final AnimationController _swipeCtrl;
 
   Future<void> _react(int msgId, String emoji) async {
     final index = _messages.indexWhere((m) => m.id == msgId);
@@ -1726,6 +1763,8 @@ class _ConversationPageState extends State<ConversationPage>
     super.initState();
     _slideCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 200));
     _slideCtrl.addListener(_onSlideAnim);
+    _swipeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+    _swipeAnim = AlwaysStoppedAnimation(0);
     _otherLastActive = widget.otherLastActive;
     _loadCache();
     _load(initial: true);
@@ -1751,6 +1790,7 @@ class _ConversationPageState extends State<ConversationPage>
 
   @override
   void dispose() {
+    _swipeCtrl.dispose();
     _slideCtrl.dispose();
     _presenceTimer?.cancel();
     _typingPollTimer?.cancel();
@@ -1762,6 +1802,28 @@ class _ConversationPageState extends State<ConversationPage>
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _snapBack() {
+    _swipeAnim = Tween<double>(begin: _swipeDx, end: 0)
+        .animate(CurvedAnimation(parent: _swipeCtrl, curve: Curves.easeOut));
+    _swipeCtrl.duration = const Duration(milliseconds: 220);
+    _swipeCtrl.reset();
+    _swipeCtrl.forward().whenComplete(() {
+      if (mounted) setState(() => _swipeDx = 0);
+    });
+  }
+
+  void _flyOut() {
+    final sw = MediaQuery.sizeOf(context).width;
+    final ms = ((sw - _swipeDx) * 220 / sw).clamp(60.0, 220.0).toInt();
+    _swipeAnim = Tween<double>(begin: _swipeDx, end: sw)
+        .animate(CurvedAnimation(parent: _swipeCtrl, curve: Curves.easeIn));
+    _swipeCtrl.duration = Duration(milliseconds: ms);
+    _swipeCtrl.reset();
+    _swipeCtrl.forward().whenComplete(() {
+      if (mounted) Navigator.of(context).pop();
+    });
   }
 
   void _handleRealtimeEvent(RealtimeEvent e) {
@@ -2441,7 +2503,30 @@ class _ConversationPageState extends State<ConversationPage>
     final bg      = isLight ? _kBgLgt : _kBgDark;
     final name    = widget.otherFullName.isNotEmpty ? widget.otherFullName : widget.otherUsername;
 
-    return Scaffold(
+    return AnimatedBuilder(
+      animation: _swipeCtrl,
+      builder: (context, child) => Transform.translate(
+        offset: Offset(_swipeCtrl.isAnimating ? _swipeAnim.value : _swipeDx, 0),
+        child: child!,
+      ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragUpdate: (d) {
+          if (_swipeCtrl.isAnimating) _swipeCtrl.stop();
+          if (d.delta.dx > 0 || _swipeDx > 0) {
+            setState(() => _swipeDx = (_swipeDx + d.delta.dx).clamp(0, double.infinity));
+          }
+        },
+        onHorizontalDragEnd: (d) {
+          final sw = MediaQuery.sizeOf(context).width;
+          if (_swipeDx > sw * 0.35 || (d.primaryVelocity ?? 0) > 400) {
+            _flyOut();
+          } else {
+            _snapBack();
+          }
+        },
+        onHorizontalDragCancel: _snapBack,
+        child: Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor: bg,
@@ -2696,7 +2781,9 @@ class _ConversationPageState extends State<ConversationPage>
             ),
         ],
       ),
-    );
+        ), // Scaffold
+      ), // GestureDetector
+    ); // AnimatedBuilder
   }
 }
 
@@ -2819,7 +2906,7 @@ class _MessageRow extends StatelessWidget {
     final groups = message.reactions.entries.where((e) => e.value.isNotEmpty).toList();
     if (groups.isEmpty) return const SizedBox.shrink();
     final bgColor     = isLight ? Colors.white : const Color(0xff2a2a2a);
-    final borderColor = isLight ? const Color(0xffe0e0e0) : const Color(0xff1a1a1a);
+    final borderColor = isLight ? const Color(0xffe0e0e0) : const Color(0xff141414);
     // Only show avatars when everyone used the same emoji — mixed reactions
     // just show the emoji set without avatars to keep the badge uncluttered.
     final singleEmoji = groups.length == 1;
@@ -4180,8 +4267,8 @@ class _SharedPollGraphic extends StatelessWidget {
   Widget build(BuildContext context) {
     final shown   = options.take(4).toList();
     final total   = shown.fold<int>(0, (s, o) => s + ((o['votes'] as num?)?.toInt() ?? 0));
-    final bg      = isLight ? const Color(0xfff5f5f5) : const Color(0xff1e1e1e);
-    final textClr = isLight ? const Color(0xff111111) : Colors.white;
+    final bg      = isLight ? const Color(0xfff5f5f5) : const Color(0xff141414);
+    final textClr = isLight ? const Color(0xff0a0a0a) : Colors.white;
     final subClr  = isLight ? const Color(0xff888888) : const Color(0xff7a7a7a);
     final divClr  = isLight ? const Color(0xffe2e2e2) : const Color(0xff2c2c2c);
 
@@ -4365,8 +4452,8 @@ class _SharedTextGraphic extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg      = isLight ? const Color(0xfff5f5f5) : const Color(0xff1e1e1e);
-    final textClr = isLight ? const Color(0xff111111) : Colors.white;
+    final bg      = isLight ? const Color(0xfff5f5f5) : const Color(0xff141414);
+    final textClr = isLight ? const Color(0xff0a0a0a) : Colors.white;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(15, 12, 13, 12),
@@ -4619,7 +4706,7 @@ class _ReplyPreviewBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg      = isLight ? const Color(0xfff2f2f2) : const Color(0xff1a1a1a);
+    final bg      = isLight ? const Color(0xfff2f2f2) : const Color(0xff141414);
     final subClr  = isLight ? _kSubLgt : _kSubDark;
     final divClr  = isLight ? const Color(0xffe0e0e0) : const Color(0xff2a2a2a);
 
@@ -4684,7 +4771,7 @@ class _EditPreviewBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg     = isLight ? const Color(0xfff2f2f2) : const Color(0xff1a1a1a);
+    final bg     = isLight ? const Color(0xfff2f2f2) : const Color(0xff141414);
     final subClr = isLight ? _kSubLgt : _kSubDark;
     final divClr = isLight ? const Color(0xffe0e0e0) : const Color(0xff2a2a2a);
     final text   = editingMessage.text;
@@ -4966,7 +5053,7 @@ class _ConvOfflineBanner extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-      color: isLight ? const Color(0xfff0f0f0) : const Color(0xff1a1a1a),
+      color: isLight ? const Color(0xfff0f0f0) : const Color(0xff141414),
       child: Row(
         children: [
           Icon(Icons.wifi_off_rounded, size: 13, color: subClr),
@@ -5053,15 +5140,6 @@ class _PhotoPreviewPageState extends State<_PhotoPreviewPage> {
     });
   }
 
-  Future<void> _save() async {
-    try {
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/neat_photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      await File(path).writeAsBytes(widget.bytes);
-      await Share.shareXFiles([XFile(path)]);
-    } catch (_) {}
-  }
-
   @override
   Widget build(BuildContext context) {
     final pad = MediaQuery.paddingOf(context);
@@ -5107,8 +5185,6 @@ class _PhotoPreviewPageState extends State<_PhotoPreviewPage> {
             bottom: pad.bottom + 20,
             child: Row(
               children: [
-                _PhotoIconButton(icon: Icons.file_download_outlined, onTap: _save),
-                const SizedBox(width: 12),
                 Expanded(
                   child: Align(
                     alignment: Alignment.centerLeft,

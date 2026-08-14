@@ -485,7 +485,7 @@ class _CommentsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const bg = Color(0xff111111);
+    const bg = Color(0xff0a0a0a);
     const divider = Color(0xff222222);
 
     return DraggableScrollableSheet(
@@ -623,7 +623,7 @@ class _AppBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: Color(0xff1a1a1a),
+        color: Color(0xff141414),
         border: Border(top: BorderSide(color: Color(0xff2a2a2a))),
       ),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),

@@ -31,9 +31,9 @@ Color _severityColor(String s) {
   }
 }
 
-Color _ink(bool l) => l ? const Color(0xff111111) : Colors.white;
+Color _ink(bool l) => l ? const Color(0xff0a0a0a) : Colors.white;
 Color _muted(bool l) => l ? const Color(0xff6b7280) : const Color(0xff9aa0a6);
-Color _surface(bool l) => l ? const Color(0xfff5f6f8) : const Color(0xff1a1a1a);
+Color _surface(bool l) => l ? const Color(0xfff5f6f8) : const Color(0xff141414);
 Color _hairline(bool l) => l ? const Color(0xffe6e8ec) : const Color(0xff2a2a2a);
 
 const _kSeverityFilters = ['alerts', 'all', 'critical', 'high', 'medium', 'low', 'info'];

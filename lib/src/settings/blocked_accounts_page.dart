@@ -66,7 +66,7 @@ class _BlockedAccountsPageState extends State<BlockedAccountsPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff121212);
+    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(

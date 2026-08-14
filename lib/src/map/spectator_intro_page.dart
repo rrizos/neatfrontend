@@ -62,7 +62,7 @@ class _SpectatorIntroPageState extends State<SpectatorIntroPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final isLight = widget.themeMode == ThemeMode.light;
-    final background = isLight ? Colors.white : const Color(0xff121212);
+    final background = isLight ? Colors.white : const Color(0xff0a0a0a);
 
     return Scaffold(
       backgroundColor: background,
@@ -151,7 +151,7 @@ class _CitiesHero extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           ColoredBox(
-            color: isLight ? const Color(0xfff2f3f5) : const Color(0xff1a1c22),
+            color: isLight ? const Color(0xfff2f3f5) : const Color(0xff141414),
           ),
           // Android has no snapshotter, so it draws the live map instead —
           // held still and deaf to touches. See AndroidCityMapHero.

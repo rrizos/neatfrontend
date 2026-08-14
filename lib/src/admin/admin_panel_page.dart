@@ -21,7 +21,7 @@ class AdminPanelPage extends StatelessWidget {
       child: Scaffold(
         backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
         appBar: AppBar(
-          backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+          backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
           title: Text(
             AppLocalizations.of(context).adminPanel,
             style: TextStyle(
@@ -202,7 +202,7 @@ class _ReportCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final cardColor = isLight ? Colors.white : const Color(0xff1a1a1a);
+    final cardColor = isLight ? Colors.white : const Color(0xff141414);
     final textColor = isLight ? Colors.black : Colors.white;
     final subColor = isLight ? const Color(0xff737373) : const Color(0xffa8a8a8);
     final divColor = isLight ? const Color(0xffe8e8e8) : const Color(0xff2a2a2a);
@@ -549,7 +549,7 @@ class _UsersTabState extends State<_UsersTab> with AutomaticKeepAliveClientMixin
               hintStyle: TextStyle(color: subColor),
               prefixIcon: Icon(Icons.search, color: subColor),
               filled: true,
-              fillColor: isLight ? Colors.white : const Color(0xff1a1a1a),
+              fillColor: isLight ? Colors.white : const Color(0xff141414),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
@@ -598,7 +598,7 @@ class _UserCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final cardColor = isLight ? Colors.white : const Color(0xff1a1a1a);
+    final cardColor = isLight ? Colors.white : const Color(0xff141414);
     final textColor = isLight ? Colors.black : Colors.white;
     final subColor = isLight ? const Color(0xff737373) : const Color(0xffa8a8a8);
 

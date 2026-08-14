@@ -78,7 +78,7 @@ class _CitySetupPageState extends State<CitySetupPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final isLight = widget.themeMode == ThemeMode.light;
-    final background = isLight ? Colors.white : const Color(0xff121212);
+    final background = isLight ? Colors.white : const Color(0xff0a0a0a);
 
     return PopScope(
       // The account is already created at this point — dropping back to the
@@ -178,7 +178,7 @@ class _MapHero extends StatelessWidget {
           // Holds the space in the app's own colours until (or if) the
           // snapshot arrives — offline, or on Android, this is all there is.
           ColoredBox(
-            color: isLight ? const Color(0xfff2f3f5) : const Color(0xff1a1c22),
+            color: isLight ? const Color(0xfff2f3f5) : const Color(0xff141414),
           ),
           // Android has no snapshotter, so it draws the live map instead —
           // held still and deaf to touches. See AndroidCityMapHero.
@@ -276,7 +276,7 @@ class _CityPickPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     return Scaffold(
-      backgroundColor: isLight ? Colors.white : const Color(0xff121212),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       body: SafeArea(
         child: Stack(
           children: [
