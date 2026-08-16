@@ -15,7 +15,7 @@ const _kHueDark = Color(0xff3d8bff);
 const _kStatus = Color(0xfff66c6c);
 
 Color _hue(bool isLight) => isLight ? _kHueLight : _kHueDark;
-Color _ink(bool isLight) => isLight ? const Color(0xff0a0a0a) : Colors.white;
+Color _ink(bool isLight) => isLight ? const Color(0xff000000) : Colors.white;
 Color _inkMuted(bool isLight) =>
     isLight ? const Color(0xff6b7280) : const Color(0xff9aa0a6);
 Color _surfaceAlt(bool isLight) =>

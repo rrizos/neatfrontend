@@ -944,7 +944,7 @@ class _LikersSheetState extends State<_LikersSheet> {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
+    final bg = isLight ? Colors.white : const Color(0xff000000);
     final textColor = isLight ? Colors.black : Colors.white;
     final users = _users;
 
@@ -1331,7 +1331,7 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       child: Container(
         decoration: BoxDecoration(
-          color: isLight ? Colors.white : const Color(0xff0a0a0a),
+          color: isLight ? Colors.white : const Color(0xff000000),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff242424)),
         ),

@@ -77,7 +77,7 @@ class _LandingPageState extends State<LandingPage> {
   @override
   Widget build(BuildContext context) {
     final isLight = widget.themeMode == ThemeMode.light;
-    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
+    final bg = isLight ? Colors.white : const Color(0xff000000);
     final fg = isLight ? Colors.black : Colors.white;
 
     return Scaffold(

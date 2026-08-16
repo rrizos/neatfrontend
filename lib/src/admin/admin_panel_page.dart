@@ -19,9 +19,9 @@ class AdminPanelPage extends StatelessWidget {
     return DefaultTabController(
       length: 4,
       child: Scaffold(
-        backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
+        backgroundColor: isLight ? Colors.white : const Color(0xff000000),
         appBar: AppBar(
-          backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
+          backgroundColor: isLight ? Colors.white : const Color(0xff000000),
           title: Text(
             AppLocalizations.of(context).adminPanel,
             style: TextStyle(

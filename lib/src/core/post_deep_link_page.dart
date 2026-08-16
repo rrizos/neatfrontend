@@ -85,7 +85,7 @@ class _PostDeepLinkPageState extends State<PostDeepLinkPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xff0a0a0a),
+      backgroundColor: const Color(0xff000000),
       body: Column(
         children: [
           SafeArea(
@@ -118,7 +118,7 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 60,
-      color: const Color(0xff0a0a0a),
+      color: const Color(0xff000000),
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
@@ -485,7 +485,7 @@ class _CommentsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const bg = Color(0xff0a0a0a);
+    const bg = Color(0xff000000);
     const divider = Color(0xff222222);
 
     return DraggableScrollableSheet(

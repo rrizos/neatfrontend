@@ -4268,7 +4268,7 @@ class _SharedPollGraphic extends StatelessWidget {
     final shown   = options.take(4).toList();
     final total   = shown.fold<int>(0, (s, o) => s + ((o['votes'] as num?)?.toInt() ?? 0));
     final bg      = isLight ? const Color(0xfff5f5f5) : const Color(0xff141414);
-    final textClr = isLight ? const Color(0xff0a0a0a) : Colors.white;
+    final textClr = isLight ? const Color(0xff000000) : Colors.white;
     final subClr  = isLight ? const Color(0xff888888) : const Color(0xff7a7a7a);
     final divClr  = isLight ? const Color(0xffe2e2e2) : const Color(0xff2c2c2c);
 
@@ -4453,7 +4453,7 @@ class _SharedTextGraphic extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final bg      = isLight ? const Color(0xfff5f5f5) : const Color(0xff141414);
-    final textClr = isLight ? const Color(0xff0a0a0a) : Colors.white;
+    final textClr = isLight ? const Color(0xff000000) : Colors.white;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(15, 12, 13, 12),

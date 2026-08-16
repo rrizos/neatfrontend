@@ -159,7 +159,7 @@ class _AndroidMap {
     map.controller = controller;
     controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7))
+      ..setBackgroundColor(isDark ? const Color(0xff000000) : const Color(0xfff2f2f7))
       ..setNavigationDelegate(NavigationDelegate(
         onWebResourceError: (e) => debugPrint('[map] resource: ${e.description}'),
       ))
@@ -256,7 +256,7 @@ class _AndroidCityMapHeroState extends State<AndroidCityMapHero> {
   @override
   Widget build(BuildContext context) {
     final placeholder = ColoredBox(
-      color: widget.isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7),
+      color: widget.isDark ? const Color(0xff000000) : const Color(0xfff2f2f7),
     );
     final map = _map;
     if (map == null) return placeholder;
@@ -1086,7 +1086,7 @@ class _MapLayer extends StatelessWidget {
     // half-initialized one. Until then (and while a rebuild for a theme
     // change is in flight) a map-colored surface shows instead.
     final map = androidMap;
-    final placeholderColor = isDark ? const Color(0xff0a0a0a) : const Color(0xfff2f2f7);
+    final placeholderColor = isDark ? const Color(0xff000000) : const Color(0xfff2f2f7);
     if (map == null) return ColoredBox(color: placeholderColor);
     return ValueListenableBuilder<bool>(
       valueListenable: map.ready,

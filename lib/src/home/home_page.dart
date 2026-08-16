@@ -1088,7 +1088,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       context: context,
       useRootNavigator: true,
       showDragHandle: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
+      backgroundColor: isLight ? Colors.white : const Color(0xff000000),
       isScrollControlled: true,
       builder: (sheetCtx) => SizedBox(
         height: MediaQuery.of(sheetCtx).size.height * 0.85,
@@ -1168,7 +1168,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       useRootNavigator: true,
       isScrollControlled: true,
       showDragHandle: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
+      backgroundColor: isLight ? Colors.white : const Color(0xff000000),
       builder: (_) => _CommentSheet(
         post: post,
         session: widget.session,
@@ -1361,7 +1361,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 canPop: !_posting,
                 child: Scaffold(
                 backgroundColor:
-                    isLight ? Colors.white : const Color(0xff0a0a0a),
+                    isLight ? Colors.white : const Color(0xff000000),
                 body: SafeArea(
                   bottom: false,
                   child: Column(
@@ -1766,7 +1766,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       context: context,
       useRootNavigator: true,
       showDragHandle: true,
-      backgroundColor: Theme.of(context).brightness == Brightness.light ? Colors.white : const Color(0xff0a0a0a),
+      backgroundColor: Theme.of(context).brightness == Brightness.light ? Colors.white : const Color(0xff000000),
       isScrollControlled: true,
       builder: (_) {
         return SafeArea(
@@ -2010,7 +2010,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           useRootNavigator: true,
           isScrollControlled: true,
           showDragHandle: true,
-          backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
+          backgroundColor: isLight ? Colors.white : const Color(0xff000000),
           builder: (_) => _CommentSheet(
             post: post,
             session: widget.session,
@@ -2049,7 +2049,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final returningCity = _returningToCity;
 
     return Scaffold(
-      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff0a0a0a),
+      backgroundColor: isLight ? const Color(0xfff3f4f6) : const Color(0xff000000),
       extendBody: _isIOS26,
       body: Stack(
         children: [
@@ -2297,7 +2297,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           unselectedItemColor:
               isLight ? const Color(0xff6d6d6d) : const Color(0xff8c8c8c),
           elevation: 0,
-          backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
+          backgroundColor: isLight ? Colors.white : const Color(0xff000000),
           iconSize: 26,
           selectedFontSize: 0,
           unselectedFontSize: 0,
@@ -2654,7 +2654,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
     final isLight = Theme.of(context).brightness == Brightness.light;
     final activeClr   = isLight ? Colors.black   : Colors.white;
     final inactiveClr = isLight ? const Color(0xff888888) : Colors.white38;
-    final bg = isLight ? const Color(0xfff3f4f6) : const Color(0xff0a0a0a);
+    final bg = isLight ? const Color(0xfff3f4f6) : const Color(0xff000000);
 
     // Spectating: single centered city tab, no indicator
     if (!widget.showFollowing) {
@@ -3030,7 +3030,7 @@ class _ViralViewState extends State<_ViralView> {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
+    final bg = isLight ? Colors.white : const Color(0xff000000);
     final dividerColor = isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a);
     final muted = isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280);
     return Column(
@@ -3665,7 +3665,7 @@ class _ViralViewState extends State<_ViralView> {
         // ── Tab bar ──────────────────────────────────────────────────────
         Container(
           decoration: BoxDecoration(
-            color: isLight ? Colors.white : const Color(0xff0a0a0a),
+            color: isLight ? Colors.white : const Color(0xff000000),
             border: Border(bottom: BorderSide(color: divider)),
           ),
           child: Row(
@@ -3939,7 +3939,7 @@ class _ViralViewState extends State<_ViralView> {
         width: 136,
         padding: const EdgeInsets.fromLTRB(12, 16, 12, 11),
         decoration: BoxDecoration(
-          color: isLight ? Colors.white : const Color(0xff0a0a0a),
+          color: isLight ? Colors.white : const Color(0xff000000),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isLight ? const Color(0xffe8eaed) : const Color(0xff242424),
@@ -4032,7 +4032,7 @@ class _ComposeAction extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: Material(
-        color: isLight ? Colors.white : const Color(0xff0a0a0a),
+        color: isLight ? Colors.white : const Color(0xff000000),
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           onTap: onTap,
@@ -4427,7 +4427,7 @@ class _NotifTile extends StatelessWidget {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final unreadBg =
         isLight ? const Color(0xffeff8ff) : const Color(0xff1a2535);
-    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
+    final bg = isLight ? Colors.white : const Color(0xff000000);
     final textColor = isLight ? Colors.black : Colors.white;
     const subColor = Color(0xff8e8e8e);
     final isFollowVerb = item.verb.contains("follow");
@@ -4975,7 +4975,7 @@ class _CommentSheetState extends State<_CommentSheet> {
       context: context,
       useRootNavigator: true,
       showDragHandle: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
+      backgroundColor: isLight ? Colors.white : const Color(0xff000000),
       builder: (sheetCtx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,

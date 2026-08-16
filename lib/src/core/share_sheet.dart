@@ -339,7 +339,7 @@ class _ShareSheetState extends State<_ShareSheet> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bg = isLight ? Colors.white : const Color(0xff0a0a0a);
+    final bg = isLight ? Colors.white : const Color(0xff000000);
     final surface = isLight ? const Color(0xfff3f4f6) : const Color(0xff141414);
     final textColor = isLight ? Colors.black : Colors.white;
     final muted = isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af);

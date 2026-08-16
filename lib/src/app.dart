@@ -114,20 +114,20 @@ class _NeatAppState extends State<NeatApp> {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
-      scaffoldBackgroundColor: const Color(0xff0a0a0a),
+      scaffoldBackgroundColor: const Color(0xff000000),
       colorScheme: const ColorScheme.dark(
         primary: Colors.white,
         secondary: Color(0xff4ea3ff),
-        surface: Color(0xff0a0a0a),
+        surface: Color(0xff000000),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xff0a0a0a),
+        backgroundColor: Color(0xff000000),
         foregroundColor: Colors.white,
         elevation: 0,
-        surfaceTintColor: Color(0xff0a0a0a),
+        surfaceTintColor: Color(0xff000000),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Color(0xff0a0a0a),
+        backgroundColor: Color(0xff000000),
         selectedItemColor: Colors.white,
         unselectedItemColor: Color(0xffa9a9a9),
       ),

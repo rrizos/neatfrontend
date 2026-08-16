@@ -276,7 +276,7 @@ import UserNotifications
             bar.isHidden = true
 
             // Match the app's dark/light background colors.
-            let darkBg  = UIColor(red: 10/255, green: 10/255, blue: 10/255, alpha: 1)
+            let darkBg  = UIColor(red: 0, green: 0, blue: 0, alpha: 1)
             let lightBg = UIColor.white
             let bg = UIColor { $0.userInterfaceStyle == .dark ? darkBg : lightBg }
             let appearance = UITabBarAppearance()

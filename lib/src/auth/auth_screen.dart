@@ -149,7 +149,7 @@ Widget build(BuildContext context) {
 final l10n = AppLocalizations.of(context);
 final isLight = widget.themeMode == ThemeMode.light;
 return Scaffold(
-backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
+backgroundColor: isLight ? Colors.white : const Color(0xff000000),
 body: SafeArea(
 child: Center(
 child: SingleChildScrollView(

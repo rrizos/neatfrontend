@@ -63,7 +63,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
   bool get _isLight => widget.themeMode == ThemeMode.light;
-  Color get _bg => _isLight ? Colors.white : const Color(0xff0a0a0a);
+  Color get _bg => _isLight ? Colors.white : const Color(0xff000000);
   Color get _surface => _isLight ? Colors.white : const Color(0xff141414);
   Color get _text => _isLight ? Colors.black : Colors.white;
   Color get _sub => const Color(0xffa9a9a9);
