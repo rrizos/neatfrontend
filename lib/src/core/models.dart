@@ -118,7 +118,7 @@ class UserProfile {
     this.hasBlockedYou = false,
     this.usernamePending = false,
     this.hasPassword = true,
-    this.canChangeCity = false,
+    this.canChangeCity = true,
     this.cityChangeAllowedAt,
   });
   final int id;
@@ -143,12 +143,13 @@ class UserProfile {
   final bool hasPassword;
 
   /// Whether the home city may be changed right now, and when it may next be
-  /// if not. The city decides which feed, which events and which people this
-  /// account belongs to, so it is held for a month at a time — the server
-  /// enforces it, and these two only exist so the app can say so up front
-  /// rather than letting somebody pick a city and be refused.
+  /// if not. [cityChangeAllowedAt] is null whenever a change is allowed —
+  /// including for a brand new account that has not picked one yet, which is
+  /// always free to. The server enforces this; these exist so the app can say
+  /// so instead of letting somebody choose a city on a map and be refused.
   final bool canChangeCity;
   final DateTime? cityChangeAllowedAt;
+
 
   final String avatarUrl;
 
@@ -223,7 +224,7 @@ class UserProfile {
       city: json['city']?.toString() ?? '',
       usernamePending: json['usernamePending'] == true,
       hasPassword: json['hasPassword'] != false,
-      canChangeCity: json['canChangeCity'] == true,
+      canChangeCity: json['canChangeCity'] != false,
       cityChangeAllowedAt:
           DateTime.tryParse(json['cityChangeAllowedAt']?.toString() ?? ''),
       avatarUrl: json['avatarUrl']?.toString() ?? '',

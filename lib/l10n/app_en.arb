@@ -923,12 +923,8 @@
       }
     }
   },
-  "cityChangeHint": "Tap to change. You can only change your city once a month.",
+  "cityChangeHint": "Tap to change. You can change your city once a month.",
   "@cityChangeHint": {
     "description": "Shown under the city field when a change is allowed"
-  },
-  "cityChanged": "Your city has been updated.",
-  "@cityChanged": {
-    "description": "Confirmation after the city was saved"
   }
 }

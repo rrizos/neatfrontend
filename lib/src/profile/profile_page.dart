@@ -1889,9 +1889,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
 
   /// Opens the map to pick a new home city.
   ///
-  /// Refused politely when the month is not up. The server enforces the same
-  /// rule, so this is only here to save somebody choosing a city on a map and
-  /// then being told no.
+  /// Refused politely when the month is not up. The server decides, so this
+  /// only saves somebody choosing a city on a map and then being told no.
   Future<void> _changeCity() async {
     final l10n = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -1911,8 +1910,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     );
     if (!mounted || picked == null || picked.isEmpty) return;
     if (picked == _cityController.text) return;
-    // Only shown in the field; it reaches the server with the rest of the
-    // form when Save is pressed, like every other value here.
+    // Shown in the field; it reaches the server with the rest of the form
+    // when Save is pressed, like every other value here.
     setState(() => _cityController.text = picked);
   }
 
@@ -2039,8 +2038,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
             _EditorField(
               controller: _cityController,
               label: AppLocalizations.of(context).city,
-              // Never typed: a city has to be one the app knows about, so it
-              // is picked on the same map as at sign-up.
+              // Never typed: it has to be a city the app knows, so it is
+              // picked on the same map as at sign-up.
               readOnly: true,
               onTap: _changeCity,
               helper: widget.profile.canChangeCity

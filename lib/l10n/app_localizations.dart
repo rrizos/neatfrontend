@@ -2963,14 +2963,8 @@ abstract class AppLocalizations {
   /// Shown under the city field when a change is allowed
   ///
   /// In en, this message translates to:
-  /// **'Tap to change. You can only change your city once a month.'**
+  /// **'Tap to change. You can change your city once a month.'**
   String get cityChangeHint;
-
-  /// Confirmation after the city was saved
-  ///
-  /// In en, this message translates to:
-  /// **'Your city has been updated.'**
-  String get cityChanged;
 }
 
 class _AppLocalizationsDelegate

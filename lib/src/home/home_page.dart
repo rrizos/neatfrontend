@@ -893,51 +893,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       maxDuration: _kMaxVideoDuration,
     );
     if (picked == null || !mounted) return;
-    setState(() => _composeMediaLoading = true);
-    setPageState(() {});
 
-    // Compress before it ever touches the network. The server re-encodes every
-    // upload to 960p/2 Mbit/s anyway, so the 60-90 MB a phone produces for a
-    // minute of 1080p is bytes spent purely to be thrown away — and on a mobile
-    // connection that is the several minutes an upload used to take. Doing it
-    // here costs the phone a few seconds and cuts what has to travel by around
-    // an order of magnitude.
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context).preparingVideo),
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    }
-    final path = await _compressVideo(picked.path);
-    if (!mounted) return;
-    final file = File(path);
-    final fileSize = await file.length();
-    if (!mounted) return;
-    if (fileSize > _kMaxVideoBytes) {
-      setState(() => _composeMediaLoading = false);
-      setPageState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            AppLocalizations.of(context).videoTooLarge(
-              (fileSize / 1024 / 1024).round(),
-              _kMaxVideoBytes ~/ (1024 * 1024),
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-    if (!mounted) return;
+    // Straight to the compose sheet. Compressing takes twenty to forty seconds
+    // for a minute of video, and it used to happen right here, in front of a
+    // spinner, with the network idle throughout — so the wait was the encode
+    // *and then* the upload. Both still happen; they now happen behind this
+    // sheet, while the caption is being written, which is the same span of
+    // time. See _prepareAndStage.
+    //
+    // The size check moved with it: how big the file ends up is not known
+    // until compression has run, so an oversized video is reported from there.
     setState(() {
       _composeMediaLoading = false;
       _composeMedia.clear();
-      _composeMedia.add(_ComposeMedia.localVideo(videoPath: path));
+      _composeMedia.add(_ComposeMedia.localVideo(videoPath: picked.path));
     });
-    // The long one. A minute of 1080p is ~11 MB, and this is exactly the
-    // stretch where the user is writing a caption and the network is idle.
     _beginStaging(_composeMedia.last);
     setPageState(() {});
   }
@@ -1005,9 +975,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ..headers.addAll(authGetHeaders(widget.session.token))
         ..fields['type'] = media.type;
 
-      if (media.videoPath != null) {
+      final videoFile = media.uploadPath ?? media.videoPath;
+      if (videoFile != null) {
         request.files.add(await http.MultipartFile.fromPath(
-          'file', media.videoPath!, filename: 'video.mp4'));
+          'file', videoFile, filename: 'video.mp4'));
       } else if (media.imageBytes != null) {
         request.files.add(http.MultipartFile.fromBytes(
           'file', media.imageBytes!, filename: 'image.jpg'));
@@ -1036,10 +1007,97 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// Kicks off staging for [media] without waiting for it.
+  /// Kicks off preparing and staging for [media] without waiting for either.
+  ///
+  /// Pressing Post before this finishes is already handled: the post awaits
+  /// `media.staging`, and that future now covers the compression too.
   void _beginStaging(_ComposeMedia media) {
-    media.staging = _stageUpload(media);
+    media.staging = _prepareAndStage(media);
     unawaited(media.staging!);
+  }
+
+  /// Compresses if it is worth it, then uploads — all behind the compose sheet.
+  ///
+  /// Compression used to run *before* the sheet appeared, so picking a minute
+  /// of video meant twenty to forty seconds of a spinner with the network
+  /// completely idle, and only then an upload. The phone encoding and the
+  /// bytes leaving are both unavoidable; making the user watch the first one
+  /// finish before the second can start is not.
+  Future<String?> _prepareAndStage(_ComposeMedia media) async {
+    if (media.isVideo && media.videoPath != null) {
+      if (mounted) setState(() => media.preparing = true);
+      final prepared = await _prepareVideo(media.videoPath!);
+      if (mounted) setState(() => media.preparing = false);
+      if (!mounted) return null;
+      final size = await File(prepared).length();
+      if (size > _kMaxVideoBytes) {
+        // Only knowable once compression has run, so it is reported here
+        // rather than at the picker.
+        _rejectOversizeVideo(media, size);
+        return null;
+      }
+      media.uploadPath = prepared;
+    }
+    return _stageUpload(media);
+  }
+
+  /// Drops a video that turned out too big even after compressing.
+  void _rejectOversizeVideo(_ComposeMedia media, int size) {
+    if (!mounted) return;
+    setState(() => _composeMedia.remove(media));
+    _uploadProgress.value = null;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppLocalizations.of(context).videoTooLarge(
+            (size / 1024 / 1024).round(),
+            _kMaxVideoBytes ~/ (1024 * 1024),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The file worth uploading for [sourcePath].
+  ///
+  /// Re-encoding is skipped when the source is already within what the server
+  /// targets, mirroring `needs_reencode` in posts/transcode.py. The client
+  /// cannot read the codec, but the codec is not what costs the user anything
+  /// — the bytes are — so the decision is made on resolution and bitrate, and
+  /// the server still remuxes or re-encodes in the background if it must.
+  Future<String> _prepareVideo(String sourcePath) async {
+    if (!await _needsCompressing(sourcePath)) {
+      debugPrint('[compose] already within target, uploading as picked');
+      return sourcePath;
+    }
+    return _compressVideo(sourcePath);
+  }
+
+  /// Matches the server's own thresholds; see _TARGET_MAX_EDGE and
+  /// _TARGET_MAX_BITRATE in posts/transcode.py. They have to move together.
+  static const _kTargetMaxEdge = 1920;
+  static const _kTargetMaxBitrate = 6000000; // bits per second
+
+  Future<bool> _needsCompressing(String path) async {
+    try {
+      final info = await VideoCompress.getMediaInfo(path);
+      final width = info.width ?? 0;
+      final height = info.height ?? 0;
+      final durationMs = info.duration ?? 0;
+      final size = info.filesize ?? 0;
+      // Anything we cannot measure is compressed: guessing wrong the other way
+      // ships an oversized file over a mobile connection.
+      if (width <= 0 || height <= 0 || durationMs <= 0 || size <= 0) return true;
+      if (width > _kTargetMaxEdge && height > _kTargetMaxEdge) return true;
+      if (width.toInt() > _kTargetMaxEdge || height.toInt() > _kTargetMaxEdge) {
+        return true;
+      }
+      final bitrate = size * 8 / (durationMs / 1000);
+      return bitrate > _kTargetMaxBitrate;
+    } catch (e) {
+      debugPrint('[compose] could not inspect video, compressing: $e');
+      return true;
+    }
   }
 
   void _removeComposeMedia(int index, StateSetter setPageState) {
@@ -1576,6 +1634,34 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 borderRadius: BorderRadius.circular(18),
                 child: Stack(children: [
                   AspectRatio(aspectRatio: 1.15, child: preview),
+                  if (item.preparing)
+                    Positioned(
+                      left: 10, bottom: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.62),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 12, height: 12,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.8, color: Colors.white),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              AppLocalizations.of(context).preparingVideo,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 12.5),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   Positioned(
                     top: 10, right: 10,
                     child: GestureDetector(
@@ -4572,6 +4658,19 @@ class _ComposeMedia {
   final Uint8List? imageBytes; // local image bytes: used for preview and upload
   final String? videoPath;     // local video file path: streamed for upload
   final String? externalUrl;   // Giphy / remote URL: sent as-is
+
+  /// True while the phone is re-encoding this video.
+  ///
+  /// Nothing is on the network yet during that stretch, so the upload ring has
+  /// nothing to show — without saying so the sheet looks like it has stalled.
+  bool preparing = false;
+
+  /// The file that is uploaded, once preparing has decided what that is.
+  ///
+  /// Kept apart from [videoPath] because the preview must not flicker when
+  /// compression finishes and swaps the file underneath it: the sheet keeps
+  /// showing the original the whole time, and only the upload uses this.
+  String? uploadPath;
 
   /// The staged upload this became, once it has finished going up.
   ///

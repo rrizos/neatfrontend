@@ -1606,7 +1606,4 @@ class AppLocalizationsEl extends AppLocalizations {
   @override
   String get cityChangeHint =>
       'Πάτησε για αλλαγή. Μπορείς να αλλάξεις πόλη μία φορά τον μήνα.';
-
-  @override
-  String get cityChanged => 'Η πόλη σου ενημερώθηκε.';
 }

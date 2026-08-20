@@ -1592,8 +1592,5 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cityChangeHint =>
-      'Tap to change. You can only change your city once a month.';
-
-  @override
-  String get cityChanged => 'Your city has been updated.';
+      'Tap to change. You can change your city once a month.';
 }
