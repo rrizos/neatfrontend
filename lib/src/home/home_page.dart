@@ -138,6 +138,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// compose sheet's indicator from outside that sheet's own setState.
   final ValueNotifier<double?> _uploadProgress = ValueNotifier<double?>(null);
 
+  /// How many items one post may carry. Matches the server, which takes
+  /// `media_info[:4]` — going past it here would silently drop the extras.
+  static const _kMaxComposeMedia = 4;
+
   /// What the top banner says while a post is being delivered, or null when
   /// there is nothing to report.
   final ValueNotifier<String?> _postingLabel = ValueNotifier<String?>(null);
@@ -675,10 +679,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
     setState(() => _posting = true);
     _postingLabel.value = AppLocalizations.of(context).postingLabel;
-    // Only start from zero if nothing is already in flight. Pressing Post
-    // while the staged upload is at 60% must not send the bar back to the
-    // start — it is the same bytes, still going.
-    if (hasVideo && _uploadProgress.value == null) _uploadProgress.value = 0;
+
+    // The banner follows the item this post is actually sending, so opening
+    // the composer again for a second post cannot touch it. Pressing Post
+    // while the staged upload is at 60% still picks up at 60% rather than
+    // restarting — it is the same bytes, still going.
+    final tracked = media.isEmpty ? null : media.first;
+    void followTracked() => _uploadProgress.value = tracked!.progress.value;
+    if (hasVideo) {
+      if (tracked != null) {
+        tracked.progress.addListener(followTracked);
+        _uploadProgress.value = tracked.progress.value ?? 0;
+      } else {
+        _uploadProgress.value = 0;
+      }
+    }
     try {
       final request = _ProgressMultipartRequest(
         'POST',
@@ -783,6 +798,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     } finally {
+      if (hasVideo && tracked != null) {
+        tracked.progress.removeListener(followTracked);
+      }
       _uploadClient?.close();
       _uploadClient = null;
       if (mounted) {
@@ -841,8 +859,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() {
       _composeMediaLoading = false;
-      _composeMedia.removeWhere((m) => m.isVideo);
-      _composeMedia.addAll(newItems);
+      // A video no longer excludes the rest: the server has always taken up
+      // to four items of mixed types, and only the app insisted a post was
+      // either one video or some photos.
+      _composeMedia.addAll(newItems.take(_kMaxComposeMedia - _composeMedia.length));
     });
     for (final item in newItems) {
       _beginStaging(item);
@@ -880,7 +900,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() {
       _composeMediaLoading = false;
-      _composeMedia.removeWhere((m) => m.isVideo);
       _composeMedia.add(_ComposeMedia.localImage(imageBytes: bytes));
     });
     _beginStaging(_composeMedia.last);
@@ -905,7 +924,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // until compression has run, so an oversized video is reported from there.
     setState(() {
       _composeMediaLoading = false;
-      _composeMedia.clear();
       _composeMedia.add(_ComposeMedia.localVideo(videoPath: picked.path));
     });
     _beginStaging(_composeMedia.last);
@@ -967,9 +985,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         onProgress: (sent, total) {
           if (total <= 0) return;
           final next = sent / total;
-          final shown = _uploadProgress.value;
+          final shown = media.progress.value;
           if (shown != null && (next - shown).abs() < 0.01 && next < 1) return;
-          _uploadProgress.value = next;
+          media.progress.value = next;
         },
       )
         ..headers.addAll(authGetHeaders(widget.session.token))
@@ -995,13 +1013,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
       final id = (jsonDecode(res.body) as Map<String, dynamic>)['id']?.toString();
       media.uploadId = id;
-      _uploadProgress.value = null;
+      media.progress.value = null;
       debugPrint('[compose] staged ${media.type} as $id');
       return id;
     } catch (e) {
       // Not fatal: the file travels with the post request instead, exactly as
       // it did before staging existed.
-      _uploadProgress.value = null;
+      media.progress.value = null;
       debugPrint('[compose] staging failed, will send with the post: $e');
       return null;
     }
@@ -1045,7 +1063,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _rejectOversizeVideo(_ComposeMedia media, int size) {
     if (!mounted) return;
     setState(() => _composeMedia.remove(media));
-    _uploadProgress.value = null;
+    media.progress.value = null;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -1682,7 +1700,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   // Listens, because the upload is usually already running
                   // before this sheet's own state ever changes.
                   ValueListenableBuilder<double?>(
-                    valueListenable: _uploadProgress,
+                    valueListenable: item.progress,
                     builder: (context, progress, _) {
                       if (progress == null) return const SizedBox.shrink();
                       return Positioned(
@@ -1838,7 +1856,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                             // megabytes in flight: a minute of
                                             // video takes long enough that a
                                             // spinner alone reads as a hang.
-                                            value: _uploadProgress.value,
+                                            value: _composeMedia.isEmpty
+                                                ? null
+                                                : _composeMedia.first
+                                                    .progress.value,
                                             valueColor:
                                                 AlwaysStoppedAnimation<Color>(
                                               isLight ? Colors.white : Colors.black,
@@ -1958,7 +1979,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                 !_composeMediaLoading &&
                                                 !_composeMedia.any(
                                                 (m) => m.isVideo) &&
-                                                _composeMedia.length < 4)
+                                                _composeMedia.length < _kMaxComposeMedia)
                                               _ComposeAction(
                                                 icon: Icons.photo_library_outlined,
                                                 onTap: () =>
@@ -1970,7 +1991,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                 !_composeMediaLoading &&
                                                 !_composeMedia.any(
                                                 (m) => m.isVideo) &&
-                                                _composeMedia.length < 4)
+                                                _composeMedia.length < _kMaxComposeMedia)
                                               _ComposeAction(
                                                 icon: Icons.camera_alt_outlined,
                                                 onTap: () =>
@@ -2059,7 +2080,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                   if (url != null &&
                                                       url.isNotEmpty) {
                                                     setState(() {
-                                                      _composeMedia.clear();
                                                       _composeMedia.add(
                                                         _ComposeMedia.external(
                                                           externalUrl: url,
@@ -4658,6 +4678,15 @@ class _ComposeMedia {
   final Uint8List? imageBytes; // local image bytes: used for preview and upload
   final String? videoPath;     // local video file path: streamed for upload
   final String? externalUrl;   // Giphy / remote URL: sent as-is
+
+  /// How far this item's own upload has got, 0-1, or null when nothing is
+  /// moving.
+  ///
+  /// Per item rather than one notifier shared by the whole screen: the banner
+  /// for a post already on its way and the ring inside a freshly opened
+  /// compose sheet are two different uploads, and sharing one meant starting a
+  /// second post wiped the bar of the first.
+  final ValueNotifier<double?> progress = ValueNotifier<double?>(null);
 
   /// True while the phone is re-encoding this video.
   ///

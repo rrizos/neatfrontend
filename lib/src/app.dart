@@ -193,6 +193,21 @@ class _NeatAppState extends State<NeatApp> {
           theme: _lightTheme(),
           darkTheme: _darkTheme(),
           themeMode: _themeMode,
+          // Tapping away from a field puts the keyboard down, on every screen
+          // in the app rather than the handful that remembered to do it.
+          //
+          // Wrapped here rather than per-screen so a route added later gets it
+          // for free. Translucent, so this only ever sees taps that nothing
+          // else wanted: a button, a link or a scroll wins the gesture arena
+          // first and this never fires for them.
+          builder: (context, child) => GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () {
+              final focus = FocusManager.instance.primaryFocus;
+              if (focus != null && focus.hasFocus) focus.unfocus();
+            },
+            child: child,
+          ),
           home: _deepLinkPostId != null
               ? PostDeepLinkPage(postId: _deepLinkPostId!, themeMode: _themeMode)
               : AuthGate(
