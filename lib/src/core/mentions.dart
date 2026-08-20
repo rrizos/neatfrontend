@@ -7,10 +7,9 @@ import 'http_client.dart' as http;
 
 import '../../l10n/app_localizations.dart';
 import 'api.dart';
-import 'avatar_store.dart';
 import 'link_preview.dart';
 import 'models.dart';
-import 'post_card.dart' show decodeAvatarUrl;
+import 'post_card.dart' show avatarProvider;
 
 final RegExp mentionRegex = RegExp(r'@([\w.]+)');
 
@@ -232,7 +231,7 @@ class _MentionSuggestionsState extends State<MentionSuggestions> {
         separatorBuilder: (_, i) => Divider(height: 1, thickness: 1, color: dividerColor, indent: 56, endIndent: 0),
         itemBuilder: (_, i) {
           final u = _results[i];
-          final bytes = decodeAvatarUrl(AvatarStore.resolve(u.username, u.avatarUrl));
+          final avatar = avatarProvider(u.username, u.avatarUrl);
           return InkWell(
             onTap: () => _select(u),
             highlightColor: highlightColor,
@@ -244,8 +243,8 @@ class _MentionSuggestionsState extends State<MentionSuggestions> {
                   CircleAvatar(
                     radius: 18,
                     backgroundColor: avatarBg,
-                    foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-                    child: bytes == null
+                    foregroundImage: avatar,
+                    child: avatar == null
                         ? Text(
                             initialFor(u.username),
                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: textColor),

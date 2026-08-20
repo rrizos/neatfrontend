@@ -47,6 +47,21 @@ class AvatarStore {
     revision.value++;
   }
 
+  /// Seeds the store with a picture already known to be current.
+  ///
+  /// Called at launch with the signed-in user's own avatar, which arrives from
+  /// `/api/auth/me/` and is authoritative. Without it, the cached feed shown
+  /// while the network catches up is drawn from a payload saved *before* the
+  /// picture changed, so relaunching the app brought the old photo back — the
+  /// change looked like it had been lost, having previously appeared to work.
+  ///
+  /// A no-op for an empty [url]: that means "not loaded", never "no picture",
+  /// and recording it would blank the avatar everywhere.
+  static void seed({required String username, required String url}) {
+    if (url.isEmpty) return;
+    update(username: username, previousUrl: '', url: url);
+  }
+
   /// What [username]'s avatar should be right now, given the (possibly stale)
   /// [url] the caller is holding.
   static String resolve(String username, String url) {

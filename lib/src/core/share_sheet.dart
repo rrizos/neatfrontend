@@ -209,7 +209,13 @@ class _ShareSheetState extends State<_ShareSheet> {
     // type instead of silently dropping their thumbnail) — imageUrl is only
     // a legacy fallback for old posts that predate the media array.
     final firstMedia = media.isNotEmpty
-        ? {'type': media.first.type, 'url': media.first.url}
+        ? {
+            'type': media.first.type,
+            'url': media.first.url,
+            // Carried into the snapshot so the receiving chat can draw a real
+            // still instead of a black square for a shared video.
+            if (media.first.thumbUrl.isNotEmpty) 'thumbUrl': media.first.thumbUrl,
+          }
         : (widget.post.imageUrl.isNotEmpty ? {'type': 'image', 'url': widget.post.imageUrl} : null);
     final poll = widget.post.poll;
     return '__neat_post__:${jsonEncode({

@@ -96,6 +96,9 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
   func mapView(_ mv: MKMapView, regionDidChangeAnimated animated: Bool) {
     let span = mv.region.span.latitudeDelta
     guard span > 0, !span.isNaN else { return }
+    // Arrival is what starts the next leg of an automatic journey; see
+    // advanceFlight(). Harmless when nothing is in flight.
+    if isFlying { advanceFlight() }
     applyDeclutter()
   }
 
@@ -113,6 +116,10 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     // Any selection that did not end in a visible card therefore froze the map
     // for good: interaction off, no card to dismiss, nothing left to call
     // zoomOut. The Android map has never had a lock for exactly this reason.
+
+    // The user has chosen; any journey still running was a guess and must not
+    // keep moving the map out from under them.
+    cancelFlight()
     focus(on: annotation.coordinate)
     channel?.invokeMethod("citySelected", arguments: name)
   }
@@ -136,43 +143,100 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
   /// to the city it detected instead of the card appearing over an untouched
   /// map of the whole country.
   private func focusCity(named name: String) {
-    guard let annotation = map.annotations.first(where: {
-      ($0.title ?? nil) == name
-    }) else { return }
+    // Searched across every city, not just the pins currently on the map.
+    // `applyDeclutter()` keeps `map.annotations` down to what actually fits on
+    // screen, so at the country view most cities are not in it — and looking
+    // there meant the journey silently never started for exactly the smaller
+    // cities that most need showing.
+    guard let annotation = allCities.first(where: { $0.title == name })
+      ?? (map.annotations.first { ($0.title ?? nil) == name })
+    else { return }
 
-    // Three beats, so it reads as a journey rather than a cut.
+    let target = annotation.coordinate
+
+    // Four beats, so it reads as a journey rather than a cut: settle at the
+    // whole country, glide across to the city at that same height so the
+    // distance is visible, then come down in two stages rather than dropping.
     //
-    //   1. sit at the default view of the whole country — wherever the map
-    //      happened to be, the trip starts from the same place every time
-    //   2. glide to the city at that same height, so the distance is visible
-    //   3. descend onto it
-    //
-    // A single setRegion does all of this at once and is over before it
-    // registers as movement, which is what made the card feel like it simply
-    // appeared. Deliberately does not select the annotation — that would fire
-    // didSelect, report back to Flutter as though the pin had been tapped,
-    // and drop the card over the animation this exists to show.
-    map.setRegion(overview, animated: true)
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleSeconds) { [weak self] in
-      guard let self else { return }
-      self.map.setRegion(
-        MKCoordinateRegion(center: annotation.coordinate, span: self.overview.span),
-        animated: true
-      )
-      DispatchQueue.main.asyncAfter(deadline: .now() + Self.travelSeconds) { [weak self] in
-        self?.focus(on: annotation.coordinate)
-      }
-    }
+    // Deliberately does not select the annotation — that would fire didSelect,
+    // report back to Flutter as though the pin had been tapped, and drop the
+    // card over the animation this exists to show.
+    var stages: [MKCoordinateRegion] = []
+    // Only if we are not effectively there already: a no-op setRegion may
+    // never report back, and starting the chain on one would stall it.
+    if !isNear(map.region, overview) { stages.append(overview) }
+    stages.append(MKCoordinateRegion(center: target, span: overview.span))
+    stages.append(MKCoordinateRegion(
+      center: target, latitudinalMeters: 220_000, longitudinalMeters: 220_000))
+    stages.append(MKCoordinateRegion(
+      center: target, latitudinalMeters: 70_000, longitudinalMeters: 70_000))
+    beginFlight(stages)
   }
 
-  /// Time given to settle at the country view before the journey starts.
-  static let settleSeconds = 0.35
+  // MARK: Flight
 
-  /// How long the glide runs before the descent begins. Kept here and mirrored
-  /// in the Dart side's card delay so the card lands after the map settles.
-  static let travelSeconds = 0.75
+  /// Remaining legs of an automatic journey, flown one at a time.
+  ///
+  /// Each leg starts only once the previous one has actually arrived. The old
+  /// version fired all three off `asyncAfter` on fixed delays, which is what
+  /// made this look instant: a `setRegion` issued while MapKit is still
+  /// animating does not queue behind it, it replaces it — so the legs
+  /// cancelled each other and the map cut straight to the city.
+  private var flightQueue: [MKCoordinateRegion] = []
+  private var flightGeneration = 0
+  private var flightWatchdog: DispatchWorkItem?
+
+  private func beginFlight(_ stages: [MKCoordinateRegion]) {
+    flightGeneration &+= 1
+    flightQueue = stages
+    advanceFlight()
+  }
+
+  private func cancelFlight() {
+    flightGeneration &+= 1
+    flightQueue = []
+    flightWatchdog?.cancel()
+    flightWatchdog = nil
+  }
+
+  private var isFlying: Bool { !flightQueue.isEmpty || flightWatchdog != nil }
+
+  private func advanceFlight() {
+    flightWatchdog?.cancel()
+    flightWatchdog = nil
+    guard !flightQueue.isEmpty else { return }
+    let next = flightQueue.removeFirst()
+
+    // MapKit reports arrival through regionDidChangeAnimated, which is what
+    // normally drives the next leg. A leg that moves the camera too little to
+    // animate may never report, so each one also carries its own deadline.
+    let generation = flightGeneration
+    let watchdog = DispatchWorkItem { [weak self] in
+      guard let self, self.flightGeneration == generation else { return }
+      self.flightWatchdog = nil
+      self.advanceFlight()
+    }
+    flightWatchdog = watchdog
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.legTimeout, execute: watchdog)
+
+    map.setRegion(next, animated: true)
+  }
+
+  /// Longest a single leg is allowed to take before the next one starts
+  /// regardless. Comfortably above MapKit's own animation, so in practice
+  /// arrival drives the chain and this only rescues a leg that never moved.
+  static let legTimeout = 1.1
+
+  /// Whether two regions are close enough that animating between them would
+  /// not read as movement.
+  private func isNear(_ a: MKCoordinateRegion, _ b: MKCoordinateRegion) -> Bool {
+    abs(a.center.latitude - b.center.latitude) < 0.05
+      && abs(a.center.longitude - b.center.longitude) < 0.05
+      && abs(a.span.latitudeDelta - b.span.latitudeDelta) < 0.5
+  }
 
   private func zoomOut() {
+    cancelFlight()
     // Still restores interaction, though nothing disables it any more: a map
     // left locked by a previous build must come back to life on first close
     // rather than staying dead until the app is reinstalled.

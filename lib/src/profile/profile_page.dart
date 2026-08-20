@@ -10,6 +10,7 @@ import '../core/http_client.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../auth/city_setup_page.dart';
 import '../core/api.dart';
 import '../core/avatar_store.dart';
 import '../core/neat_loader.dart';
@@ -17,6 +18,7 @@ import '../core/legacy_nav_bar.dart';
 import '../core/media_cache.dart';
 import '../core/models.dart';
 import '../core/post_card.dart';
+import '../core/profile_save_queue.dart';
 import '../core/realtime_service.dart';
 import '../admin/admin_panel_page.dart';
 import '../core/report_post_sheet.dart';
@@ -74,10 +76,16 @@ Uint8List _cropAndEncode(_CropParams p) {
       : decoded.height - y);
 
   final cropped = img.copyCrop(decoded, x: x, y: y, width: sz, height: sz);
-  final out = cropped.width > 1200
-      ? img.copyResize(cropped, width: 1200, height: 1200)
+  // 1024 at q90, because that is exactly what the server keeps: it caps the
+  // stored copy at AVATAR_FULL_MAX_PX (1024) and re-encodes at q90 regardless.
+  // Sending 1200 at q95 spent 427 KB of somebody's phone connection to hand
+  // over pixels the server immediately threw away -- and that upload is the
+  // thing that fails on a weak signal. Same picture, 1.8x less to send.
+  const maxEdge = 1024;
+  final out = cropped.width > maxEdge
+      ? img.copyResize(cropped, width: maxEdge, height: maxEdge)
       : cropped;
-  return Uint8List.fromList(img.encodeJpg(out, quality: 95));
+  return Uint8List.fromList(img.encodeJpg(out, quality: 90));
 }
 
 class ProfilePage extends StatefulWidget {
@@ -800,7 +808,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         barrierColor: Colors.transparent,
         transitionDuration: const Duration(milliseconds: 220),
         pageBuilder: (_, a1, a2) => _AvatarFullscreenPage(
-          avatarUrl: profile.avatarUrl,
+          // This is the one screen that paints an avatar at 240dp — 720px on
+          // a 3x phone — so it takes the sharp copy when the server has one.
+          avatarUrl: profile.avatarFullUrl.isNotEmpty
+              ? profile.avatarFullUrl
+              : profile.avatarUrl,
+          fallbackAvatarUrl: profile.avatarUrl,
           username: profile.username,
           isSelf: isSelf,
           initialFollowing: _followingOverride ?? profile.isFollowing,
@@ -901,6 +914,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               currentIndex: widget.activeNavIndex,
               onTap: widget.onNavTap!,
               avatarUrl: widget.currentUser.avatarUrl,
+              username: widget.currentUser.username,
             ),
       appBar: AppBar(
         backgroundColor: isLight ? Colors.white : const Color(0xff000000),
@@ -934,6 +948,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     onThemeModeChanged: widget.onThemeModeChanged,
                     onLogout: widget.onLogout,
                     token: widget.token,
+                    hasPassword: widget.currentUser.hasPassword,
                   ),
                 ),
               ),
@@ -967,10 +982,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                         child: CircleAvatar(
                           radius: 48,
                           backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                          foregroundImage: _dataUrlBytes(profile.avatarUrl) != null
-                              ? ResizeImage(MemoryImage(_dataUrlBytes(profile.avatarUrl)!), width: 288)
-                              : null,
-                          child: _dataUrlBytes(profile.avatarUrl) == null
+                          foregroundImage:
+                              avatarProvider(profile.username, profile.avatarUrl),
+                          child: avatarProvider(
+                                      profile.username, profile.avatarUrl) ==
+                                  null
                               ? Text(
                                   initialFor(profile.username),
                                   style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 20),
@@ -1242,9 +1258,15 @@ class _AvatarFullscreenPage extends StatefulWidget {
     required this.username,
     required this.isSelf,
     required this.initialFollowing,
+    this.fallbackAvatarUrl = '',
     this.onToggleFollow,
   });
   final String avatarUrl;
+
+  /// Shown if [avatarUrl] fails to load — it may be a file on the server that
+  /// this device cannot reach right now, while the small inline copy is
+  /// already in the profile payload and cannot fail.
+  final String fallbackAvatarUrl;
   final String username;
   final bool isSelf;
   final bool initialFollowing;
@@ -1258,13 +1280,23 @@ class _AvatarFullscreenPageState extends State<_AvatarFullscreenPage> {
   late bool _following = widget.initialFollowing;
   bool _toggling = false;
 
+  /// True once the sharp copy has failed, so the build stops asking for it.
+  bool _fullFailed = false;
+
   ImageProvider _imageProvider() {
-    final bytes = _dataUrlBytes(widget.avatarUrl);
-    if (bytes != null) return MemoryImage(bytes);
-    final url = widget.avatarUrl.startsWith('/')
-        ? '$apiBaseUrl${widget.avatarUrl}'
+    final source = _fullFailed && widget.fallbackAvatarUrl.isNotEmpty
+        ? widget.fallbackAvatarUrl
         : widget.avatarUrl;
-    return CachedNetworkImageProvider(url);
+    final bytes = _dataUrlBytes(source);
+    if (bytes != null) return MemoryImage(bytes);
+    final url = source.startsWith('/') ? '$apiBaseUrl$source' : source;
+    final provider = CachedNetworkImageProvider(
+      url,
+      errorListener: (_) {
+        if (mounted && !_fullFailed) setState(() => _fullFailed = true);
+      },
+    );
+    return provider;
   }
 
   Future<void> _toggle() async {
@@ -1519,10 +1551,11 @@ class _MutualsRow extends StatelessWidget {
                     child: CircleAvatar(
                       radius: 9,
                       backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                      foregroundImage: _dataUrlBytes(preview[i].avatarUrl) != null
-                          ? ResizeImage(MemoryImage(_dataUrlBytes(preview[i].avatarUrl)!), width: 288)
-                          : null,
-                      child: _dataUrlBytes(preview[i].avatarUrl) == null
+                      foregroundImage: avatarProvider(
+                          preview[i].username, preview[i].avatarUrl),
+                      child: avatarProvider(preview[i].username,
+                                  preview[i].avatarUrl) ==
+                              null
                           ? Text(
                               initialFor(preview[i].username),
                               style: TextStyle(
@@ -1553,6 +1586,8 @@ class _EditorField extends StatelessWidget {
     this.maxLines = 1,
     this.maxLength,
     this.readOnly = false,
+    this.onTap,
+    this.helper,
   });
 
   final TextEditingController controller;
@@ -1561,6 +1596,11 @@ class _EditorField extends StatelessWidget {
   final int? maxLength;
   final bool readOnly;
 
+  /// Set when the value is chosen somewhere else — the city comes from the
+  /// map, never from typing.
+  final VoidCallback? onTap;
+  final String? helper;
+
   @override
   Widget build(BuildContext context) {
     return TextField(
@@ -1568,6 +1608,7 @@ class _EditorField extends StatelessWidget {
       maxLines: maxLines,
       maxLength: maxLength,
       readOnly: readOnly,
+      onTap: onTap,
       style: TextStyle(
         color: Theme.of(context).brightness == Brightness.light
             ? Colors.black
@@ -1578,6 +1619,22 @@ class _EditorField extends StatelessWidget {
           : Colors.white,
       decoration: InputDecoration(
         labelText: label,
+        helperText: helper,
+        helperMaxLines: 2,
+        helperStyle: TextStyle(
+          color: Theme.of(context).brightness == Brightness.light
+              ? const Color(0xff6b7280)
+              : const Color(0xff9c9c9c),
+          fontSize: 12,
+        ),
+        suffixIcon: onTap == null
+            ? null
+            : Icon(
+                Icons.chevron_right_rounded,
+                color: Theme.of(context).brightness == Brightness.light
+                    ? const Color(0xff9aa1ad)
+                    : const Color(0xff6c6c6c),
+              ),
         labelStyle: TextStyle(
           color: Theme.of(context).brightness == Brightness.light
               ? const Color(0xff6b7280)
@@ -1664,6 +1721,7 @@ class _EditProfileSheet extends StatefulWidget {
 
 class _EditProfileSheetState extends State<_EditProfileSheet> {
   late final TextEditingController _usernameController;
+  late final TextEditingController _emailController;
   late final TextEditingController _nameController;
   late final TextEditingController _bioController;
   late final TextEditingController _cityController;
@@ -1675,6 +1733,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   void initState() {
     super.initState();
     _usernameController = TextEditingController(text: widget.profile.username);
+    _emailController = TextEditingController(text: widget.profile.email);
     _nameController = TextEditingController(text: widget.profile.fullName);
     _bioController = TextEditingController(text: widget.profile.bio);
     _cityController = TextEditingController(text: widget.profile.city);
@@ -1692,11 +1751,34 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   @override
   void dispose() {
     _usernameController.dispose();
+    _emailController.dispose();
     _nameController.dispose();
     _bioController.dispose();
     _cityController.dispose();
     super.dispose();
   }
+
+  /// True while the picked photo is still being decoded, rotated and cropped.
+  ///
+  /// Save is disabled for its duration. Without it, tapping Save during those
+  /// seconds sent the *old* `_avatarUrl` — the request succeeded, the sheet
+  /// closed, and the new picture was silently dropped. That looked like a
+  /// slow-network bug because that is when the window is wide enough to hit.
+  bool _preparingAvatar = false;
+
+  /// Whether this sheet picked a new picture, as opposed to only editing text.
+  ///
+  /// The avatar rides in the save as ~240 KB of base64, and it used to be sent
+  /// on every save -- so changing nothing but your bio re-uploaded your whole
+  /// photo, which on a weak connection is the difference between a save that
+  /// works and one that times out. The server keeps whatever it already has
+  /// when the field is absent.
+  bool _avatarChanged = false;
+
+  /// The picked JPEG itself, so the save can send it as a binary file instead
+  /// of base64 inside JSON — a third fewer bytes on the app's largest upload.
+  /// The data URL in [_avatarUrl] is still what the UI draws from.
+  Uint8List? _avatarBytes;
 
   Future<void> _pickAvatar() async {
     final picked = await widget.imagePicker.pickImage(
@@ -1704,62 +1786,145 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
       imageQuality: 95,
     );
     if (picked == null || !mounted) return;
-    final rawBytes = await picked.readAsBytes();
-    if (!mounted) return;
-    // Always decode+re-encode to bake EXIF rotation into pixels on all platforms.
-    final fixed = await compute(_fixExifAndEncode, rawBytes);
-    if (!mounted) return;
-    Uint8List? cropped;
-    await Navigator.of(context).push<void>(MaterialPageRoute(
-      fullscreenDialog: true,
-      builder: (_) => _CropAvatarPage(
-        bytes: fixed,
-        onCrop: (b) => cropped = b,
-      ),
-    ));
-    if (cropped == null || !mounted) return;
-    setState(() {
-      _avatarUrl = 'data:image/jpeg;base64,${base64Encode(cropped!)}';
-    });
+    setState(() => _preparingAvatar = true);
+    try {
+      final rawBytes = await picked.readAsBytes();
+      if (!mounted) return;
+      // Always decode+re-encode to bake EXIF rotation into pixels on all platforms.
+      final fixed = await compute(_fixExifAndEncode, rawBytes);
+      if (!mounted) return;
+      Uint8List? cropped;
+      await Navigator.of(context).push<void>(MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _CropAvatarPage(
+          bytes: fixed,
+          onCrop: (b) => cropped = b,
+        ),
+      ));
+      if (cropped == null || !mounted) return;
+      setState(() {
+        _avatarUrl = 'data:image/jpeg;base64,${base64Encode(cropped!)}';
+        _avatarBytes = cropped;
+        _avatarChanged = true;
+      });
+    } finally {
+      if (mounted) setState(() => _preparingAvatar = false);
+    }
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || _preparingAvatar) return;
     setState(() => _saving = true);
     try {
-      final res = await http.patch(
-        meEndpoint,
-        headers: authJsonHeaders(widget.token),
-        body: jsonEncode({
-          'username': _usernameController.text.trim(),
-          'fullName': _nameController.text.trim(),
-          'bio': _bioController.text.trim(),
-          'city': _cityController.text.trim(),
-          'avatarUrl': _avatarUrl,
-          'avatarZoomable': _avatarZoomable,
-        }),
+      final body = <String, dynamic>{
+        'username': _usernameController.text.trim(),
+        'fullName': _nameController.text.trim(),
+        'bio': _bioController.text.trim(),
+        'city': _cityController.text.trim(),
+        'avatarZoomable': _avatarZoomable,
+      };
+      // Only when it actually changed. Omitting it leaves the server's copy
+      // alone, and turns a text-only edit from a ~240 KB upload into a
+      // fraction of a kilobyte — which is most saves, on the connection where
+      // it matters most.
+      // Only when there is no binary to send — a build talking to an older
+      // server, or a crop that produced no bytes. Otherwise the picture rides
+      // as a file part and this would duplicate it.
+      if (_avatarChanged && _avatarBytes == null) body['avatarUrl'] = _avatarUrl;
+
+      // Everything below happens without waiting for the network, and that is
+      // the whole point. The bytes are already on this device, so showing them
+      // needs no server; waiting for one is what made a bad connection look
+      // like a broken app. See ProfileSaveQueue.
+      final optimistic = widget.profile.copyWith(
+        avatarUrl: _avatarChanged ? _avatarUrl : null,
+        bio: _bioController.text.trim(),
+        fullName: _nameController.text.trim(),
+        city: _cityController.text.trim(),
       );
-      if (!mounted) return;
-      if (res.statusCode != 200) {
-        setState(() => _saving = false);
-        return;
+      if (_avatarChanged) {
+        AvatarStore.update(
+          username: widget.profile.username,
+          previousUrl: widget.profile.avatarUrl,
+          url: _avatarUrl,
+        );
       }
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final userJson = Map<String, dynamic>.from(
-        decoded['user'] as Map<String, dynamic>,
+      widget.onSaved(optimistic);
+
+      await ProfileSaveQueue.enqueue(
+        token: widget.token,
+        body: body,
+        username: widget.profile.username,
+        previousAvatarUrl: widget.profile.avatarUrl,
+        imageBytes: _avatarChanged ? _avatarBytes : null,
       );
-      userJson['avatarZoomable'] = _avatarZoomable;
-      widget.onSaved(UserProfile.fromJson(userJson));
+
       if (mounted) Navigator.of(context).pop();
-    } finally {
-      if (mounted) setState(() => _saving = false);
+    } catch (e) {
+      // Only reachable if the *local* work failed — encoding the body, or
+      // writing the job. The upload itself cannot fail this far.
+      debugPrint('[profile-save] could not queue: $e');
+      if (mounted) {
+        _reportSaveFailure(AppLocalizations.of(context).couldNotSaveProfile);
+      }
     }
+  }
+
+  /// Leaves the sheet open with everything still filled in, so the fix is one
+  /// more tap on Save rather than picking the photo again.
+  void _reportSaveFailure(String message) {
+    setState(() => _saving = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  /// The date the hold lifts, as the user would write it.
+  String _formatCityUnlock(DateTime? when) {
+    if (when == null) return '—';
+    final local = when.toLocal();
+    return '${local.day.toString().padLeft(2, '0')}/'
+        '${local.month.toString().padLeft(2, '0')}/${local.year}';
+  }
+
+  /// Opens the map to pick a new home city.
+  ///
+  /// Refused politely when the month is not up. The server enforces the same
+  /// rule, so this is only here to save somebody choosing a city on a map and
+  /// then being told no.
+  Future<void> _changeCity() async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    if (!widget.profile.canChangeCity) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l10n.cityChangeLocked(
+            _formatCityUnlock(widget.profile.cityChangeAllowedAt),
+          )),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final picked = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => CityPickPage(token: widget.token)),
+    );
+    if (!mounted || picked == null || picked.isEmpty) return;
+    if (picked == _cityController.text) return;
+    // Only shown in the field; it reaches the server with the rest of the
+    // form when Save is pressed, like every other value here.
+    setState(() => _cityController.text = picked);
   }
 
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final avatarBytes = _dataUrlBytes(_avatarUrl);
+    // Not _dataUrlBytes: the server now sends avatars as URLs, and decoding
+    // one as base64 returns nothing — which is why this sheet showed the
+    // letter placeholder instead of the picture the profile behind it was
+    // already displaying. avatarProvider handles both forms, including the
+    // data URL this holds after a new photo is picked.
+    final avatarImage = avatarProvider(widget.profile.username, _avatarUrl);
     return Container(
       decoration: BoxDecoration(
         color: isLight ? Colors.white : const Color(0xff000000),
@@ -1796,8 +1961,12 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                 ),
                 const Spacer(),
                 TextButton(
-                  onPressed: _saving ? null : _save,
-                  child: Text(AppLocalizations.of(context).save),
+                  onPressed: (_saving || _preparingAvatar) ? null : _save,
+                  child: Text(
+                    _preparingAvatar
+                        ? AppLocalizations.of(context).preparingPhoto
+                        : AppLocalizations.of(context).save,
+                  ),
                 ),
               ],
             ),
@@ -1810,10 +1979,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                     backgroundColor: Theme.of(context).brightness == Brightness.light
                         ? const Color(0xffe6e9ef)
                         : const Color(0xff2a2a2a),
-                    foregroundImage: avatarBytes != null
-                        ? ResizeImage(MemoryImage(avatarBytes), width: 288)
-                        : null,
-                    child: avatarBytes == null
+                    foregroundImage: avatarImage,
+                    child: avatarImage == null
                         ? Text(
                             initialFor(widget.profile.username),
                             style: TextStyle(
@@ -1856,11 +2023,31 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
               controller: _nameController,
               label: AppLocalizations.of(context).fieldName,
             ),
+            // Shown but not editable. Changing it is how somebody would take
+            // an account away from its owner, and it is the address a provider
+            // sign-in is matched against — so it is not a free-text field.
+            // Empty only for an account created with no address at all.
+            if (widget.profile.email.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _EditorField(
+                controller: _emailController,
+                label: AppLocalizations.of(context).email,
+                readOnly: true,
+              ),
+            ],
             const SizedBox(height: 12),
             _EditorField(
               controller: _cityController,
               label: AppLocalizations.of(context).city,
+              // Never typed: a city has to be one the app knows about, so it
+              // is picked on the same map as at sign-up.
               readOnly: true,
+              onTap: _changeCity,
+              helper: widget.profile.canChangeCity
+                  ? AppLocalizations.of(context).cityChangeHint
+                  : AppLocalizations.of(context).cityChangeLocked(
+                      _formatCityUnlock(widget.profile.cityChangeAllowedAt),
+                    ),
             ),
             const SizedBox(height: 12),
             _EditorField(
@@ -2483,7 +2670,7 @@ class _UserListPageState extends State<_UserListPage>
   }
 
   Widget _buildRow(UserProfile user, bool isLight) {
-    final bytes = _dataUrlBytes(user.avatarUrl);
+    final avatar = avatarProvider(user.username, user.avatarUrl);
     final canToggle = user.username != widget.currentUser.username;
     final isFollowing = user.isFollowing;
 
@@ -2499,14 +2686,9 @@ class _UserListPageState extends State<_UserListPage>
               backgroundColor: isLight
                   ? const Color(0xffe6e9ef)
                   : const Color(0xff2a2a2a),
-              foregroundImage: user.avatarUrl.isNotEmpty
-                  ? ResizeImage(
-                      bytes != null
-                          ? MemoryImage(bytes) as ImageProvider
-                          : CachedNetworkImageProvider(user.avatarUrl,
-                              cacheManager: imageCacheManager),
-                      width: 156) // 26px radius × 2 × 3.0 max DPR
-                  : null,
+              // avatarProvider already resolves data URL vs remote URL and
+              // caps the decode, so this no longer has to do it by hand.
+              foregroundImage: avatar,
               child: Text(initialFor(user.username),
                   style: TextStyle(
                       color: isLight ? Colors.black : Colors.white,

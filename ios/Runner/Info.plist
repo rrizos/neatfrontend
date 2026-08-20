@@ -14,6 +14,11 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>el</string>
+		<string>en</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>neat</string>
 	<key>CFBundlePackageType</key>
@@ -22,8 +27,6 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
-	<key>CFBundleVersion</key>
-	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -34,54 +37,27 @@
 				<string>neat</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.449378002358-i3dlqsb7rmff8jf05ag6slk7o21k8laq</string>
+			</array>
+		</dict>
 	</array>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<!-- The app uses only standard HTTPS/TLS, which is exempt under the US
-	     export regulations. Declaring it here stops App Store Connect asking
-	     the export-compliance question on every single upload. -->
+	<key>CFBundleVersion</key>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<!-- Without this the App Store lists the app as English-only, even though
-	     it ships full Greek. Greek is first: it is the primary language. -->
-	<key>CFBundleLocalizations</key>
-	<array>
-		<string>el</string>
-		<string>en</string>
-	</array>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-	</array>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Neat uses your microphone to record voice messages.</string>
-	<!-- Asked once, on the sign-up map only, to preselect the city you are in.
-	     Refusing it just leaves you picking from the map by hand. -->
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Neat can use your location once, while you are choosing your city, to find which city you are in. Your location is never stored or shared, and Neat never tracks you in the background.</string>
-	<!-- Required even though Neat never asks for "Always": the geolocator
-	     plugin's iOS code references requestAlwaysAuthorization, and App Store
-	     Connect rejects the upload over the mere reference (ITMS-90683)
-	     regardless of whether the app calls it. CityLocator only ever requests
-	     when-in-use, so this prompt is never actually shown — the wording still
-	     has to describe the access honestly if it ever were. -->
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Neat can use your location once, while you are choosing your city, to find which city you are in. Your location is never stored or shared, and Neat never uses your location in the background.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Neat needs access to your photo library to send photos.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Neat uses your camera to take photos for messages.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>instagram</string>
 		<string>whatsapp</string>
 		<string>tg</string>
 	</array>
-	<!-- Scoped to the one backend host, which has no domain name (so it can't
-	     get a public-CA cert) and serves a pinned self-signed cert instead —
-	     needed for native AVPlayer video playback to trust it. Every other
-	     host the app talks to (Firebase, Nominatim, MapKit's CDN, Netlify)
-	     keeps full ATS enforcement. -->
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>
@@ -95,6 +71,16 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Neat uses your camera to take photos for messages.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Neat can use your location once, while you are choosing your city, to find which city you are in. Your location is never stored or shared, and Neat never uses your location in the background.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Neat can use your location once, while you are choosing your city, to find which city you are in. Your location is never stored or shared, and Neat never tracks you in the background.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Neat uses your microphone to record voice messages.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Neat needs access to your photo library to send photos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -118,6 +104,10 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

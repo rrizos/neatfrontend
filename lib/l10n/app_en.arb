@@ -1,16 +1,13 @@
 {
   "@@locale": "en",
   "appTitle": "neat",
-
   "signUp": "Sign up",
   "signIn": "Sign in",
   "cancel": "Cancel",
-
   "landingSlogan": "One app, everything for your city.",
-
   "username": "Username",
   "email": "Email",
-  "fullName": "Full name",
+  "fullName": "Name",
   "password": "Password",
   "authAgreePrefix": "By signing up you agree to our ",
   "termsOfService": "Terms of Service",
@@ -21,7 +18,6 @@
   "authSwitchToSignIn": "Already have an account? Sign in",
   "authSwitchToSignUp": "New here? Create an account",
   "cityPickHint": "Join the For You of your area by tapping its pin.",
-
   "introTitle": "See what's going on in your city",
   "introSubtitle": "Neat only shows posts, news and conversations from your own area.",
   "introLocalFeedTitle": "Local feed",
@@ -31,7 +27,6 @@
   "introExploreTitle": "75+ cities",
   "introExploreBody": "Browse the map and see what's happening across Greece.",
   "introContinue": "Continue",
-
   "citySetupTitle": "Choose your city",
   "citySetupSubtitle": "The city you choose will be your community on Neat.",
   "citySetupHomeCityTitle": "Your city",
@@ -48,7 +43,6 @@
   "spectatorNoInteractionBody": "You can see everything, but you can't post, like or comment.",
   "spectatorMicrocopy": "Your city stays the only place where you take part.",
   "spectatorCta": "Continue",
-
   "forgotEnterEmailError": "Please enter your email or username",
   "forgotEnterAllDigits": "Please enter all 6 digits",
   "passwordMinLength": "Password must be at least 8 characters",
@@ -61,7 +55,11 @@
   "verify": "Verify",
   "resendCodeIn": "Resend code in {seconds}s",
   "@resendCodeIn": {
-    "placeholders": { "seconds": { "type": "int" } }
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
   },
   "resendCode": "Resend code",
   "createNewPassword": "Create new password",
@@ -69,7 +67,6 @@
   "newPassword": "New password",
   "confirmPassword": "Confirm password",
   "resetPassword": "Reset password",
-
   "settings": "Settings",
   "appearance": "Appearance",
   "language": "Language",
@@ -86,21 +83,35 @@
   "deleteAccountTypePrompt": "To confirm, type {word}",
   "deleteAccountTypeWord": "DELETE",
   "@deleteAccountTypePrompt": {
-    "placeholders": { "word": { "type": "String" } }
+    "placeholders": {
+      "word": {
+        "type": "String"
+      }
+    }
   },
   "delete": "Delete",
   "actionFailedStatus": "Failed ({status}): {body}",
   "@actionFailedStatus": {
-    "placeholders": { "status": { "type": "int" }, "body": { "type": "String" } }
+    "placeholders": {
+      "status": {
+        "type": "int"
+      },
+      "body": {
+        "type": "String"
+      }
+    }
   },
   "genericErrorMessage": "Error: {error}",
   "@genericErrorMessage": {
-    "placeholders": { "error": { "type": "String" } }
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
   },
   "blockedEmpty": "You haven't blocked anyone.",
   "unblock": "Unblock",
   "done": "Done",
-
   "reportTitle": "Report",
   "reportWhyPost": "Why are you reporting this post?",
   "reportAnonymousNote": "Your report is anonymous, except if you're reporting an intellectual property infringement.",
@@ -154,7 +165,6 @@
   "reportSubPolitics": "Politics",
   "reportSubSocialIssue": "Social issue",
   "reportSubSomethingElse": "Something else",
-
   "noMatchesInTown": "No matches in your town",
   "shareSendTo": "Send to",
   "shareSearchHint": "Search people in your city…",
@@ -163,20 +173,55 @@
   "sent": "Sent",
   "send": "Send",
   "copyLink": "Copy link",
-
   "justNow": "just now",
   "timeMinutes": "{n}m",
-  "@timeMinutes": { "placeholders": { "n": { "type": "int" } } },
+  "@timeMinutes": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "timeHours": "{n}h",
-  "@timeHours": { "placeholders": { "n": { "type": "int" } } },
+  "@timeHours": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "timeDays": "{n}d",
-  "@timeDays": { "placeholders": { "n": { "type": "int" } } },
+  "@timeDays": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "timeWeeks": "{n}w",
-  "@timeWeeks": { "placeholders": { "n": { "type": "int" } } },
+  "@timeWeeks": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "timeMonths": "{n}mo",
-  "@timeMonths": { "placeholders": { "n": { "type": "int" } } },
+  "@timeMonths": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "timeYears": "{n}y",
-  "@timeYears": { "placeholders": { "n": { "type": "int" } } },
+  "@timeYears": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "likesLoadError": "Could not load likes.",
   "noLikesYet": "No likes yet.",
   "likesTitle": "Likes",
@@ -186,34 +231,95 @@
   "likedByPrefix": "Liked by ",
   "listAnd": " and ",
   "likedByOthers": "{count, plural, =1{{count} other} other{{count} others}}",
-  "@likedByOthers": { "placeholders": { "count": { "type": "int" } } },
+  "@likedByOthers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "pollVotes": "{count, plural, =1{1 vote} other{{count} votes}}",
-  "@pollVotes": { "placeholders": { "count": { "type": "int" } } },
-
+  "@pollVotes": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "navHome": "Home",
   "navSearch": "Search",
   "navCreate": "Create",
   "navMap": "Map",
   "navProfile": "Profile",
-
   "postNotFound": "Post not found",
   "couldNotLoadPost": "Could not load post",
   "couldNotOpenLink": "Could not open the link",
   "openInApp": "Open in app",
   "noCommentsYet": "No comments yet",
   "commentsCount": "{count, plural, =1{1 comment} other{{count} comments}}",
-  "@commentsCount": { "placeholders": { "count": { "type": "int" } } },
-
+  "@commentsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "newPost": "New post",
   "post": "Post",
   "pollOptionHint": "Option {n}",
-  "@pollOptionHint": { "placeholders": { "n": { "type": "int" } } },
+  "@pollOptionHint": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "fileTooLarge": "File too large. Try a shorter video or smaller photos.",
   "uploadTimedOut": "Upload timed out. Please try again.",
   "networkError": "Network error. Please try again.",
   "photosSkipped": "{count, plural, =1{1 photo was too large and skipped. Try selecting a different photo.} other{{count} photos were too large and skipped. Try selecting a different photo.}}",
-  "@photosSkipped": { "placeholders": { "count": { "type": "int" } } },
+  "@photosSkipped": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "photoTooLarge": "Photo is too large. Try again.",
+  "videoTooLarge": "Video is too large ({size} MB). The limit is {max} MB — try a shorter clip.",
+  "@videoTooLarge": {
+    "placeholders": {
+      "size": {
+        "type": "int"
+      },
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "uploadingVideo": "Uploading video… {percent}%",
+  "@uploadingVideo": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "couldNotSaveProfile": "Could not save your profile. Check your connection and try again.",
+  "preparingPhoto": "Preparing photo…",
+  "videoProcessing": "Processing video…",
+  "postShared": "Posted",
+  "postingLabel": "Posting…",
+  "videoProcessingPercent": "Processing video… {percent}%",
+  "@videoProcessingPercent": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "postDeleted": "This post has been deleted",
+  "preparingVideo": "Preparing video…",
   "noPostsYet": "No posts yet.",
   "deletePost": "Delete post",
   "reportPost": "Report post",
@@ -225,7 +331,13 @@
   "searchPeople": "People",
   "searchPosts": "Posts",
   "noResultsFor": "No results for\n\"{query}\"",
-  "@noResultsFor": { "placeholders": { "query": { "type": "String" } } },
+  "@noResultsFor": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
   "nothingHereYet": "Nothing here yet.",
   "tryDifferentSearch": "Try a different search term.",
   "notificationsTitle": "Notifications",
@@ -244,11 +356,29 @@
   "notifMentionedPost": "mentioned you in a post",
   "notifMentionedDm": "mentioned you in a DM",
   "timeMinutesAgo": "{n}m ago",
-  "@timeMinutesAgo": { "placeholders": { "n": { "type": "int" } } },
+  "@timeMinutesAgo": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "timeHoursAgo": "{n}h ago",
-  "@timeHoursAgo": { "placeholders": { "n": { "type": "int" } } },
+  "@timeHoursAgo": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "timeDaysAgo": "{n}d ago",
-  "@timeDaysAgo": { "placeholders": { "n": { "type": "int" } } },
+  "@timeDaysAgo": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "unpinComment": "Unpin comment",
   "pinComment": "Pin comment",
   "deleteComment": "Delete comment",
@@ -260,18 +390,35 @@
   "commentsTitle": "Comments",
   "noCommentsBeFirst": "No comments yet.\nBe the first!",
   "replyToHint": "Reply to @{username}...",
-  "@replyToHint": { "placeholders": { "username": { "type": "String" } } },
+  "@replyToHint": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
   "addCommentHint": "Add a comment...",
   "noInternet": "No internet connection",
   "noPostsInCity": "No posts in {city} yet",
-  "@noPostsInCity": { "placeholders": { "city": { "type": "String" } } },
-
+  "@noPostsInCity": {
+    "placeholders": {
+      "city": {
+        "type": "String"
+      }
+    }
+  },
   "somethingWentWrong": "Something went wrong",
   "userBlocked": "User blocked",
   "userUnblocked": "User unblocked",
   "blockUser": "Block User",
   "blockUserConfirm": "Block @{username}? They won't be able to find your profile, see your posts, or message you.",
-  "@blockUserConfirm": { "placeholders": { "username": { "type": "String" } } },
+  "@blockUserConfirm": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
   "block": "Block",
   "adminPanel": "Admin Panel",
   "moreOptions": "More options",
@@ -296,11 +443,22 @@
   "sortByLabel": "Sort by ",
   "noUsersYet": "No users yet.",
   "followersTitle": "{count} Followers",
-  "@followersTitle": { "placeholders": { "count": { "type": "int" } } },
+  "@followersTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "followingTitle": "{count} Following",
-  "@followingTitle": { "placeholders": { "count": { "type": "int" } } },
+  "@followingTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "city": "City",
-
   "eventsOfficial": "Official",
   "eventsCommunity": "Community",
   "noEventsYet": "No events yet.",
@@ -344,14 +502,28 @@
   "tapPhotoReplace": "Tap photo icon to replace",
   "pinnedByOrganizer": "Pinned by organizer",
   "couldNotCreateEvent": "Could not create event ({status}): {body}",
-  "@couldNotCreateEvent": { "placeholders": { "status": { "type": "int" }, "body": { "type": "String" } } },
+  "@couldNotCreateEvent": {
+    "placeholders": {
+      "status": {
+        "type": "int"
+      },
+      "body": {
+        "type": "String"
+      }
+    }
+  },
   "couldNotSaveEvent": "Could not save event ({status})",
-  "@couldNotSaveEvent": { "placeholders": { "status": { "type": "int" } } },
+  "@couldNotSaveEvent": {
+    "placeholders": {
+      "status": {
+        "type": "int"
+      }
+    }
+  },
   "seeIfFriendsGoing": "See if friends are going",
   "couldNotLoad": "Could not load.",
   "noFriendsGoing": "None of your friends are going yet.",
   "friendsGoing": "Friends going",
-
   "couldNotStartChat": "Could not start chat",
   "newMessage": "New message",
   "activeNowHeader": "Active Now",
@@ -372,7 +544,13 @@
   "cantBeUndone": "This can't be undone.",
   "unblockUser": "Unblock User",
   "blockUserConfirmMsg": "Block @{name}? They won't be able to message you or find your profile or posts, and this conversation will be removed from your inbox.",
-  "@blockUserConfirmMsg": { "placeholders": { "name": { "type": "String" } } },
+  "@blockUserConfirmMsg": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "conversationUnavailable": "This conversation is no longer available",
   "editedLabel": "Edited",
   "recording": "Recording...",
@@ -383,17 +561,34 @@
   "messageFailedToSend": "Message failed to send",
   "readLabel": "Read",
   "replyingToUser": "Replying to @{sender}",
-  "@replyingToUser": { "placeholders": { "sender": { "type": "String" } } },
+  "@replyingToUser": {
+    "placeholders": {
+      "sender": {
+        "type": "String"
+      }
+    }
+  },
   "mapMobileOnly": "Map is available on mobile only.",
-
   "analyticsTab": "Analytics",
   "securityTab": "Security",
   "reportsTab": "Reports",
   "usersTab": "Users",
   "adminNoDelete": "No admin delete available for a {type}",
-  "@adminNoDelete": { "placeholders": { "type": { "type": "String" } } },
+  "@adminNoDelete": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
   "deleteFailed": "Delete failed ({status})",
-  "@deleteFailed": { "placeholders": { "status": { "type": "int" } } },
+  "@deleteFailed": {
+    "placeholders": {
+      "status": {
+        "type": "int"
+      }
+    }
+  },
   "contentDeleted": "Content deleted",
   "retry": "Retry",
   "noReports": "No reports",
@@ -403,14 +598,41 @@
   "mediaUnavailable": "media unavailable",
   "dismiss": "Dismiss",
   "deleteTyped": "Delete {type}",
-  "@deleteTyped": { "placeholders": { "type": { "type": "String" } } },
+  "@deleteTyped": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
   "deleteTypedTitle": "Delete {type}?",
-  "@deleteTypedTitle": { "placeholders": { "type": { "type": "String" } } },
+  "@deleteTypedTitle": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
   "deleteContentConfirm": "This permanently deletes the {type} by @{author} and all of its reports.",
-  "@deleteContentConfirm": { "placeholders": { "type": { "type": "String" }, "author": { "type": "String" } } },
+  "@deleteContentConfirm": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "author": {
+        "type": "String"
+      }
+    }
+  },
   "deleteUserTitle": "Delete user?",
   "deleteUserConfirm": "This will permanently delete @{username} and all their data.",
-  "@deleteUserConfirm": { "placeholders": { "username": { "type": "String" } } },
+  "@deleteUserConfirm": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
   "searchUsersHint": "Search users...",
   "noUsersFound": "No users found",
   "verifyUser": "Verify user",
@@ -455,9 +677,24 @@
   "reviewNeeded": "to review",
   "reviewClear": "clear",
   "postsCountLabel": "{count} posts",
-  "@postsCountLabel": { "placeholders": { "count": { "type": "int" } } },
+  "@postsCountLabel": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "cityUsersPosts": "{users} users · {posts} posts",
-  "@cityUsersPosts": { "placeholders": { "users": { "type": "int" }, "posts": { "type": "int" } } },
+  "@cityUsersPosts": {
+    "placeholders": {
+      "users": {
+        "type": "int"
+      },
+      "posts": {
+        "type": "int"
+      }
+    }
+  },
   "failedLoadSecurity": "Failed to load security data",
   "secLockAccount": "Lock account",
   "secUnlockAccount": "Unlock account",
@@ -469,36 +706,88 @@
   "confirm": "Confirm",
   "proceed": "Proceed?",
   "secLockBody": "Disable \"{u}\" and revoke every session/API token. They will be signed out immediately and cannot sign in until unlocked.",
-  "@secLockBody": { "placeholders": { "u": { "type": "String" } } },
+  "@secLockBody": {
+    "placeholders": {
+      "u": {
+        "type": "String"
+      }
+    }
+  },
   "secUnlockBody": "Re-enable \"{u}\" so they can sign in again.",
-  "@secUnlockBody": { "placeholders": { "u": { "type": "String" } } },
+  "@secUnlockBody": {
+    "placeholders": {
+      "u": {
+        "type": "String"
+      }
+    }
+  },
   "secRevokeBody": "Sign \"{u}\" out of all devices by revoking every session/API token. The account stays active.",
-  "@secRevokeBody": { "placeholders": { "u": { "type": "String" } } },
+  "@secRevokeBody": {
+    "placeholders": {
+      "u": {
+        "type": "String"
+      }
+    }
+  },
   "searchSecurityHint": "Search actor, IP, path, message…",
   "noEventsMatchFilters": "No events match these filters.",
   "chainVerified": "Chain verified ({checked})",
-  "@chainVerified": { "placeholders": { "checked": { "type": "int" } } },
+  "@chainVerified": {
+    "placeholders": {
+      "checked": {
+        "type": "int"
+      }
+    }
+  },
   "chainBroken": "Chain broken",
   "actionDone": "{action} — done",
-  "@actionDone": { "placeholders": { "action": { "type": "String" } } },
+  "@actionDone": {
+    "placeholders": {
+      "action": {
+        "type": "String"
+      }
+    }
+  },
   "actionFailed": "Action failed",
   "actionFailedStatusShort": "Action failed ({status})",
-  "@actionFailedStatusShort": { "placeholders": { "status": { "type": "int" } } },
+  "@actionFailedStatusShort": {
+    "placeholders": {
+      "status": {
+        "type": "int"
+      }
+    }
+  },
   "auditChainBroken": "Audit chain broken from entry #{id} — a record was altered or removed outside the application.",
-  "@auditChainBroken": { "placeholders": { "id": { "type": "String" } } },
+  "@auditChainBroken": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
   "reactionsTitle": "Reactions",
   "tapToRemoveReaction": "Tap to remove",
-
   "addBio": "Add bio",
   "joiningCity": "Joining {city}...",
-  "@joiningCity": { "placeholders": { "city": { "type": "String" } } },
+  "@joiningCity": {
+    "placeholders": {
+      "city": {
+        "type": "String"
+      }
+    }
+  },
   "returningToCity": "Returning to {city}...",
-  "@returningToCity": { "placeholders": { "city": { "type": "String" } } },
+  "@returningToCity": {
+    "placeholders": {
+      "city": {
+        "type": "String"
+      }
+    }
+  },
   "neatPass": "Neat Pass",
   "neatPoints": "Neat Points",
   "neatPassHowToEarn": "Appear in the Virals top-10 to earn Neat Points.",
   "neatPassCurrentPoints": "Points Balance",
-
   "photoViewOnce": "View once",
   "photoAllowReplay": "Allow replay",
   "photoKeepInChat": "Keep in chat",
@@ -508,5 +797,138 @@
   "photoOpened": "Opened",
   "photoSentOnce": "Sent · View once",
   "photoSentReplay": "Sent · Allow replay",
-  "photoUnavailable": "This photo is no longer available"
+  "photoUnavailable": "This photo is no longer available",
+  "signUpMethodTitle": "Create your account",
+  "@signUpMethodTitle": {
+    "description": "Heading on the screen that offers Apple / Google / email sign-up"
+  },
+  "signUpMethodSubtitle": "Pick how you want to sign up. You can always sign in the same way later.",
+  "@signUpMethodSubtitle": {
+    "description": "Explains that the chosen method is also how they will sign in later"
+  },
+  "signUpWithApple": "Continue with Apple",
+  "@signUpWithApple": {
+    "description": "Button label. Apple requires the wording \"Continue with Apple\""
+  },
+  "signUpWithGoogle": "Continue with Google",
+  "@signUpWithGoogle": {
+    "description": "Button label for Google sign-in"
+  },
+  "signUpWithEmail": "Sign up with email",
+  "@signUpWithEmail": {
+    "description": "Button label that opens the existing username/password form"
+  },
+  "signUpMethodHaveAccount": "Already have an account?",
+  "@signUpMethodHaveAccount": {
+    "description": "Prompt above the sign-in link"
+  },
+  "signUpMethodSignIn": "Sign in",
+  "@signUpMethodSignIn": {
+    "description": "Link to the sign-in form"
+  },
+  "signUpGoogleUnavailable": "Google sign-in is not set up yet.",
+  "@signUpGoogleUnavailable": {
+    "description": "Shown when the Google client id has not been configured"
+  },
+  "usernameSetupTitle": "Pick your username",
+  "@usernameSetupTitle": {
+    "description": "Username setup screen: usernameSetupTitle"
+  },
+  "usernameSetupSubtitle": "This is how people find you and mention you. You can change it later in your profile.",
+  "@usernameSetupSubtitle": {
+    "description": "Username setup screen: usernameSetupSubtitle"
+  },
+  "usernameSetupHint": "username",
+  "@usernameSetupHint": {
+    "description": "Username setup screen: usernameSetupHint"
+  },
+  "usernameSetupRules": "Letters, numbers, dots and underscores. 3–20 characters.",
+  "@usernameSetupRules": {
+    "description": "Username setup screen: usernameSetupRules"
+  },
+  "usernameSetupCta": "Continue",
+  "@usernameSetupCta": {
+    "description": "Username setup screen: usernameSetupCta"
+  },
+  "usernameSetupTaken": "That username is already taken.",
+  "@usernameSetupTaken": {
+    "description": "Username setup screen: usernameSetupTaken"
+  },
+  "usernameSetupTooShort": "Username must be at least 3 characters.",
+  "@usernameSetupTooShort": {
+    "description": "Username setup screen: usernameSetupTooShort"
+  },
+  "usernameSetupTooLong": "Username must be at most 20 characters.",
+  "@usernameSetupTooLong": {
+    "description": "Username setup screen: usernameSetupTooLong"
+  },
+  "usernameSetupBadChars": "Only letters, numbers, dots and underscores.",
+  "@usernameSetupBadChars": {
+    "description": "Username setup screen: usernameSetupBadChars"
+  },
+  "authOr": "or",
+  "@authOr": {
+    "description": "Divider between the password form and the provider buttons"
+  },
+  "setPasswordTitle": "Set a password",
+  "@setPasswordTitle": {
+    "description": "Password settings screen: setPasswordTitle"
+  },
+  "changePasswordTitle": "Change password",
+  "@changePasswordTitle": {
+    "description": "Password settings screen: changePasswordTitle"
+  },
+  "setPasswordExplain": "You signed up with Apple or Google, so your account has no password yet. Adding one gives you a second way to sign in if you ever lose access to that account.",
+  "@setPasswordExplain": {
+    "description": "Password settings screen: setPasswordExplain"
+  },
+  "changePasswordExplain": "Choose a new password for your account.",
+  "@changePasswordExplain": {
+    "description": "Password settings screen: changePasswordExplain"
+  },
+  "currentPasswordHint": "Current password",
+  "@currentPasswordHint": {
+    "description": "Password settings screen: currentPasswordHint"
+  },
+  "newPasswordHint": "New password",
+  "@newPasswordHint": {
+    "description": "Password settings screen: newPasswordHint"
+  },
+  "confirmPasswordHint": "Repeat new password",
+  "@confirmPasswordHint": {
+    "description": "Password settings screen: confirmPasswordHint"
+  },
+  "passwordsDoNotMatch": "The two passwords are not the same.",
+  "@passwordsDoNotMatch": {
+    "description": "Password settings screen: passwordsDoNotMatch"
+  },
+  "passwordSaved": "Password saved.",
+  "@passwordSaved": {
+    "description": "Password settings screen: passwordSaved"
+  },
+  "savePassword": "Save",
+  "@savePassword": {
+    "description": "Password settings screen: savePassword"
+  },
+  "support": "Support",
+  "@support": {
+    "description": "Support row in settings: support"
+  },
+  "cityChangeLocked": "You can change your city again on {date}.",
+  "@cityChangeLocked": {
+    "description": "Shown when the month has not passed yet",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "cityChangeHint": "Tap to change. You can only change your city once a month.",
+  "@cityChangeHint": {
+    "description": "Shown under the city field when a change is allowed"
+  },
+  "cityChanged": "Your city has been updated.",
+  "@cityChanged": {
+    "description": "Confirmation after the city was saved"
+  }
 }

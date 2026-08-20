@@ -45,12 +45,40 @@ class MutualUser {
 }
 
 class MediaItem {
-  const MediaItem({required this.type, required this.url, this.duration});
+  const MediaItem({
+    required this.type,
+    required this.url,
+    this.duration,
+    this.status = 'ready',
+    this.thumbUrl = '',
+    this.progress = 0,
+  });
   final String type; // 'image' or 'video'
   final String url;
   final double? duration;
+
+  /// 'ready', or 'processing' while the server is still re-encoding a video.
+  ///
+  /// Uploads are no longer transcoded inside the request that carries them, so
+  /// a post can arrive a few seconds before its video is finished. [url] is
+  /// populated either way — it points at the original upload until the encode
+  /// lands — but the original can be tens of megabytes, so it is worth waiting
+  /// rather than pulling it down over a phone connection.
+  final String status;
+
+  /// A still from the video, produced server-side by the transcode worker.
+  ///
+  /// Empty for images, and for videos posted before posters existed — in which
+  /// case anywhere that wants a thumbnail falls back to what it did before.
+  final String thumbUrl;
+
+  /// How far through the server-side encode this video is, 0-100. Only
+  /// meaningful while [isProcessing]; a wait with no number reads as a hang.
+  final int progress;
+
   bool get isVideo => type == 'video';
   bool get isImage => type == 'image';
+  bool get isProcessing => status == 'processing';
 }
 
 class AuthSession {
@@ -75,6 +103,7 @@ class UserProfile {
     required this.bio,
     required this.city,
     required this.avatarUrl,
+    this.avatarFullUrl = '',
     required this.followers,
     required this.following,
     required this.isFollowing,
@@ -87,6 +116,10 @@ class UserProfile {
     this.canCreateOfficialEvents = false,
     this.isBlocked = false,
     this.hasBlockedYou = false,
+    this.usernamePending = false,
+    this.hasPassword = true,
+    this.canChangeCity = false,
+    this.cityChangeAllowedAt,
   });
   final int id;
   final String username;
@@ -94,7 +127,39 @@ class UserProfile {
   final String fullName;
   final String bio;
   final String city;
+
+  /// True while this account still carries a username the server invented for
+  /// it, which only happens to accounts created through Apple or Google — they
+  /// never pass a form with a username field. The app asks for a real one
+  /// before letting them in, and the server clears this once they pick.
+  final bool usernamePending;
+
+  /// Whether this account can be signed into with a password at all. False for
+  /// one created through Apple or Google that has never set one — for those
+  /// the provider is the only way in until they add a password.
+  ///
+  /// Defaults to true so an older cached profile, saved before the server sent
+  /// this, is not mistaken for an account with no password.
+  final bool hasPassword;
+
+  /// Whether the home city may be changed right now, and when it may next be
+  /// if not. The city decides which feed, which events and which people this
+  /// account belongs to, so it is held for a month at a time — the server
+  /// enforces it, and these two only exist so the app can say so up front
+  /// rather than letting somebody pick a city and be refused.
+  final bool canChangeCity;
+  final DateTime? cityChangeAllowedAt;
+
   final String avatarUrl;
+
+  /// Media URL of the sharp, full-resolution copy, when the server has one.
+  ///
+  /// [avatarUrl] is deliberately a small inline image — it rides in every
+  /// payload that mentions this user — so it is soft anywhere it is drawn
+  /// larger than a feed row. Screens that enlarge an avatar read this
+  /// instead and fall back to [avatarUrl] when it is empty, which it is for
+  /// anyone who has not saved a picture since the server started keeping both.
+  final String avatarFullUrl;
   final int followers;
   final int following;
   final bool isFollowing;
@@ -114,9 +179,21 @@ class UserProfile {
     int? followers,
     bool? isBlocked,
     bool? hasBlockedYou,
+    String? avatarUrl,
+    String? bio,
+    String? fullName,
+    String? city,
+    String? username,
+    bool? usernamePending,
+    bool? hasPassword,
+    bool? canChangeCity,
   }) => UserProfile(
-    id: id, username: username, email: email, fullName: fullName,
-    bio: bio, city: city, avatarUrl: avatarUrl,
+    id: id, username: username ?? this.username, email: email,
+    fullName: fullName ?? this.fullName,
+    bio: bio ?? this.bio,
+    city: city ?? this.city,
+    avatarUrl: avatarUrl ?? this.avatarUrl,
+    avatarFullUrl: avatarFullUrl,
     followers: followers ?? this.followers,
     following: following,
     isFollowing: isFollowing ?? this.isFollowing,
@@ -126,6 +203,13 @@ class UserProfile {
     canCreateOfficialEvents: canCreateOfficialEvents,
     isBlocked: isBlocked ?? this.isBlocked,
     hasBlockedYou: hasBlockedYou ?? this.hasBlockedYou,
+    // Carried through explicitly: leaving it out silently defaults it to
+    // false, which would make the "pick a username" prompt disappear the first
+    // time anything copied the profile.
+    usernamePending: usernamePending ?? this.usernamePending,
+    hasPassword: hasPassword ?? this.hasPassword,
+    canChangeCity: canChangeCity ?? this.canChangeCity,
+    cityChangeAllowedAt: cityChangeAllowedAt,
   );
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -137,7 +221,13 @@ class UserProfile {
       fullName: json['fullName']?.toString() ?? '',
       bio: json['bio']?.toString() ?? '',
       city: json['city']?.toString() ?? '',
+      usernamePending: json['usernamePending'] == true,
+      hasPassword: json['hasPassword'] != false,
+      canChangeCity: json['canChangeCity'] == true,
+      cityChangeAllowedAt:
+          DateTime.tryParse(json['cityChangeAllowedAt']?.toString() ?? ''),
       avatarUrl: json['avatarUrl']?.toString() ?? '',
+      avatarFullUrl: json['avatarFullUrl']?.toString() ?? '',
       followers: parseInt(json['followers']),
       following: parseInt(json['following']),
       isFollowing: json['isFollowing'] == true,
@@ -166,7 +256,14 @@ class UserProfile {
     'fullName': fullName,
     'bio': bio,
     'city': city,
+    // Round-trips through the cached copy AuthGate keeps, so a sign-up
+    // interrupted before the username was chosen still knows to ask.
+    'usernamePending': usernamePending,
+    'hasPassword': hasPassword,
+    'canChangeCity': canChangeCity,
+    'cityChangeAllowedAt': cityChangeAllowedAt?.toIso8601String(),
     'avatarUrl': avatarUrl,
+    'avatarFullUrl': avatarFullUrl,
     'followers': followers,
     'following': following,
     'isFollowing': isFollowing,
@@ -290,6 +387,11 @@ class FeedPost {
                 type: m['type']?.toString() ?? 'image',
                 url: _resolveMediaUrl(m['url']?.toString() ?? ''),
                 duration: (m['duration'] as num?)?.toDouble(),
+                // Absent on servers older than the transcode queue, which had
+                // finished encoding before they answered at all.
+                status: m['status']?.toString() ?? 'ready',
+                thumbUrl: _resolveMediaUrl(m['thumbUrl']?.toString() ?? ''),
+                progress: int.tryParse(m['progress']?.toString() ?? '') ?? 0,
               ))
           .where((m) => m.url.isNotEmpty)
           .toList();
@@ -507,6 +609,7 @@ class MessageItem {
     this.photoMode = '',
     this.opensLeft = 0,
     this.openedByOther = false,
+    this.mediaUrl = '',
   });
 
   final int id;
@@ -531,10 +634,20 @@ class MessageItem {
   /// sender's side, and independent of whether you have spent your own.
   final bool openedByOther;
 
+  /// Where this message's picture or voice note actually lives.
+  ///
+  /// DM media used to be base64 inside [text], so a bubble drew straight from
+  /// the message. It is a file now, and the server sends its URL right here —
+  /// which means the bubble can render it without a second request asking
+  /// where it is. Empty for text messages, for temporary photos (whose bytes
+  /// are deliberately not addressable), and for servers older than this.
+  final String mediaUrl;
+
   bool get isTemporaryPhoto => photoMode.isNotEmpty;
 
   MessageItem copyWith({String? text, int? opensLeft, bool? openedByOther}) => MessageItem(
         id: id,
+        mediaUrl: mediaUrl,
         sender: sender,
         text: text ?? this.text,
         created: created,
@@ -569,6 +682,7 @@ class MessageItem {
               .toList(),
     };
     final text = json['text']?.toString() ?? '';
+    final mediaUrl = json['mediaUrl']?.toString() ?? '';
     // The thread ships the cards the server already holds. Seeding them means
     // a chat opens with its thumbnails rather than each bubble asking for one
     // and filling in over the next minute.
@@ -594,6 +708,7 @@ class MessageItem {
       photoMode: json['photo_mode']?.toString() ?? '',
       opensLeft: parseInt(json['opens_left']),
       openedByOther: json['opened_by_other'] == true,
+      mediaUrl: mediaUrl,
     );
   }
 }

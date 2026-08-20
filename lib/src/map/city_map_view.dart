@@ -362,11 +362,14 @@ class _CityMapViewState extends State<CityMapView> {
   }
 
   /// How long the map is given to reach the detected city before the card
-  /// covers it: settling at the country view (350ms), the glide across to the
-  /// city (750ms), and the descent onto it — all set on both native sides.
-  /// Land the card any earlier and it hides the movement that is the whole
-  /// point of showing someone where their city is.
-  static const _kFocusTravel = Duration(milliseconds: 2000);
+  /// covers it: a settle at the country view, the glide across to the city,
+  /// and a two-stage descent onto it — all set on both native sides.
+  ///
+  /// The native legs are chained on arrival rather than run to a stopwatch, so
+  /// this cannot be derived exactly; it is a comfortable margin over the
+  /// typical flight. Land the card any earlier and it hides the movement that
+  /// is the whole point of showing someone where their city is.
+  static const _kFocusTravel = Duration(milliseconds: 2400);
 
   /// Asks for location permission and, if it is granted, opens the card for
   /// the city the device is in so the user only has to press connect.

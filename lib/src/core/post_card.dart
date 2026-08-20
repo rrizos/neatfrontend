@@ -43,6 +43,27 @@ Uint8List? decodeAvatarUrl(String rawValue) {
   return result;
 }
 
+/// The image for someone's avatar, whichever form the server sent.
+///
+/// Avatars used to always be base64 inside the JSON, so every screen decoded
+/// them directly. That is what made a payload grow with the number of people
+/// it mentioned — a data URL cannot be cached, cannot be fetched alongside the
+/// list, and barely compresses. Newer servers send a URL instead, and this is
+/// the one place that knows the difference.
+///
+/// Returns null when there is no picture, which is the caller's cue to draw
+/// initials.
+ImageProvider? avatarProvider(String username, String rawUrl) {
+  final resolved = AvatarStore.resolve(username, rawUrl);
+  if (resolved.isEmpty) return null;
+  if (resolved.startsWith('data:')) {
+    final bytes = decodeAvatarUrl(resolved);
+    return bytes == null ? null : ResizeImage(MemoryImage(bytes), width: 288);
+  }
+  final url = resolved.startsWith('/') ? '$apiBaseUrl$resolved' : resolved;
+  return ResizeImage(CachedNetworkImageProvider(url), width: 288);
+}
+
 String postAge(int minutesAgo, AppLocalizations l10n) {
   if (minutesAgo < 1) return l10n.justNow;
   if (minutesAgo < 60) return l10n.timeMinutes(minutesAgo);
@@ -113,11 +134,11 @@ class PostAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final bytes = decodeAvatarUrl(AvatarStore.resolve(username, avatarUrl));
+    final image = avatarProvider(username, avatarUrl);
     return CircleAvatar(
       backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-      foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-      child: bytes == null
+      foregroundImage: image,
+      child: image == null
           ? Text(
               initialFor(username),
               style: TextStyle(color: isLight ? const Color(0xff444444) : Colors.white),
@@ -187,6 +208,63 @@ class _FeedMedia extends StatelessWidget {
           color: isLight ? const Color(0xfff0f0f0) : const Color(0xff141414),
         );
       },
+    );
+  }
+}
+
+/// Stands in for a video the server is still re-encoding.
+///
+/// Uploads used to be transcoded inside the request that carried them, so a
+/// post could not exist before its video did. Now the encode happens in a
+/// worker and a fresh post is briefly ahead of its own video — a matter of
+/// seconds, but the tile has to say something during them.
+///
+/// It deliberately does not offer to play anything. The URL does work already
+/// (it points at the original upload), but that file can be a hundred
+/// megabytes, which is exactly what the re-encode exists to avoid sending down
+/// a phone connection.
+class _ProcessingMedia extends StatelessWidget {
+  const _ProcessingMedia({this.progress = 0});
+
+  /// 0-100 from the server. Zero means "queued, not started" — shown as an
+  /// indeterminate spinner, because a hard 0% looks stuck.
+  final int progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final ground = isLight ? const Color(0xffe6e9ef) : const Color(0xff1c1c1c);
+    final ink = isLight ? const Color(0xff5c6675) : const Color(0xff9aa4b2);
+
+    return ColoredBox(
+      color: ground,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.2,
+                value: progress > 0 ? progress / 100 : null,
+                valueColor: AlwaysStoppedAnimation<Color>(ink),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              progress > 0
+                  ? AppLocalizations.of(context).videoProcessingPercent(progress)
+                  : AppLocalizations.of(context).videoProcessing,
+              style: TextStyle(
+                color: ink,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -602,6 +680,7 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
   }
 
   Widget _buildPage(MediaItem item, int index) {
+    if (item.isProcessing) return _ProcessingMedia(progress: item.progress);
     if (item.isVideo) {
       return _FeedVideoPlayer(
         url: item.url,
@@ -730,6 +809,21 @@ Future<void> openPhotoViewer(BuildContext context, Uint8List bytes) {
   );
 }
 
+/// Opens a photo that lives at a URL, for DM media now stored as files.
+Future<void> openPhotoUrlViewer(BuildContext context, String url) {
+  return Navigator.of(context).push<void>(
+    PageRouteBuilder<void>(
+      opaque: true,
+      pageBuilder: (_, _, _) => _FullscreenMediaViewer(
+        media: [MediaItem(type: 'image', url: url)],
+        initialIndex: 0,
+      ),
+      transitionsBuilder: (_, animation, _, child) =>
+          FadeTransition(opacity: animation, child: child),
+    ),
+  );
+}
+
 class _FullscreenMediaViewer extends StatefulWidget {
   const _FullscreenMediaViewer({
     required this.media,
@@ -798,6 +892,9 @@ class _FullscreenMediaViewerState extends State<_FullscreenMediaViewer> {
               onPageChanged: (i) => setState(() => _current = i),
               itemBuilder: (_, i) {
                 final item = widget.media[i];
+                if (item.isProcessing) {
+                  return _ProcessingMedia(progress: item.progress);
+                }
                 if (item.isVideo) {
                   return _FeedVideoPlayer(url: item.url, fullscreen: true);
                 }
@@ -964,7 +1061,7 @@ class _LikersSheetState extends State<_LikersSheet> {
         itemCount: users.length,
         itemBuilder: (_, i) {
           final u = users[i];
-          final bytes = decodeAvatarUrl(AvatarStore.resolve(u.username, u.avatarUrl));
+          final avatar = avatarProvider(u.username, u.avatarUrl);
           final isSelf = u.username == widget.currentUsername;
           final isFollowing = _following.contains(u.username);
           return ListTile(
@@ -974,8 +1071,8 @@ class _LikersSheetState extends State<_LikersSheet> {
               child: CircleAvatar(
                 radius: 24,
                 backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-                child: bytes == null
+                foregroundImage: avatar,
+                child: avatar == null
                     ? Text(
                         u.username.isNotEmpty ? u.username[0].toUpperCase() : '?',
                         style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: textColor),

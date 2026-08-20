@@ -32,3 +32,14 @@ Future<void> _open(BuildContext context, String path) async {
 Future<void> openTermsOfService(BuildContext context) => _open(context, '/terms');
 
 Future<void> openPrivacyPolicy(BuildContext context) => _open(context, '/privacy');
+
+/// The Safety and data portal: privacy, terms, contact and account deletion,
+/// all in one page.
+///
+/// Settings links here rather than straight to a mail app because most of what
+/// people open a support link for — what data is kept, how to delete an
+/// account, the rules — is answered on the page itself, and the ones who still
+/// need a person find the Contact button on it. Opening a blank email instead
+/// asks them to write out a question the page had already answered.
+Future<void> openSafetyPortal(BuildContext context) =>
+    _open(context, '/safetyportal');

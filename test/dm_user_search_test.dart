@@ -24,6 +24,9 @@ Widget _app() => MaterialApp(
         // suggestion filter is what we're checking anyway.
         token: 'test-token',
         currentUsername: 'me',
+        // Never rendered here: the search field is what this exercises, and an
+        // empty URL is the same "no picture yet" case a new account has.
+        currentAvatarUrl: '',
         suggestedUsers: [
           _user('maria_k', 'Μαρία Κ.'),
           _user('giorgos99', 'Γιώργος Παπαδόπουλος'),

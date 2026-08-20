@@ -10,7 +10,8 @@ import '../core/api.dart';
 import '../core/models.dart';
 import '../core/legal_links.dart';
 import '../map/city_map_view.dart';
-import 'city_setup_page.dart';
+import 'app_intro_page.dart';
+import 'social_buttons.dart';
 import 'forgot_password_screen.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -98,40 +99,15 @@ final session = AuthSession.fromJson(
 jsonDecode(res.body) as Map<String, dynamic>,
 );
 if (mounted) {
-if (_signup) {
-// Account created — the city setup screen is the last mandatory step
-// before the map, and only returns once a city has been chosen.
-final selectedCity = await Navigator.of(context).push<String>(
-MaterialPageRoute(
-builder: (_) => CitySetupPage(
-token: session.token,
-themeMode: widget.themeMode,
-),
-),
-);
-if (!mounted) return;
-if (selectedCity == null || selectedCity.isEmpty) {
-setState(() => _loading = false);
-return;
-}
-final updateRes = await http.patch(
-meEndpoint,
-headers: authJsonHeaders(session.token),
-body: jsonEncode({'city': selectedCity}),
-);
-if (updateRes.statusCode != 200) {
-throw Exception(friendlyHttpError(updateRes));
-}
-final updated = jsonDecode(updateRes.body) as Map<String, dynamic>;
-final user = UserProfile.fromJson(
-updated['user'] as Map<String, dynamic>,
-);
-if (mounted && Navigator.of(context).canPop()) Navigator.of(context).popUntil((r) => r.isFirst);
-widget.onAuthenticated(AuthSession(token: session.token, user: user));
-} else {
+// Both paths hand the session straight over, which is what writes the
+// token to the Keychain. Sign-up used to hold it in memory until a city
+// had been picked, so anything that ended the app on the map step — a
+// crash, a dead connection, the user backgrounding it — threw the token
+// away while the account stayed on the server: the username was taken
+// and there was no way back into it. AuthGate now sees a session whose
+// user has no city and resumes at the map instead of the form.
 if (mounted && Navigator.of(context).canPop()) Navigator.of(context).popUntil((r) => r.isFirst);
 widget.onAuthenticated(session);
-}
 }
 } catch (e) {
 if (mounted) {
@@ -170,7 +146,8 @@ TextField(
 controller: _username,
 style: TextStyle(color: isLight ? Colors.black : Colors.white),
 cursorColor: isLight ? Colors.black : Colors.white,
-decoration: _fieldDecoration(l10n.username, isLight),
+decoration: _fieldDecoration(
+_signup ? l10n.username : l10n.emailOrUsername, isLight),
 ),
 if (_signup) ...[
 const SizedBox(height: 12),
@@ -208,6 +185,23 @@ FilledButton(
 onPressed: _loading ? null : _submit,
 child: Text(_signup ? l10n.signUp : l10n.signIn),
 ),
+// Only on the sign-in side. Somebody who reached the sign-up form got
+// here by choosing "with email" a screen ago, and offering the other two
+// again would be asking the same question twice.
+//
+// The same buttons as sign-up on purpose: to the server both are the one
+// act, so whoever created their account with a provider gets back into
+// it by tapping the provider again.
+if (!_signup) ...[
+  const SizedBox(height: 20),
+  AuthOrDivider(isLight: isLight),
+  const SizedBox(height: 16),
+  SocialSignInButtons(
+    isLight: isLight,
+    onAuthenticated: widget.onAuthenticated,
+    onBusyChanged: (busy) => setState(() => _loading = busy),
+  ),
+],
 if (_signup) ...[
   const SizedBox(height: 12),
   Text.rich(
@@ -257,11 +251,22 @@ TextButton(
 onPressed: _loading
 ? null
 : () {
-setState(() => _signup = !_signup);
-if (_signup && !_cityMapPrewarmed) {
-_cityMapPrewarmed = true;
-unawaited(prewarmCityMap(homeCity: '', isDark: Theme.of(context).brightness == Brightness.dark));
+if (!_signup) {
+// Coming from sign-in, "new here?" starts sign-up properly:
+// the tutorial, then the choice of Apple/Google/email. Flipping
+// this form into sign-up mode instead dropped people straight
+// into a credentials form, skipping both.
+Navigator.of(context).push(
+MaterialPageRoute<void>(
+builder: (_) => AppIntroPage(
+onAuthenticated: widget.onAuthenticated,
+themeMode: widget.themeMode,
+),
+),
+);
+return;
 }
+setState(() => _signup = false);
 },
 child: Text(
 _signup

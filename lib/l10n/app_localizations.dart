@@ -143,7 +143,7 @@ abstract class AppLocalizations {
   /// No description provided for @fullName.
   ///
   /// In en, this message translates to:
-  /// **'Full name'**
+  /// **'Name'**
   String get fullName;
 
   /// No description provided for @password.
@@ -1165,6 +1165,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Photo is too large. Try again.'**
   String get photoTooLarge;
+
+  /// No description provided for @videoTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'Video is too large ({size} MB). The limit is {max} MB — try a shorter clip.'**
+  String videoTooLarge(int size, int max);
+
+  /// No description provided for @uploadingVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Uploading video… {percent}%'**
+  String uploadingVideo(int percent);
+
+  /// No description provided for @couldNotSaveProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save your profile. Check your connection and try again.'**
+  String get couldNotSaveProfile;
+
+  /// No description provided for @preparingPhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing photo…'**
+  String get preparingPhoto;
+
+  /// No description provided for @videoProcessing.
+  ///
+  /// In en, this message translates to:
+  /// **'Processing video…'**
+  String get videoProcessing;
+
+  /// No description provided for @postShared.
+  ///
+  /// In en, this message translates to:
+  /// **'Posted'**
+  String get postShared;
+
+  /// No description provided for @postingLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Posting…'**
+  String get postingLabel;
+
+  /// No description provided for @videoProcessingPercent.
+  ///
+  /// In en, this message translates to:
+  /// **'Processing video… {percent}%'**
+  String videoProcessingPercent(int percent);
+
+  /// No description provided for @postDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'This post has been deleted'**
+  String get postDeleted;
+
+  /// No description provided for @preparingVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing video…'**
+  String get preparingVideo;
 
   /// No description provided for @noPostsYet.
   ///
@@ -2719,6 +2779,198 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This photo is no longer available'**
   String get photoUnavailable;
+
+  /// Heading on the screen that offers Apple / Google / email sign-up
+  ///
+  /// In en, this message translates to:
+  /// **'Create your account'**
+  String get signUpMethodTitle;
+
+  /// Explains that the chosen method is also how they will sign in later
+  ///
+  /// In en, this message translates to:
+  /// **'Pick how you want to sign up. You can always sign in the same way later.'**
+  String get signUpMethodSubtitle;
+
+  /// Button label. Apple requires the wording "Continue with Apple"
+  ///
+  /// In en, this message translates to:
+  /// **'Continue with Apple'**
+  String get signUpWithApple;
+
+  /// Button label for Google sign-in
+  ///
+  /// In en, this message translates to:
+  /// **'Continue with Google'**
+  String get signUpWithGoogle;
+
+  /// Button label that opens the existing username/password form
+  ///
+  /// In en, this message translates to:
+  /// **'Sign up with email'**
+  String get signUpWithEmail;
+
+  /// Prompt above the sign-in link
+  ///
+  /// In en, this message translates to:
+  /// **'Already have an account?'**
+  String get signUpMethodHaveAccount;
+
+  /// Link to the sign-in form
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in'**
+  String get signUpMethodSignIn;
+
+  /// Shown when the Google client id has not been configured
+  ///
+  /// In en, this message translates to:
+  /// **'Google sign-in is not set up yet.'**
+  String get signUpGoogleUnavailable;
+
+  /// Username setup screen: usernameSetupTitle
+  ///
+  /// In en, this message translates to:
+  /// **'Pick your username'**
+  String get usernameSetupTitle;
+
+  /// Username setup screen: usernameSetupSubtitle
+  ///
+  /// In en, this message translates to:
+  /// **'This is how people find you and mention you. You can change it later in your profile.'**
+  String get usernameSetupSubtitle;
+
+  /// Username setup screen: usernameSetupHint
+  ///
+  /// In en, this message translates to:
+  /// **'username'**
+  String get usernameSetupHint;
+
+  /// Username setup screen: usernameSetupRules
+  ///
+  /// In en, this message translates to:
+  /// **'Letters, numbers, dots and underscores. 3–20 characters.'**
+  String get usernameSetupRules;
+
+  /// Username setup screen: usernameSetupCta
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get usernameSetupCta;
+
+  /// Username setup screen: usernameSetupTaken
+  ///
+  /// In en, this message translates to:
+  /// **'That username is already taken.'**
+  String get usernameSetupTaken;
+
+  /// Username setup screen: usernameSetupTooShort
+  ///
+  /// In en, this message translates to:
+  /// **'Username must be at least 3 characters.'**
+  String get usernameSetupTooShort;
+
+  /// Username setup screen: usernameSetupTooLong
+  ///
+  /// In en, this message translates to:
+  /// **'Username must be at most 20 characters.'**
+  String get usernameSetupTooLong;
+
+  /// Username setup screen: usernameSetupBadChars
+  ///
+  /// In en, this message translates to:
+  /// **'Only letters, numbers, dots and underscores.'**
+  String get usernameSetupBadChars;
+
+  /// Divider between the password form and the provider buttons
+  ///
+  /// In en, this message translates to:
+  /// **'or'**
+  String get authOr;
+
+  /// Password settings screen: setPasswordTitle
+  ///
+  /// In en, this message translates to:
+  /// **'Set a password'**
+  String get setPasswordTitle;
+
+  /// Password settings screen: changePasswordTitle
+  ///
+  /// In en, this message translates to:
+  /// **'Change password'**
+  String get changePasswordTitle;
+
+  /// Password settings screen: setPasswordExplain
+  ///
+  /// In en, this message translates to:
+  /// **'You signed up with Apple or Google, so your account has no password yet. Adding one gives you a second way to sign in if you ever lose access to that account.'**
+  String get setPasswordExplain;
+
+  /// Password settings screen: changePasswordExplain
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a new password for your account.'**
+  String get changePasswordExplain;
+
+  /// Password settings screen: currentPasswordHint
+  ///
+  /// In en, this message translates to:
+  /// **'Current password'**
+  String get currentPasswordHint;
+
+  /// Password settings screen: newPasswordHint
+  ///
+  /// In en, this message translates to:
+  /// **'New password'**
+  String get newPasswordHint;
+
+  /// Password settings screen: confirmPasswordHint
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat new password'**
+  String get confirmPasswordHint;
+
+  /// Password settings screen: passwordsDoNotMatch
+  ///
+  /// In en, this message translates to:
+  /// **'The two passwords are not the same.'**
+  String get passwordsDoNotMatch;
+
+  /// Password settings screen: passwordSaved
+  ///
+  /// In en, this message translates to:
+  /// **'Password saved.'**
+  String get passwordSaved;
+
+  /// Password settings screen: savePassword
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get savePassword;
+
+  /// Support row in settings: support
+  ///
+  /// In en, this message translates to:
+  /// **'Support'**
+  String get support;
+
+  /// Shown when the month has not passed yet
+  ///
+  /// In en, this message translates to:
+  /// **'You can change your city again on {date}.'**
+  String cityChangeLocked(String date);
+
+  /// Shown under the city field when a change is allowed
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to change. You can only change your city once a month.'**
+  String get cityChangeHint;
+
+  /// Confirmation after the city was saved
+  ///
+  /// In en, this message translates to:
+  /// **'Your city has been updated.'**
+  String get cityChanged;
 }
 
 class _AppLocalizationsDelegate

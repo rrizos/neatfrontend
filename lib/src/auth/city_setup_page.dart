@@ -19,17 +19,23 @@ import '../core/onboarding_ui.dart';
 /// ([prewarmCityMap]) and gets a screen of its own, with nothing drawn over
 /// it, when the user taps through.
 ///
-/// Pops with the chosen city name (never with null: the step is mandatory, so
-/// there is no back affordance and the system back gesture is blocked).
+/// Reports the chosen city through [onCitySelected] rather than popping: the
+/// step is mandatory, so this is hosted as a screen in its own right (see
+/// AuthGate) rather than pushed on top of the sign-up form. There is no back
+/// affordance and the system back gesture is blocked.
 class CitySetupPage extends StatefulWidget {
   const CitySetupPage({
     super.key,
     required this.token,
     required this.themeMode,
+    required this.onCitySelected,
   });
 
   final String token;
   final ThemeMode themeMode;
+
+  /// Called once, with a non-empty city name.
+  final ValueChanged<String> onCitySelected;
 
   @override
   State<CitySetupPage> createState() => _CitySetupPageState();
@@ -66,12 +72,12 @@ class _CitySetupPageState extends State<CitySetupPage> {
 
   Future<void> _openMap() async {
     final city = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => _CityPickPage(token: widget.token)),
+      MaterialPageRoute(builder: (_) => CityPickPage(token: widget.token)),
     );
     // Backing out of the map lands here again rather than anywhere further
     // back — this screen is the flow's floor until a city exists.
     if (!mounted || city == null || city.isEmpty) return;
-    Navigator.of(context).pop(city);
+    widget.onCitySelected(city);
   }
 
   @override
@@ -267,8 +273,12 @@ class _HomePin extends StatelessWidget {
 // [CitySetupPage] for why that matters.
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _CityPickPage extends StatelessWidget {
-  const _CityPickPage({required this.token});
+/// The map, on its own, returning the city that was tapped.
+///
+/// Public because changing your city later is the same act as choosing it at
+/// sign-up, and a second map would be a second set of bugs.
+class CityPickPage extends StatelessWidget {
+  const CityPickPage({super.key, required this.token});
 
   final String token;
 

@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show Random;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'http_client.dart' as http;
 
 import 'api.dart';
@@ -19,7 +21,23 @@ const _messagesChannelId = 'messages_channel';
 /// natively by Android/iOS from the FCM `notification` payload — this is
 /// just the mandatory hook the plugin needs registered.
 @pragma('vm:entry-point')
-Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {}
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Runs in its own isolate with no app state, so it does the one thing it
+  // can do safely: paint the count the push already carried. iOS applies
+  // `aps.badge` itself for a backgrounded app, but Android has no equivalent
+  // and a data-only push gets no help from either — this covers both.
+  final raw = message.data['badge'];
+  final badge = int.tryParse('$raw');
+  if (badge == null) return;
+  try {
+    await const MethodChannel('com.neat/badge')
+        .invokeMethod('setBadge', badge < 0 ? 0 : badge);
+  } catch (_) {
+    // No channel in this isolate on some platforms; the foreground path and
+    // aps.badge both still apply it.
+  }
+}
 
 /// Wires up Firebase Cloud Messaging: permission requests, device-token
 /// registration, and tap-to-navigate. No tray notification is ever shown
@@ -125,9 +143,21 @@ class PushService {
       if (authToken != null) unawaited(_postToken(authToken, token));
     });
 
-    // Deliberately no FirebaseMessaging.onMessage listener: while the app is
+    // A foreground listener that shows nothing.
+    //
+    // iOS only applies `aps.badge` when the app is *not* in front, so a
+    // message arriving while somebody is reading the feed left the icon
+    // showing the previous number — which is why DMs appeared not to count.
+    // This sets the badge and does nothing else: no tray notification, per the
+    // rule below.
+    FirebaseMessaging.onMessage.listen((message) {
+      final badge = int.tryParse('${message.data['badge']}');
+      if (badge != null) unawaited(setBadge(badge));
+    });
+
+    // Deliberately no tray notification from that listener: while the app is
     // foregrounded (the only time that stream fires), pushes shouldn't
-    // interrupt with a tray notification — matching Instagram, and per
+    // interrupt with one — matching Instagram, and per
     // explicit request not to notify while already inside the app. The
     // in-app UI (notifications bell, conversation view) reflects new
     // activity through its own existing polling instead.
@@ -290,8 +320,35 @@ class PushService {
     }
   }
 
+  /// A stable id for this phone, so the server can retire the token it
+  /// replaces.
+  ///
+  /// FCM issues a new token on reinstall and gives no way to connect it to the
+  /// old one, so every reinstall left another live registration behind and
+  /// every notification arrived once per leftover. Kept in the keychain rather
+  /// than in preferences deliberately: on iOS the keychain survives deleting
+  /// the app, so a reinstall is recognised as the same phone instead of
+  /// looking like a new one all over again.
+  static const _deviceIdKey = 'neat_device_id';
+
+  Future<String> _deviceId() async {
+    const storage = FlutterSecureStorage();
+    try {
+      final existing = await storage.read(key: _deviceIdKey);
+      if (existing != null && existing.isNotEmpty) return existing;
+      final fresh = '${DateTime.now().microsecondsSinceEpoch}-'
+          '${Random().nextInt(1 << 32)}';
+      await storage.write(key: _deviceIdKey, value: fresh);
+      return fresh;
+    } catch (e) {
+      debugPrint('PushService._deviceId failed: $e');
+      return '';
+    }
+  }
+
   Future<void> _postToken(String authToken, String fcmToken) async {
     try {
+      final deviceId = await _deviceId();
       final res = await http
           .post(
             registerDeviceEndpoint,
@@ -299,6 +356,7 @@ class PushService {
             body: jsonEncode({
               'token': fcmToken,
               'platform': Platform.isIOS ? 'ios' : 'android',
+              if (deviceId.isNotEmpty) 'deviceId': deviceId,
             }),
           )
           .timeout(const Duration(seconds: 15));

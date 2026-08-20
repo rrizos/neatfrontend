@@ -247,7 +247,14 @@ class LinkPreviewService {
   // that has since gained one stay blank for a week.
   static const _kMaxAge = Duration(days: 7);
   static const _kMaxEntries = 400;
-  static const _kFileName = 'link_previews.json';
+  // Bumped when previously-stored cards stop being trustworthy. v2: cards
+  // written before thumbnails were copied onto our own server hold third-party
+  // CDN URLs, and Instagram's and TikTok's expire after a few days — so a
+  // phone that had cached one kept showing a card with a blank space where the
+  // picture used to be, and never re-asked, because a cached card is never
+  // re-fetched. Renaming the file retires all of them in one go.
+  static const _kFileName = 'link_previews_v2.json';
+  static const _kRetiredFileNames = ['link_previews.json'];
 
   /// When each entry was written, for expiry and for evicting the oldest.
   final Map<String, int> _storedAt = {};
@@ -262,6 +269,13 @@ class LinkPreviewService {
     _restored = true;
     try {
       final dir = await getApplicationSupportDirectory();
+      // Reclaim the space from any superseded cache rather than leaving it.
+      for (final old in _kRetiredFileNames) {
+        try {
+          final stale = File('${dir.path}/$old');
+          if (await stale.exists()) await stale.delete();
+        } catch (_) {}
+      }
       final file = File('${dir.path}/$_kFileName');
       _file = file;
       if (!await file.exists()) return;
@@ -358,6 +372,20 @@ class LinkPreviewService {
   /// Keyed on the normalised URL like [fetch] is, so "in.gr" and
   /// "https://in.gr" are one entry rather than a hit and a permanent miss.
   bool isCached(String url) => _cache.containsKey(normaliseUrl(url));
+
+  /// Forgets a card, so the next request for it asks the server again.
+  ///
+  /// Called when a card's picture fails to load. A cached card is otherwise
+  /// never re-fetched — [fetch] returns the stored value without a request —
+  /// so without this one broken image is permanent for as long as the entry
+  /// survives, which is how expired thumbnails outlived the server-side fix
+  /// for them.
+  void evict(String url) {
+    final key = normaliseUrl(url);
+    final had = _cache.remove(key) != null;
+    final tracked = _storedAt.remove(key) != null;
+    if (had || tracked) _scheduleSave();
+  }
   LinkPreviewData? cached(String url) => _cache[normaliseUrl(url)];
 
   Future<LinkPreviewData?> fetch(String rawUrl, String token) {
@@ -520,6 +548,32 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
   int _attempts = 0;
   Timer? _retry;
 
+  /// One re-fetch per card, so a picture that is genuinely gone cannot put the
+  /// widget in a loop of asking, failing and asking again.
+  bool _refetchedAfterImageFailure = false;
+
+  /// The card's picture would not load — most likely a stored card pointing at
+  /// a third-party URL that has since expired. Forget it and ask again; the
+  /// server now keeps its own copy of every thumbnail, so the replacement will
+  /// not expire.
+  void _onImageFailed() {
+    if (_refetchedAfterImageFailure || widget.token.isEmpty) return;
+    _refetchedAfterImageFailure = true;
+    // Out of the build phase — errorBuilder runs during paint.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final service = LinkPreviewService.instance;
+      service.evict(widget.url);
+      final fresh = await service.fetch(widget.url, widget.token);
+      if (!mounted) return;
+      setState(() {
+        _data = fresh;
+        _resolved = true;
+      });
+      _measureIfNeeded();
+    });
+  }
+
   void _start() {
     final service = LinkPreviewService.instance;
     if (service.isCached(widget.url)) {
@@ -647,7 +701,10 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
                             width: double.infinity,
                             // A broken or slow image shouldn't blank the whole
                             // card — the text below it is the useful part.
-                            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                            errorBuilder: (_, _, _) {
+                              _onImageFailed();
+                              return const SizedBox.shrink();
+                            },
                             loadingBuilder: (context, child, progress) =>
                                 progress == null
                                     ? child

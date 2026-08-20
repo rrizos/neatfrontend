@@ -12,7 +12,20 @@
           "package_name": "gr.app.neat"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "449378002358-uomk7imr97mi213ia9d3jjnasgi98seq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "gr.app.neat",
+            "certificate_hash": "7258be2ed3f150a55b9fb5e58cc5ff8cd4ddd51f"
+          }
+        },
+        {
+          "client_id": "449378002358-430tlsk1shjrk07mv4nbcsjibtk9437a.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCo_PahmCCr9JAkDgb371F-wdQyr5Bahv4"
@@ -20,7 +33,20 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "449378002358-430tlsk1shjrk07mv4nbcsjibtk9437a.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "449378002358-i3dlqsb7rmff8jf05ag6slk7o21k8laq.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "NeatApp.Neat",
+                "app_store_id": "6748038152"
+              }
+            }
+          ]
         }
       }
     }

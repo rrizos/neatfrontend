@@ -30,7 +30,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get email => 'Email';
 
   @override
-  String get fullName => 'Full name';
+  String get fullName => 'Name';
 
   @override
   String get password => 'Password';
@@ -614,6 +614,43 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get photoTooLarge => 'Photo is too large. Try again.';
+
+  @override
+  String videoTooLarge(int size, int max) {
+    return 'Video is too large ($size MB). The limit is $max MB — try a shorter clip.';
+  }
+
+  @override
+  String uploadingVideo(int percent) {
+    return 'Uploading video… $percent%';
+  }
+
+  @override
+  String get couldNotSaveProfile =>
+      'Could not save your profile. Check your connection and try again.';
+
+  @override
+  String get preparingPhoto => 'Preparing photo…';
+
+  @override
+  String get videoProcessing => 'Processing video…';
+
+  @override
+  String get postShared => 'Posted';
+
+  @override
+  String get postingLabel => 'Posting…';
+
+  @override
+  String videoProcessingPercent(int percent) {
+    return 'Processing video… $percent%';
+  }
+
+  @override
+  String get postDeleted => 'This post has been deleted';
+
+  @override
+  String get preparingVideo => 'Preparing video…';
 
   @override
   String get noPostsYet => 'No posts yet.';
@@ -1455,4 +1492,108 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get photoUnavailable => 'This photo is no longer available';
+
+  @override
+  String get signUpMethodTitle => 'Create your account';
+
+  @override
+  String get signUpMethodSubtitle =>
+      'Pick how you want to sign up. You can always sign in the same way later.';
+
+  @override
+  String get signUpWithApple => 'Continue with Apple';
+
+  @override
+  String get signUpWithGoogle => 'Continue with Google';
+
+  @override
+  String get signUpWithEmail => 'Sign up with email';
+
+  @override
+  String get signUpMethodHaveAccount => 'Already have an account?';
+
+  @override
+  String get signUpMethodSignIn => 'Sign in';
+
+  @override
+  String get signUpGoogleUnavailable => 'Google sign-in is not set up yet.';
+
+  @override
+  String get usernameSetupTitle => 'Pick your username';
+
+  @override
+  String get usernameSetupSubtitle =>
+      'This is how people find you and mention you. You can change it later in your profile.';
+
+  @override
+  String get usernameSetupHint => 'username';
+
+  @override
+  String get usernameSetupRules =>
+      'Letters, numbers, dots and underscores. 3–20 characters.';
+
+  @override
+  String get usernameSetupCta => 'Continue';
+
+  @override
+  String get usernameSetupTaken => 'That username is already taken.';
+
+  @override
+  String get usernameSetupTooShort => 'Username must be at least 3 characters.';
+
+  @override
+  String get usernameSetupTooLong => 'Username must be at most 20 characters.';
+
+  @override
+  String get usernameSetupBadChars =>
+      'Only letters, numbers, dots and underscores.';
+
+  @override
+  String get authOr => 'or';
+
+  @override
+  String get setPasswordTitle => 'Set a password';
+
+  @override
+  String get changePasswordTitle => 'Change password';
+
+  @override
+  String get setPasswordExplain =>
+      'You signed up with Apple or Google, so your account has no password yet. Adding one gives you a second way to sign in if you ever lose access to that account.';
+
+  @override
+  String get changePasswordExplain => 'Choose a new password for your account.';
+
+  @override
+  String get currentPasswordHint => 'Current password';
+
+  @override
+  String get newPasswordHint => 'New password';
+
+  @override
+  String get confirmPasswordHint => 'Repeat new password';
+
+  @override
+  String get passwordsDoNotMatch => 'The two passwords are not the same.';
+
+  @override
+  String get passwordSaved => 'Password saved.';
+
+  @override
+  String get savePassword => 'Save';
+
+  @override
+  String get support => 'Support';
+
+  @override
+  String cityChangeLocked(String date) {
+    return 'You can change your city again on $date.';
+  }
+
+  @override
+  String get cityChangeHint =>
+      'Tap to change. You can only change your city once a month.';
+
+  @override
+  String get cityChanged => 'Your city has been updated.';
 }

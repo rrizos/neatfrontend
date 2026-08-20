@@ -201,3 +201,62 @@ class OnboardingButton extends StatelessWidget {
     );
   }
 }
+
+/// A provider button in the app's own shape, for the providers that do not
+/// ship one. Deliberately the same height and radius as Apple's so the three
+/// read as one stack rather than three borrowed styles.
+class ProviderButton extends StatelessWidget {
+  const ProviderButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.isLight,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final String label;
+  final Widget icon;
+  final bool isLight;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = isLight ? Colors.black : Colors.white;
+    return Opacity(
+      opacity: enabled ? 1 : 0.5,
+      child: SizedBox(
+        height: 52,
+        width: double.infinity,
+        child: OutlinedButton(
+          onPressed: enabled ? onPressed : null,
+          style: OutlinedButton.styleFrom(
+            backgroundColor: isLight ? Colors.white : const Color(0xff0d0d0d),
+            side: BorderSide(
+              color: isLight ? const Color(0xffd6d9de) : const Color(0xff2a2a2a),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              icon,
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

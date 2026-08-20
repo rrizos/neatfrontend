@@ -20,6 +20,7 @@ import 'package:record/record.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
+import '../core/deleted_posts.dart';
 import '../core/avatar_store.dart';
 import '../core/link_preview.dart';
 import '../core/media_cache.dart';
@@ -317,7 +318,9 @@ class _MessagesPageState extends State<MessagesPage>
   Timer? _inboxRefreshDebounce;
   StreamSubscription<RealtimeEvent>? _realtimeSub;
   // Full-screen swipe-back gesture state
-  double _swipeDx = 0;
+  /// How far the inbox has been dragged, as a notifier rather than state:
+  /// it changes every frame of a drag and only the Transform cares.
+  final ValueNotifier<double> _swipeOffset = ValueNotifier<double>(0);
   late Animation<double> _swipeAnimInbox;
   late final AnimationController _swipeCtrlInbox;
 
@@ -352,29 +355,39 @@ class _MessagesPageState extends State<MessagesPage>
     _realtimeSub?.cancel();
     _search.dispose();
     _openSwipeId.dispose();
+    _swipeOffset.dispose();
     super.dispose();
   }
 
   void _snapBackInbox() {
-    _swipeAnimInbox = Tween<double>(begin: _swipeDx, end: 0)
+    _swipeAnimInbox = Tween<double>(begin: _swipeOffset.value, end: 0)
         .animate(CurvedAnimation(parent: _swipeCtrlInbox, curve: Curves.easeOut));
     _swipeCtrlInbox.duration = const Duration(milliseconds: 220);
     _swipeCtrlInbox.reset();
     _swipeCtrlInbox.forward().whenComplete(() {
-      if (mounted) setState(() => _swipeDx = 0);
+      if (mounted) _swipeOffset.value = 0;
     });
   }
 
-  void _flyOutInbox() {
-    final sw = MediaQuery.sizeOf(context).width;
-    final ms = ((sw - _swipeDx) * 220 / sw).clamp(60.0, 220.0).toInt();
-    _swipeAnimInbox = Tween<double>(begin: _swipeDx, end: sw)
-        .animate(CurvedAnimation(parent: _swipeCtrlInbox, curve: Curves.easeIn));
-    _swipeCtrlInbox.duration = Duration(milliseconds: ms);
-    _swipeCtrlInbox.reset();
-    _swipeCtrlInbox.forward().whenComplete(() {
-      if (mounted) Navigator.of(context).pop();
-    });
+  /// Returns to the feed.
+  ///
+  /// Deliberately does *not* animate the page out itself. The route already
+  /// has an exit transition — it slid in from the right, so popping slides it
+  /// back that way — and hand-animating on top of that played the whole thing
+  /// twice: once under the finger, then again as the route left. Snapping the
+  /// drag offset back to zero hands over cleanly, and the route's own
+  /// transition is the single animation the user sees.
+  /// Returns to the feed.
+  ///
+  /// The offset is deliberately left exactly where the finger released it. The
+  /// route has its own exit transition, and that transition *adds* to this
+  /// offset — so the page carries on from where it was instead of snapping to
+  /// centre first. Resetting it to zero here is what produced the visible
+  /// stutter: one frame at the dragged position, the next back at centre, then
+  /// the route sliding out from there.
+  void _leaveInbox() {
+    _swipeCtrlInbox.stop();
+    Navigator.of(context).pop();
   }
 
   Future<void> _pingPresence() async {
@@ -530,23 +543,36 @@ class _MessagesPageState extends State<MessagesPage>
             c.otherFullName.toLowerCase().contains(q)).toList();
 
     return AnimatedBuilder(
-      animation: _swipeCtrlInbox,
+      // Both: the controller drives the snap-back, the notifier the drag.
+      animation: Listenable.merge([_swipeCtrlInbox, _swipeOffset]),
       builder: (context, child) => Transform.translate(
-        offset: Offset(_swipeCtrlInbox.isAnimating ? _swipeAnimInbox.value : _swipeDx, 0),
+        offset: Offset(
+          _swipeCtrlInbox.isAnimating ? _swipeAnimInbox.value : _swipeOffset.value,
+          0,
+        ),
         child: child!,
       ),
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
+        // Either direction leaves the inbox. Dragging right is the platform
+        // back gesture; dragging left is how people reach for the feed, since
+        // that is the direction the inbox was opened from — and having it do
+        // nothing read as the screen being stuck.
         onHorizontalDragUpdate: (d) {
           if (_swipeCtrlInbox.isAnimating) _swipeCtrlInbox.stop();
-          if (d.delta.dx > 0 || _swipeDx > 0) {
-            setState(() => _swipeDx = (_swipeDx + d.delta.dx).clamp(0, double.infinity));
-          }
+          // A notifier, not setState: this fires on every frame of the drag,
+          // and rebuilding the whole inbox — app bar, search field and the
+          // entire conversation list — sixty times a second is what made the
+          // gesture stutter. Only the Transform needs to change.
+          _swipeOffset.value += d.delta.dx;
         },
         onHorizontalDragEnd: (d) {
           final sw = MediaQuery.sizeOf(context).width;
-          if (_swipeDx > sw * 0.35 || (d.primaryVelocity ?? 0) > 400) {
-            _flyOutInbox();
+          final velocity = d.primaryVelocity ?? 0;
+          final farEnough = _swipeOffset.value.abs() > sw * 0.35;
+          final fastEnough = velocity.abs() > 400;
+          if (farEnough || fastEnough) {
+            _leaveInbox();
           } else {
             _snapBackInbox();
           }
@@ -882,20 +908,12 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
     }
   }
 
-  void _settle() {
-    if (_ctrl.value > 0.5) {
-      _ctrl.animateTo(1.0, curve: Curves.easeOut);
-      if (!_open) {
-        widget.openSwipeId.value = widget.summary.id;
-        setState(() => _open = true);
-      }
-    } else {
-      _ctrl.animateTo(0.0, curve: Curves.easeOut);
-      if (_open) {
-        if (widget.openSwipeId.value == widget.summary.id) widget.openSwipeId.value = null;
-        setState(() => _open = false);
-      }
-    }
+  /// Slides the delete action in, and remembers that this row is the open one
+  /// so opening another closes it.
+  void _reveal() {
+    _ctrl.animateTo(1.0, curve: Curves.easeOut);
+    widget.openSwipeId.value = widget.summary.id;
+    if (!_open) setState(() => _open = true);
   }
 
   void _close() {
@@ -909,15 +927,18 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
   @override
   Widget build(BuildContext context) {
     final bg = widget.isLight ? _kBgLgt : _kBgDark;
+    // Delete is on long-press, not on a swipe.
+    //
+    // A row that claimed horizontal drags won the gesture arena against the
+    // page behind it, so swiping anywhere on the list revealed a delete button
+    // instead of going back to the feed — and since the list is almost
+    // entirely rows, "swipe to leave the inbox" effectively did not exist.
+    // Only one of the two can own that gesture, and leaving the screen is the
+    // thing people do constantly; deleting a conversation is rare and is
+    // exactly what a long-press is for.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onHorizontalDragStart: (_) => _ctrl.stop(),
-      onHorizontalDragUpdate: (d) {
-        if (d.delta.dx > 0 && _ctrl.value == 0) return;
-        _ctrl.value = (_ctrl.value - d.delta.dx / _actionWidth).clamp(0.0, 1.0);
-      },
-      onHorizontalDragEnd: (_) => _settle(),
-      onHorizontalDragCancel: () => _ctrl.animateTo(0.0, curve: Curves.easeOut),
+      onLongPress: _open ? _close : _reveal,
       child: Stack(
         clipBehavior: Clip.hardEdge,
         children: [
@@ -1430,7 +1451,8 @@ class _ConversationPageState extends State<ConversationPage>
   bool _vTracking = false;
   late final AnimationController _slideCtrl;
   // Full-screen swipe-back gesture state
-  double _swipeDx = 0;
+  /// See _MessagesPageState._swipeOffset — same reasoning, same gesture.
+  final ValueNotifier<double> _swipeOffset = ValueNotifier<double>(0);
   late Animation<double> _swipeAnim;
   late final AnimationController _swipeCtrl;
 
@@ -1730,6 +1752,39 @@ class _ConversationPageState extends State<ConversationPage>
     } catch (_) {}
   }
 
+  /// Starts downloading the photos in [msgs] before their bubbles ask for them.
+  ///
+  /// Newest first, because that is where a chat opens and what the reader sees
+  /// while scrolling up. Temporary photos are excluded on purpose: fetching one
+  /// spends a viewing, and prefetching would burn it before anybody looked.
+  /// Finds out which shared posts in [msgs] have since been deleted.
+  ///
+  /// The card holds a snapshot, so it cannot tell on its own — one request
+  /// covers the whole thread, and the answer never changes back.
+  void _checkSharedPosts(List<MessageItem> msgs) {
+    final ids = <int>[];
+    for (final m in msgs) {
+      if (!m.text.startsWith(_kPostPrefix)) continue;
+      final data = _parsePost(m.text);
+      final id = (data?['id'] as num?)?.toInt() ?? 0;
+      if (id > 0) ids.add(id);
+    }
+    if (ids.isEmpty) return;
+    unawaited(DeletedPosts.check(token: widget.token, postIds: ids));
+  }
+
+  void _prefetchMedia(List<MessageItem> msgs) {
+    final ids = msgs.reversed
+        .where((m) => m.id > 0 && !m.isTemporaryPhoto)
+        .where((m) => m.text.startsWith(_kImagePrefix))
+        .map((m) => m.id);
+    DmMedia.prefetch(
+      token: widget.token,
+      conversationId: widget.conversationId,
+      messageIds: ids,
+    );
+  }
+
   Future<void> _loadCache() async {
     try {
       final file = await _cacheFile;
@@ -1738,6 +1793,8 @@ class _ConversationPageState extends State<ConversationPage>
       final msgs = data.whereType<Map<String, dynamic>>().map(MessageItem.fromJson).toList();
       if (!mounted || msgs.isEmpty) return;
       setState(() { _messages = msgs; _loading = false; });
+      _prefetchMedia(msgs);
+      _checkSharedPosts(msgs);
       _scrollToBottom(jump: true);
     } catch (_) {}
   }
@@ -1791,6 +1848,7 @@ class _ConversationPageState extends State<ConversationPage>
   @override
   void dispose() {
     _swipeCtrl.dispose();
+    _swipeOffset.dispose();
     _slideCtrl.dispose();
     _presenceTimer?.cancel();
     _typingPollTimer?.cancel();
@@ -1805,25 +1863,23 @@ class _ConversationPageState extends State<ConversationPage>
   }
 
   void _snapBack() {
-    _swipeAnim = Tween<double>(begin: _swipeDx, end: 0)
+    _swipeAnim = Tween<double>(begin: _swipeOffset.value, end: 0)
         .animate(CurvedAnimation(parent: _swipeCtrl, curve: Curves.easeOut));
     _swipeCtrl.duration = const Duration(milliseconds: 220);
     _swipeCtrl.reset();
     _swipeCtrl.forward().whenComplete(() {
-      if (mounted) setState(() => _swipeDx = 0);
+      if (mounted) _swipeOffset.value = 0;
     });
   }
 
+  /// Leaves the conversation. See _leaveInbox — same reasoning: the route
+  /// already animates itself out, so animating the page here as well played
+  /// the exit twice.
   void _flyOut() {
-    final sw = MediaQuery.sizeOf(context).width;
-    final ms = ((sw - _swipeDx) * 220 / sw).clamp(60.0, 220.0).toInt();
-    _swipeAnim = Tween<double>(begin: _swipeDx, end: sw)
-        .animate(CurvedAnimation(parent: _swipeCtrl, curve: Curves.easeIn));
-    _swipeCtrl.duration = Duration(milliseconds: ms);
-    _swipeCtrl.reset();
-    _swipeCtrl.forward().whenComplete(() {
-      if (mounted) Navigator.of(context).pop();
-    });
+    // Offset left where the finger released it; the route transition adds to
+    // it, so the page keeps moving instead of snapping back to centre first.
+    _swipeCtrl.stop();
+    Navigator.of(context).pop();
   }
 
   void _handleRealtimeEvent(RealtimeEvent e) {
@@ -1994,6 +2050,8 @@ class _ConversationPageState extends State<ConversationPage>
         if (conv != null) _blocked = conv['viewerBlockedOther'] == true;
       });
       _saveCache(merged);
+      _prefetchMedia(merged);
+      _checkSharedPosts(merged);
       if (hadNewFromOther) _scrollToBottom();
     }
 
@@ -2084,6 +2142,8 @@ class _ConversationPageState extends State<ConversationPage>
         if (otherReadAt != null) _otherLastReadAt = otherReadAt;
       });
       _saveCache(merged);
+      _prefetchMedia(merged);
+      _checkSharedPosts(merged);
       _scrollToBottom(jump: initial);
     } catch (_) {
       // keep whatever messages are already loaded rather than blanking the screen
@@ -2121,6 +2181,8 @@ class _ConversationPageState extends State<ConversationPage>
           ..sort((a, b) => a.created.compareTo(b.created));
         _hasOlder = body['has_more'] == true;
       });
+      _prefetchMedia(older);
+      _checkSharedPosts(older);
     } catch (_) {
       // Leave _hasOlder alone: the page is still there, the network wasn't.
     } finally {
@@ -2141,6 +2203,9 @@ class _ConversationPageState extends State<ConversationPage>
     String text, {
     bool clearInput = false,
     _PhotoMode photoMode = _PhotoMode.keep,
+    Uint8List? mediaBytes,
+    String mediaKind = 'image',
+    String mediaSuffix = '',
   }) async {
     if (text.isEmpty || _sending) return;
     if (clearInput) _composer.clear();
@@ -2163,7 +2228,17 @@ class _ConversationPageState extends State<ConversationPage>
     _scrollToBottom();
 
     try {
-      final res = await http.post(
+      // A picture or voice note goes as a binary file part; base64 inside the
+      // JSON costs a third more bytes, over the connection least able to carry
+      // them. Anything else is still an ordinary JSON body.
+      final res = mediaBytes != null
+          ? await _sendMediaMultipart(
+              bytes: mediaBytes,
+              kind: mediaKind,
+              suffix: mediaSuffix,
+              photoMode: temporary ? photoMode.wire : '',
+            )
+          : await http.post(
         messageConversationEndpoint(widget.conversationId),
         headers: authJsonHeaders(widget.token),
         body: jsonEncode({
@@ -2174,7 +2249,39 @@ class _ConversationPageState extends State<ConversationPage>
         }),
       );
       if (res.statusCode == 401) return widget.onLogout();
-      if (res.statusCode != 201) {
+      if (res.statusCode == 201) {
+        // Swap the optimistic entry for the real one, by id.
+        //
+        // This used to be left to the next poll, which dropped the optimistic
+        // copy by matching sender+text against the server's. That match broke
+        // the moment media stopped travelling inside `text`: the server now
+        // stores the picture as a file and echoes back a bare
+        // `__neat_image__:`, which never equals the base64 the optimistic copy
+        // holds — so both survived and the photo appeared twice, the second
+        // one loading forever because no such message exists on the server.
+        try {
+          final saved = MessageItem.fromJson(
+            jsonDecode(res.body) as Map<String, dynamic>,
+          );
+          if (mounted) {
+            setState(() {
+              final at = _messages.indexWhere((m) => m.id == opt.id);
+              if (at >= 0) {
+                _messages[at] = saved;
+              } else if (!_messages.any((m) => m.id == saved.id)) {
+                _messages.add(saved);
+              }
+            });
+            _saveCache(_messages);
+          }
+        } catch (_) {
+          // Unparseable success: drop the placeholder and let the poll bring
+          // the real message in, rather than leaving a permanent ghost.
+          if (mounted) {
+            setState(() => _messages.removeWhere((m) => m.id == opt.id));
+          }
+        }
+      } else {
         if (mounted) {
           setState(() => _messages.removeWhere((m) => m.id == opt.id));
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2212,8 +2319,35 @@ class _ConversationPageState extends State<ConversationPage>
     return _sendRaw(text, clearInput: true);
   }
 
+  /// Posts a photo or voice note as a binary part rather than base64.
+  Future<http.Response> _sendMediaMultipart({
+    required Uint8List bytes,
+    required String kind,
+    required String suffix,
+    required String photoMode,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST', messageConversationEndpoint(widget.conversationId),
+    )..headers.addAll(authGetHeaders(widget.token));
+    request.fields['text'] = '';
+    request.fields['media_kind'] = kind;
+    if (suffix.isNotEmpty) request.fields['media_suffix'] = suffix;
+    if (photoMode.isNotEmpty) request.fields['photo_mode'] = photoMode;
+    request.files.add(http.MultipartFile.fromBytes(
+      'media', bytes,
+      filename: kind == 'voice' ? 'voice.m4a' : 'photo.jpg',
+    ));
+    final streamed =
+        await request.send().timeout(const Duration(seconds: 180));
+    return http.Response.fromStream(streamed);
+  }
+
   Future<void> _sendImage(Uint8List bytes, [_PhotoMode mode = _PhotoMode.keep]) =>
-      _sendRaw('$_kImagePrefix${base64Encode(bytes)}', photoMode: mode);
+      _sendRaw(
+        '$_kImagePrefix${base64Encode(bytes)}',
+        photoMode: mode,
+        mediaBytes: bytes,
+      );
 
   /// Spends one of the recipient's viewings and shows them the picture.
   ///
@@ -2262,8 +2396,12 @@ class _ConversationPageState extends State<ConversationPage>
     setState(() => _messages[index] = message);
   }
 
-  Future<void> _sendVoice(Uint8List bytes, int durationSecs) =>
-      _sendRaw('$_kVoicePrefix${base64Encode(bytes)}|$durationSecs');
+  Future<void> _sendVoice(Uint8List bytes, int durationSecs) => _sendRaw(
+        '$_kVoicePrefix${base64Encode(bytes)}|$durationSecs',
+        mediaBytes: bytes,
+        mediaKind: 'voice',
+        mediaSuffix: '|$durationSecs',
+      );
 
   void _setReplyTo(MessageItem msg) => setState(() => _replyTo = msg);
   void _clearReply() => setState(() => _replyTo = null);
@@ -2506,20 +2644,22 @@ class _ConversationPageState extends State<ConversationPage>
     return AnimatedBuilder(
       animation: _swipeCtrl,
       builder: (context, child) => Transform.translate(
-        offset: Offset(_swipeCtrl.isAnimating ? _swipeAnim.value : _swipeDx, 0),
+        offset: Offset(
+          _swipeCtrl.isAnimating ? _swipeAnim.value : _swipeOffset.value, 0),
         child: child!,
       ),
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onHorizontalDragUpdate: (d) {
           if (_swipeCtrl.isAnimating) _swipeCtrl.stop();
-          if (d.delta.dx > 0 || _swipeDx > 0) {
-            setState(() => _swipeDx = (_swipeDx + d.delta.dx).clamp(0, double.infinity));
+          if (d.delta.dx > 0 || _swipeOffset.value > 0) {
+            _swipeOffset.value =
+                (_swipeOffset.value + d.delta.dx).clamp(0, double.infinity);
           }
         },
         onHorizontalDragEnd: (d) {
           final sw = MediaQuery.sizeOf(context).width;
-          if (_swipeDx > sw * 0.35 || (d.primaryVelocity ?? 0) > 400) {
+          if (_swipeOffset.value > sw * 0.35 || (d.primaryVelocity ?? 0) > 400) {
             _flyOut();
           } else {
             _snapBack();
@@ -2857,6 +2997,7 @@ class _MessageRow extends StatelessWidget {
       // non-empty is an older server, or the copy that came over the socket.
       return _ImageBubble(
         bytes: imgBytes.isEmpty ? null : imgBytes,
+        mediaUrl: message.mediaUrl,
         messageId: message.id,
         conversationId: conversationId,
         token: token,
@@ -3116,10 +3257,17 @@ class _ImageBubble extends StatefulWidget {
     required this.messageId,
     required this.conversationId,
     required this.token,
+    this.mediaUrl = '',
   });
 
   /// The picture, when the message happened to carry it. Null means "fetch".
   final Uint8List? bytes;
+
+  /// Where the picture is, when the server said so on the message itself.
+  ///
+  /// Rendering straight from this skips asking the server where the file is —
+  /// a round trip per photo that the thread payload had already answered.
+  final String mediaUrl;
   final int messageId;
   final int conversationId;
   final String token;
@@ -3140,7 +3288,8 @@ class _ImageBubbleState extends State<_ImageBubble> {
   void initState() {
     super.initState();
     _bytes = widget.bytes ?? DmMedia.cached(widget.messageId);
-    if (_bytes == null) _fetch();
+    // Nothing to fetch when the message told us where the picture is.
+    if (_bytes == null && widget.mediaUrl.isEmpty) _fetch();
   }
 
   @override
@@ -3150,7 +3299,7 @@ class _ImageBubbleState extends State<_ImageBubble> {
     if (old.messageId != widget.messageId) {
       _bytes = widget.bytes ?? DmMedia.cached(widget.messageId);
       _failed = false;
-      if (_bytes == null) _fetch();
+      if (_bytes == null && widget.mediaUrl.isEmpty) _fetch();
     }
   }
 
@@ -3180,7 +3329,15 @@ class _ImageBubbleState extends State<_ImageBubble> {
     final bytes = _bytes;
 
     return GestureDetector(
-      onTap: bytes == null ? (_failed ? _retry : null) : () => openPhotoViewer(context, bytes),
+      onTap: () {
+        if (bytes != null) {
+          openPhotoViewer(context, bytes);
+        } else if (widget.mediaUrl.isNotEmpty) {
+          openPhotoUrlViewer(context, widget.mediaUrl);
+        } else if (_failed) {
+          _retry();
+        }
+      },
       child: ClipRRect(
         borderRadius: BorderRadius.circular(18),
         child: SizedBox.square(
@@ -3191,6 +3348,24 @@ class _ImageBubbleState extends State<_ImageBubble> {
                   fit: BoxFit.cover,
                   cacheWidth: decodeWidth,
                   gaplessPlayback: true,
+                )
+              : widget.mediaUrl.isNotEmpty
+              ? CachedNetworkImage(
+                  imageUrl: widget.mediaUrl,
+                  cacheManager: imageCacheManager,
+                  fit: BoxFit.cover,
+                  memCacheWidth: decodeWidth,
+                  fadeInDuration: Duration.zero,
+                  errorWidget: (_, _, _) => ColoredBox(
+                    color: isLight
+                        ? const Color(0xffe6e9ef)
+                        : const Color(0xff2a2a2a),
+                    child: Center(
+                      child: Icon(Icons.refresh_rounded,
+                          size: 22,
+                          color: isLight ? Colors.black54 : Colors.white54),
+                    ),
+                  ),
                 )
               // The frame is the same size either way, so the bubble never
               // resizes under the reader when the picture lands.
@@ -3659,11 +3834,21 @@ class _ComposerState extends State<_Composer> {
 
   Future<void> _pickImage(ImageSource source) async {
     try {
+      // 1080/q80, not 1200/q85. Measured on the live database, DM photos
+      // averaged 786 KB and reached 2.8 MB *each* — they travel as base64
+      // inside the message, which adds a third again on top of the file.
+      //
+      // Worth about 1.3x, not the order of magnitude the numbers tempt you
+      // into: a chat photo also opens fullscreen, so it cannot go much below
+      // 1080 without being visibly soft there, and the remaining weight is the
+      // base64 itself. Getting the rest means storing DM media as files the
+      // way posts already do, which is a change to how messages are stored,
+      // not to what the picker returns.
       final xfile = await ImagePicker().pickImage(
         source: source,
-        imageQuality: 85,
-        maxWidth: 1200,
-        maxHeight: 1200,
+        imageQuality: 80,
+        maxWidth: 1080,
+        maxHeight: 1080,
       );
       if (xfile == null || !mounted) return;
       final bytes = await xfile.readAsBytes();
@@ -4088,6 +4273,50 @@ class _EmptyConversation extends StatelessWidget {
 
 // ─── Shared post card ─────────────────────────────────────────────────────────
 
+/// What a shared post becomes once the original is deleted.
+///
+/// Deliberately keeps the card's footprint rather than vanishing: the message
+/// was sent, and a chat that silently loses a bubble reads as a bug. It is also
+/// not tappable — there is nothing left to open.
+class _DeletedPostCard extends StatelessWidget {
+  const _DeletedPostCard({required this.isLight});
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = isLight ? const Color(0xffdbdbdb) : const Color(0xff363636);
+    final ink = isLight ? _kSubLgt : _kSubDark;
+
+    return Container(
+      width: _SharedPostCard._kCardWidth,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 26),
+      decoration: BoxDecoration(
+        color: isLight ? const Color(0xfff1f2f4) : const Color(0xff1c1c1e),
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.block_rounded, size: 26, color: ink),
+          const SizedBox(height: 10),
+          Text(
+            AppLocalizations.of(context).postDeleted,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: ink, fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A `/media/...` path as an absolute URL. Shared-post snapshots carry media
+/// paths exactly as the server sent them, and an image widget cannot resolve a
+/// bare path.
+String _absoluteMediaUrl(String url) =>
+    url.startsWith('/') ? '$apiBaseUrl$url' : url;
+
 class _SharedPostCard extends StatelessWidget {
   const _SharedPostCard({
     required this.data,
@@ -4104,6 +4333,18 @@ class _SharedPostCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final postId = (data['id'] as num?)?.toInt() ?? 0;
+    // Repaints the moment the lookup comes back, without the whole thread
+    // having to rebuild for it.
+    return ValueListenableBuilder<int>(
+      valueListenable: DeletedPosts.revision,
+      builder: (context, _, _) => DeletedPosts.isDeleted(postId)
+          ? _DeletedPostCard(isLight: isLight)
+          : _card(context),
+    );
+  }
+
+  Widget _card(BuildContext context) {
     final author         = data['author']?.toString() ?? '';
     final avatarUrl      = data['avatarUrl']?.toString() ?? '';
     final authorVerified = data['authorVerified'] == true;
@@ -4115,6 +4356,9 @@ class _SharedPostCard extends StatelessWidget {
     final mediaType = media?['type']?.toString() ?? (data['imageUrl'] != null ? 'image' : '');
     final mediaUrl  = (media?['url'] ?? data['imageUrl'])?.toString() ?? '';
     final isVideo   = mediaType == 'video';
+    // The server takes a still off every video it re-encodes, so a shared
+    // video no longer has to be a black square here.
+    final thumbUrl  = media?['thumbUrl']?.toString() ?? '';
     final pollOptions = (data['poll'] as Map?)?['options'] as List? ?? const [];
 
     final cardBg    = isLight ? Colors.white : const Color(0xff1c1c1e);
@@ -4136,14 +4380,28 @@ class _SharedPostCard extends StatelessWidget {
       mediaArea = AspectRatio(
         aspectRatio: 1,
         child: isVideo
-            // A static play-button treatment rather than decoding/playing
-            // the video — Instagram's own DM preview is a static frame,
-            // and actually decoding video just for a chat thumbnail isn't
-            // worth the cost here.
-            ? Container(
-                color: Colors.black,
+            // A still plus a play badge, never a live player: decoding video
+            // for a chat thumbnail is not worth it, and Instagram's own DM
+            // preview is a static frame too. The still comes from the server
+            // (PostMedia.thumb_url); the black square is the fallback for
+            // videos shared before posters existed.
+            ? Stack(
+                fit: StackFit.expand,
                 alignment: Alignment.center,
-                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 44),
+                children: [
+                  ColoredBox(color: Colors.black),
+                  if (thumbUrl.isNotEmpty)
+                    CachedNetworkImage(
+                      imageUrl: _absoluteMediaUrl(thumbUrl),
+                      cacheManager: imageCacheManager,
+                      fit: BoxFit.cover,
+                      memCacheWidth: 630,
+                      fadeInDuration: Duration.zero,
+                      errorWidget: (_, _, _) => const SizedBox.shrink(),
+                    ),
+                  const Icon(Icons.play_arrow_rounded,
+                      color: Colors.white, size: 44),
+                ],
               )
             : (mediaBytes != null
                 ? Image.memory(mediaBytes, fit: BoxFit.cover, cacheWidth: 630)
@@ -5176,9 +5434,9 @@ class _PhotoPreviewPageState extends State<_PhotoPreviewPage> {
             ),
           ),
 
-          // Save, lifetime, send. The lifetime button sits in the middle,
-          // between the two things it qualifies, and takes the width it needs
-          // for whichever label it is currently showing.
+          // Lifetime and send. There is deliberately no "save to gallery"
+          // here: a photo you are about to send — possibly as view-once — has
+          // no business offering a one-tap copy to the camera roll.
           Positioned(
             left: 20,
             right: 20,

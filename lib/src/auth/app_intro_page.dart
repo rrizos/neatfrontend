@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
 import '../core/models.dart';
 import '../map/city_map_view.dart';
-import 'auth_screen.dart';
+import 'sign_up_method_page.dart';
 import '../core/onboarding_ui.dart';
 
 /// Sign-up step 1 of 3 — shown right after the landing page's "Sign up",
 /// before the user types anything. Says in three lines what Neat is, then
-/// hands off to [AuthScreen] for the actual credentials form.
+/// hands off to [SignUpMethodPage], where they pick how to sign up.
 class AppIntroPage extends StatefulWidget {
   const AppIntroPage({
     super.key,
@@ -46,10 +46,9 @@ class _AppIntroPageState extends State<AppIntroPage> {
   void _continue() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => AuthScreen(
+        builder: (_) => SignUpMethodPage(
           onAuthenticated: widget.onAuthenticated,
           themeMode: widget.themeMode,
-          initialSignup: true,
         ),
       ),
     );

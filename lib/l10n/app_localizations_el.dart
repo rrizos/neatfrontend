@@ -30,7 +30,7 @@ class AppLocalizationsEl extends AppLocalizations {
   String get email => 'Email';
 
   @override
-  String get fullName => 'Ονοματεπώνυμο';
+  String get fullName => 'Όνομα';
 
   @override
   String get password => 'Κωδικός πρόσβασης';
@@ -617,6 +617,43 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get photoTooLarge => 'Η φωτογραφία είναι πολύ μεγάλη. Δοκίμασε ξανά.';
+
+  @override
+  String videoTooLarge(int size, int max) {
+    return 'Το βίντεο είναι πολύ μεγάλο ($size MB). Το όριο είναι $max MB — δοκίμασε ένα πιο σύντομο κλιπ.';
+  }
+
+  @override
+  String uploadingVideo(int percent) {
+    return 'Μεταφόρτωση βίντεο… $percent%';
+  }
+
+  @override
+  String get couldNotSaveProfile =>
+      'Δεν ήταν δυνατή η αποθήκευση του προφίλ. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά.';
+
+  @override
+  String get preparingPhoto => 'Προετοιμασία φωτογραφίας…';
+
+  @override
+  String get videoProcessing => 'Επεξεργασία βίντεο…';
+
+  @override
+  String get postShared => 'Δημοσιεύτηκε';
+
+  @override
+  String get postingLabel => 'Δημοσίευση…';
+
+  @override
+  String videoProcessingPercent(int percent) {
+    return 'Επεξεργασία βίντεο… $percent%';
+  }
+
+  @override
+  String get postDeleted => 'Η δημοσίευση διαγράφηκε';
+
+  @override
+  String get preparingVideo => 'Προετοιμασία βίντεο…';
 
   @override
   String get noPostsYet => 'Καμία δημοσίευση ακόμη.';
@@ -1464,4 +1501,112 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get photoUnavailable => 'Η φωτογραφία δεν είναι πλέον διαθέσιμη';
+
+  @override
+  String get signUpMethodTitle => 'Φτιάξε τον λογαριασμό σου';
+
+  @override
+  String get signUpMethodSubtitle =>
+      'Διάλεξε πώς θέλεις να εγγραφείς. Θα μπορείς να συνδέεσαι με τον ίδιο τρόπο κάθε φορά.';
+
+  @override
+  String get signUpWithApple => 'Συνέχεια με Apple';
+
+  @override
+  String get signUpWithGoogle => 'Συνέχεια με Google';
+
+  @override
+  String get signUpWithEmail => 'Εγγραφή με email';
+
+  @override
+  String get signUpMethodHaveAccount => 'Έχεις ήδη λογαριασμό;';
+
+  @override
+  String get signUpMethodSignIn => 'Σύνδεση';
+
+  @override
+  String get signUpGoogleUnavailable =>
+      'Η σύνδεση με Google δεν έχει ρυθμιστεί ακόμη.';
+
+  @override
+  String get usernameSetupTitle => 'Διάλεξε το username σου';
+
+  @override
+  String get usernameSetupSubtitle =>
+      'Έτσι θα σε βρίσκουν και θα σε αναφέρουν οι άλλοι. Μπορείς να το αλλάξεις αργότερα από το προφίλ σου.';
+
+  @override
+  String get usernameSetupHint => 'username';
+
+  @override
+  String get usernameSetupRules =>
+      'Γράμματα, αριθμοί, τελείες και κάτω παύλες. 3–20 χαρακτήρες.';
+
+  @override
+  String get usernameSetupCta => 'Συνέχεια';
+
+  @override
+  String get usernameSetupTaken => 'Αυτό το username χρησιμοποιείται ήδη.';
+
+  @override
+  String get usernameSetupTooShort =>
+      'Το username πρέπει να έχει τουλάχιστον 3 χαρακτήρες.';
+
+  @override
+  String get usernameSetupTooLong =>
+      'Το username πρέπει να έχει το πολύ 20 χαρακτήρες.';
+
+  @override
+  String get usernameSetupBadChars =>
+      'Μόνο γράμματα, αριθμοί, τελείες και κάτω παύλες.';
+
+  @override
+  String get authOr => 'ή';
+
+  @override
+  String get setPasswordTitle => 'Ορισμός κωδικού';
+
+  @override
+  String get changePasswordTitle => 'Αλλαγή κωδικού';
+
+  @override
+  String get setPasswordExplain =>
+      'Έκανες εγγραφή με Apple ή Google, οπότε ο λογαριασμός σου δεν έχει ακόμη κωδικό. Αν βάλεις έναν, θα μπορείς να συνδέεσαι και χωρίς αυτούς — χρήσιμο αν χάσεις την πρόσβαση σε εκείνον τον λογαριασμό.';
+
+  @override
+  String get changePasswordExplain =>
+      'Διάλεξε νέο κωδικό για τον λογαριασμό σου.';
+
+  @override
+  String get currentPasswordHint => 'Τρέχων κωδικός';
+
+  @override
+  String get newPasswordHint => 'Νέος κωδικός';
+
+  @override
+  String get confirmPasswordHint => 'Επανάλαβε τον νέο κωδικό';
+
+  @override
+  String get passwordsDoNotMatch => 'Οι δύο κωδικοί δεν είναι ίδιοι.';
+
+  @override
+  String get passwordSaved => 'Ο κωδικός αποθηκεύτηκε.';
+
+  @override
+  String get savePassword => 'Αποθήκευση';
+
+  @override
+  String get support => 'Υποστήριξη';
+
+  @override
+  String cityChangeLocked(String date) {
+    return 'Θα μπορείς να αλλάξεις πόλη ξανά στις $date.';
+  }
+
+  @override
+  String get cityChangeHint =>
+      'Πάτησε για αλλαγή. Μπορείς να αλλάξεις πόλη μία φορά τον μήνα.';
+
+  @override
+  String get cityChanged => 'Η πόλη σου ενημερώθηκε.';
 }

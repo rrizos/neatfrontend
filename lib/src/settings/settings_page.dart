@@ -7,6 +7,7 @@ import '../core/api.dart';
 import '../core/code_push_service.dart';
 import '../core/legal_links.dart';
 import 'blocked_accounts_page.dart';
+import 'set_password_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
@@ -15,12 +16,17 @@ class SettingsPage extends StatelessWidget {
     required this.onThemeModeChanged,
     required this.onLogout,
     required this.token,
+    this.hasPassword = true,
   });
 
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final Future<void> Function() onLogout;
   final String token;
+
+  /// False for an account created through Apple or Google that has never set
+  /// one — the row then offers to add a password rather than change it.
+  final bool hasPassword;
 
   @override
   Widget build(BuildContext context) {
@@ -38,8 +44,15 @@ class SettingsPage extends StatelessWidget {
         elevation: 0,
         title: Text(l10n.settings),
       ),
+      // bottom: false, because the padding below is doing that job properly:
+      // SafeArea alone stops at the home indicator, which is shorter than the
+      // tab bar sitting on top of it.
       body: SafeArea(
+        bottom: false,
         child: ListView(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.paddingOf(context).bottom + 112,
+          ),
           children: [
             _SectionHeader(label: l10n.appearance, color: sectionColor),
             SwitchListTile(
@@ -90,6 +103,30 @@ class SettingsPage extends StatelessWidget {
             ),
             const SizedBox(height: 28),
             _SectionHeader(label: l10n.account, color: sectionColor),
+            _SettingsRow(
+              icon: Icons.support_rounded,
+              label: l10n.support,
+              isLight: isLight,
+              onTap: () => openSafetyPortal(context),
+            ),
+            Divider(height: 1, color: divider),
+            _SettingsRow(
+              icon: Icons.lock_outline_rounded,
+              label: hasPassword
+                  ? l10n.changePasswordTitle
+                  : l10n.setPasswordTitle,
+              isLight: isLight,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => SetPasswordPage(
+                    token: token,
+                    hasPassword: hasPassword,
+                    isLight: isLight,
+                  ),
+                ),
+              ),
+            ),
+            Divider(height: 1, color: divider),
             _SettingsRow(
               icon: Icons.block,
               label: l10n.blockedAccounts,
@@ -307,13 +344,15 @@ class _LanguageRow extends StatelessWidget {
     final color = isLight ? Colors.black : Colors.white;
     return ListTile(
       onTap: selected ? null : onTap,
-      leading: Icon(Icons.language, color: color),
+      visualDensity: VisualDensity.compact,
+      minLeadingWidth: 32,
+      leading: Icon(Icons.language, color: color, size: 24),
       title: Text(
         label,
         style: TextStyle(color: color, fontWeight: FontWeight.w500),
       ),
       trailing: selected
-          ? const Icon(Icons.check_rounded, color: Color(0xff1479ff))
+          ? const Icon(Icons.check_rounded, size: 21, color: Color(0xff1479ff))
           : null,
     );
   }
@@ -366,14 +405,21 @@ class _SettingsRow extends StatelessWidget {
         : (isLight ? Colors.black : Colors.white);
     return ListTile(
       onTap: onTap,
-      leading: Icon(icon, color: color),
+      visualDensity: VisualDensity.compact,
+      minLeadingWidth: 32,
+      leading: Icon(icon, color: color, size: 24),
       title: Text(
         label,
-        style: TextStyle(color: color, fontWeight: FontWeight.w500),
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w500,
+          fontSize: 15.5,
+        ),
       ),
       trailing: showChevron
           ? Icon(
               Icons.chevron_right,
+              size: 21,
               color: isLight ? const Color(0xffb0b0b0) : const Color(0xff5a5a5a),
             )
           : null,

@@ -18,6 +18,7 @@ import '../core/http_client.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:visibility_detector/visibility_detector.dart';
+import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../l10n/app_localizations.dart';
@@ -127,6 +128,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final _composeMedia = <_ComposeMedia>[];
   bool _composeMediaLoading = false;
   bool _posting = false;
+
+  /// Fraction of the compose upload's bytes written, or null while there is
+  /// nothing large enough in flight to be worth a determinate bar.
+  /// Fraction of the media currently going up, or null when nothing is.
+  ///
+  /// A notifier rather than state: the upload now starts when media is picked
+  /// and runs while the caption is being written, so it has to drive the
+  /// compose sheet's indicator from outside that sheet's own setState.
+  final ValueNotifier<double?> _uploadProgress = ValueNotifier<double?>(null);
+
+  /// What the top banner says while a post is being delivered, or null when
+  /// there is nothing to report.
+  final ValueNotifier<String?> _postingLabel = ValueNotifier<String?>(null);
+
+  /// The client carrying the current upload, kept so it can be aborted.
+  ///
+  /// Uploads go through their own client rather than the shared one because
+  /// closing a client is what cancels its in-flight request — and closing the
+  /// shared one would take every other request in the app down with it.
+  http.Client? _uploadClient;
+  bool _cancelledUpload = false;
+
+  /// Follow-up refresh while a just-posted video is still encoding.
+  /// See _scheduleProcessingRefresh.
+  Timer? _processingPollTimer;
+  int _processingPolls = 0;
+  static const _kProcessingPollLimit = 24;
   bool _composePollActive = false;
   final _composePollControllers = <TextEditingController>[];
   int _unreadMessages = 0;
@@ -146,6 +174,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    AvatarStore.revision.addListener(_onAvatarRevisionChanged);
     _setupNativeTabChannel();
     // Paint last-known posts instantly instead of a blank spinner while the
     // network round-trip for fresh ones is still in flight.
@@ -246,6 +275,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    // A socket left open by a screen that no longer exists.
+    _uploadClient?.close();
+    _uploadClient = null;
+    AvatarStore.revision.removeListener(_onAvatarRevisionChanged);
     WidgetsBinding.instance.removeObserver(this);
     if (_isIOS26) _kTabChannel.invokeMethod('hideTabBar');
     _kTabChannel.setMethodCallHandler(null);
@@ -258,6 +291,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (identical(PushService.instance.onNotificationTap, _openNotificationTargetFromPush)) {
       PushService.instance.onNotificationTap = null;
     }
+    _processingPollTimer?.cancel();
+    _uploadProgress.dispose();
+    _postingLabel.dispose();
     _compose.dispose();
     for (final c in _composePollControllers) { c.dispose(); }
     _cityScroll.dispose();
@@ -317,11 +353,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _loading = false;
         _isOffline = false;
       });
+      _scheduleProcessingRefresh();
       await Future.wait([_loadFollowingAuthors(), _loadFollowerAuthors(), _loadUnreadMessages(), _loadOfficialEventsBadge()]);
     } catch (_) {
       await _loadCachedPosts();
       if (mounted) setState(() { _loading = false; _isOffline = true; });
     }
+  }
+
+  /// Re-fetches the feed while any video in it is still being encoded.
+  ///
+  /// A post now reaches the feed a few seconds before its video does, so
+  /// without this the poster would sit looking at their own "Processing video"
+  /// tile until they thought to pull-to-refresh. Only runs when something is
+  /// actually processing, and gives up after [_kProcessingPollLimit] tries so a
+  /// video that never finishes can't leave the app polling forever.
+  void _scheduleProcessingRefresh() {
+    _processingPollTimer?.cancel();
+    final processing = _posts.any((p) => p.media.any((m) => m.isProcessing));
+    if (!processing) {
+      _processingPolls = 0;
+      return;
+    }
+    if (_processingPolls >= _kProcessingPollLimit) return;
+    _processingPolls++;
+    _processingPollTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) unawaited(_load());
+    });
   }
 
   Future<void> _loadUnreadMessages() async {
@@ -557,24 +615,107 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   static const _kMaxImageBytes = 6 * 1024 * 1024; // 6 MB per image
-  static const _kMaxVideoBytes = 20 * 1024 * 1024; // 20 MB per video
 
+  /// Ceiling for a picked video, in bytes.
+  ///
+  /// This is what the length limit actually was: at the ~17 Mbit/s a phone
+  /// shoots 1080p at, the old 20 MB cap rejected anything past roughly five
+  /// seconds, whatever [_kMaxVideoDuration] said. 140 MB clears a minute of
+  /// 1080p with room to spare and still sits under the server's 150 MB cap.
+  /// Nothing is served at this size — the box re-encodes every upload to
+  /// 960p/2 Mbit/s — so it only bounds what has to travel up the wire.
+  static const _kMaxVideoBytes = 140 * 1024 * 1024; // 140 MB per video
+  static const _kMaxVideoDuration = Duration(minutes: 3);
+
+  /// Closes the sheet and posts behind you.
+  ///
+  /// Posting used to hold the compose sheet open for the whole upload, which
+  /// on a phone connection is a minute of staring at a spinner for something
+  /// you have already decided to do. The sheet now closes on the tap and the
+  /// work continues in the background, with a bar at the top of the feed
+  /// carrying the progress — the same thing Instagram does, and the reason
+  /// posting there feels instant even when the upload is not.
   Future<void> _createPost(StateSetter setPageState) async {
     final text = _compose.text.trim();
     if (text.isEmpty || _posting) return;
+
+    // Everything the delivery needs, taken before the sheet is torn down.
+    final media = List<_ComposeMedia>.from(_composeMedia);
+    final pollOptions = _composePollActive
+        ? _composePollControllers
+            .map((c) => c.text.trim())
+            .where((t) => t.isNotEmpty)
+            .toList()
+        : <String>[];
+
+    Navigator.of(context).pop();
+    _compose.clear();
+    setState(() {
+      _composeMedia.clear();
+      _composePollActive = false;
+      for (final c in _composePollControllers) {
+        c.dispose();
+      }
+      _composePollControllers.clear();
+    });
+
+    unawaited(_deliverPost(text, media, pollOptions));
+  }
+
+  /// Uploads and creates the post, with nothing waiting on it.
+  Future<void> _deliverPost(
+    String text,
+    List<_ComposeMedia> media,
+    List<String> pollOptions,
+  ) async {
+    // Only counts as a big upload if the bytes still have to go now — a video
+    // already staged while the caption was written costs a few hundred bytes.
+    final hasVideo = media.any(
+      (m) => m.isVideo && m.videoPath != null && m.uploadId == null,
+    );
     setState(() => _posting = true);
-    setPageState(() {});
-    var popped = false;
+    _postingLabel.value = AppLocalizations.of(context).postingLabel;
+    // Only start from zero if nothing is already in flight. Pressing Post
+    // while the staged upload is at 60% must not send the bar back to the
+    // start — it is the same bytes, still going.
+    if (hasVideo && _uploadProgress.value == null) _uploadProgress.value = 0;
     try {
-      final request = http.MultipartRequest('POST', postsEndpoint())
-        ..headers['Authorization'] = 'Token ${widget.session.token}';
+      final request = _ProgressMultipartRequest(
+        'POST',
+        postsEndpoint(),
+        onProgress: (sent, total) {
+          if (!hasVideo || total <= 0 || !mounted) return;
+          final next = sent / total;
+          // Repaint on whole percentage points only — a chunk callback fires
+          // far more often than a progress ring can usefully change.
+          final shown = _uploadProgress.value;
+          if (shown != null && (next - shown).abs() < 0.01 && next < 1) return;
+          _uploadProgress.value = next;
+        },
+      )..headers['Authorization'] = 'Token ${widget.session.token}';
       request.fields['text'] = text;
+
+      // Anything still going up gets waited on here rather than re-sent. By
+      // this point it has had the whole caption-writing to finish, so it is
+      // usually already done and this returns immediately.
+      for (final m in media) {
+        if (m.uploadId == null && m.staging != null) {
+          await m.staging;
+        }
+      }
 
       final mediaInfo = <Map<String, dynamic>>[];
       int fileIndex = 0;
-      for (final m in _composeMedia) {
+      for (final m in media) {
         if (m.externalUrl != null) {
           mediaInfo.add({'type': m.type, 'url': m.externalUrl!, 'order': mediaInfo.length});
+        } else if (m.uploadId != null) {
+          // Already on the server; the post carries only its id.
+          mediaInfo.add({
+            'type': m.type,
+            'upload_id': m.uploadId,
+            'order': mediaInfo.length,
+          });
         } else if (m.isVideo && m.videoPath != null) {
           mediaInfo.add({'type': 'video', 'file_index': fileIndex, 'order': mediaInfo.length});
           request.files.add(await http.MultipartFile.fromPath(
@@ -595,40 +736,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
       request.fields['media'] = jsonEncode(mediaInfo);
 
-      if (_composePollActive && _composePollControllers.length >= 2) {
-        final options = _composePollControllers
-            .map((c) => c.text.trim())
-            .where((t) => t.isNotEmpty)
-            .toList();
-        if (options.length >= 2) {
-          request.fields['poll'] = jsonEncode({'options': options});
-        }
+      if (pollOptions.length >= 2) {
+        request.fields['poll'] = jsonEncode({'options': pollOptions});
       }
 
-      final streamed = await http.sharedHttpClient.send(request).timeout(const Duration(seconds: 180));
+      // Generous, because it has to cover both the wire time for up to 140 MB
+      // on a phone connection and the server-side transcode that follows it.
+      // The progress ring is what tells the user it is alive; this only has to
+      // be long enough not to kill an upload that is genuinely still moving.
+      final client = http.Client();
+      _uploadClient = client;
+      _cancelledUpload = false;
+      final streamed = await client
+          .send(request)
+          .timeout(Duration(seconds: hasVideo ? 900 : 180));
       final res = await http.Response.fromStream(streamed);
       if (!mounted) return;
       if (res.statusCode == 201) {
-        _compose.clear();
-        popped = true;
-        Navigator.of(context).pop();
+        // Deliberately does not navigate anywhere. The sheet closed when Post
+        // was tapped and the user has been reading the feed ever since —
+        // yanking them to their profile now would be the app grabbing the
+        // wheel back long after they let go.
         if (mounted) {
-          setState(() {
-            _composeMedia.clear();
-            _composePollActive = false;
-            for (final c in _composePollControllers) { c.dispose(); }
-            _composePollControllers.clear();
-            // Switch to profile tab and force a reload so the new post appears.
-            _nav = 4;
-            _visitedTabs.add(4);
-            _inlineProfileUsername = widget.session.user.username;
-            _inlinePostId = null;
-            _showInlineProfile = true;
-            _profileRefreshKey++;
-          });
-          if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 4);
-          // Refresh the home feed so the profile picks up the new post.
+          _postingLabel.value = AppLocalizations.of(context).postShared;
           _load();
+          Future<void>.delayed(const Duration(seconds: 2), () {
+            if (mounted) _postingLabel.value = null;
+          });
         }
       } else if (res.statusCode == 413) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -640,16 +774,44 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         );
       }
     } catch (e) {
-      if (mounted) {
+      // An aborted upload throws on the way out; that is the user's own doing,
+      // not a failure to report back to them.
+      if (mounted && !_cancelledUpload) {
         final msg = e.toString().contains('TimeoutException')
             ? AppLocalizations.of(context).uploadTimedOut
             : AppLocalizations.of(context).networkError;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     } finally {
+      _uploadClient?.close();
+      _uploadClient = null;
       if (mounted) {
-        setState(() => _posting = false);
-        if (!popped) setPageState(() {});
+        setState(() {
+          _posting = false;
+        });
+        _uploadProgress.value = null;
+      }
+    }
+  }
+
+  /// Stops an upload in progress and lets the sheet close.
+  ///
+  /// Closing the client aborts the request it is carrying — the only way to
+  /// actually stop a send in flight. Without this, Cancel and the media X were
+  /// both dead while a video uploaded: the sheet refused to pop, the buttons
+  /// were disabled, and a minute-long upload (or a stalled one) left the user
+  /// with nowhere to go but force-quitting the app.
+  void _cancelUpload() {
+    if (!_posting) return;
+    _cancelledUpload = true;
+    _uploadClient?.close();
+    _uploadClient = null;
+    if (mounted) {
+      setState(() => _posting = false);
+      _uploadProgress.value = null;
+      // Left standing only when it says "Posted", which clears itself.
+      if (_postingLabel.value == AppLocalizations.of(context).postingLabel) {
+        _postingLabel.value = null;
       }
     }
   }
@@ -682,6 +844,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _composeMedia.removeWhere((m) => m.isVideo);
       _composeMedia.addAll(newItems);
     });
+    for (final item in newItems) {
+      _beginStaging(item);
+    }
     setPageState(() {});
     if (skipped > 0 && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -718,18 +883,37 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _composeMedia.removeWhere((m) => m.isVideo);
       _composeMedia.add(_ComposeMedia.localImage(imageBytes: bytes));
     });
+    _beginStaging(_composeMedia.last);
     setPageState(() {});
   }
 
   Future<void> _pickComposeVideo(StateSetter setPageState) async {
     final picked = await _imagePicker.pickVideo(
       source: ImageSource.gallery,
-      maxDuration: const Duration(seconds: 30),
+      maxDuration: _kMaxVideoDuration,
     );
     if (picked == null || !mounted) return;
     setState(() => _composeMediaLoading = true);
     setPageState(() {});
-    final fileSize = await picked.length();
+
+    // Compress before it ever touches the network. The server re-encodes every
+    // upload to 960p/2 Mbit/s anyway, so the 60-90 MB a phone produces for a
+    // minute of 1080p is bytes spent purely to be thrown away — and on a mobile
+    // connection that is the several minutes an upload used to take. Doing it
+    // here costs the phone a few seconds and cuts what has to travel by around
+    // an order of magnitude.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context).preparingVideo),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+    final path = await _compressVideo(picked.path);
+    if (!mounted) return;
+    final file = File(path);
+    final fileSize = await file.length();
     if (!mounted) return;
     if (fileSize > _kMaxVideoBytes) {
       setState(() => _composeMediaLoading = false);
@@ -737,7 +921,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Video is too large (${(fileSize / 1024 / 1024).toStringAsFixed(0)} MB). Try a shorter clip under 30 seconds.',
+            AppLocalizations.of(context).videoTooLarge(
+              (fileSize / 1024 / 1024).round(),
+              _kMaxVideoBytes ~/ (1024 * 1024),
+            ),
           ),
         ),
       );
@@ -747,12 +934,119 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _composeMediaLoading = false;
       _composeMedia.clear();
-      _composeMedia.add(_ComposeMedia.localVideo(videoPath: picked.path));
+      _composeMedia.add(_ComposeMedia.localVideo(videoPath: path));
     });
+    // The long one. A minute of 1080p is ~11 MB, and this is exactly the
+    // stretch where the user is writing a caption and the network is idle.
+    _beginStaging(_composeMedia.last);
     setPageState(() {});
   }
 
+  /// Re-encodes [sourcePath] to something worth uploading, or returns it
+  /// unchanged if that fails.
+  ///
+  /// Never fatal: a phone that refuses to compress (an unusual codec, no
+  /// hardware encoder, a plugin that throws) should still be able to post its
+  /// video, just slowly. That is the old behaviour, so falling back to it
+  /// cannot be a regression.
+  Future<String> _compressVideo(String sourcePath) async {
+    try {
+      final info = await VideoCompress.compressVideo(
+        sourcePath,
+        // 1080p, matching the server's own target exactly
+        // (_TARGET_MAX_EDGE in posts/transcode.py). The match is what matters
+        // as much as the number: when the two disagree the server re-encodes
+        // every upload, which is twenty seconds of "processing" instead of
+        // about one. They have to be changed together.
+        quality: VideoQuality.Res1920x1080Quality,
+        deleteOrigin: false,
+        includeAudio: true,
+      );
+      final out = info?.path;
+      if (out == null || out.isEmpty) return sourcePath;
+      // Trust it only if it actually came out smaller; some sources compress
+      // to something larger than they started.
+      final before = await File(sourcePath).length();
+      final after = await File(out).length();
+      if (after <= 0 || after >= before) return sourcePath;
+      debugPrint(
+        '[compose] video ${(before / 1048576).toStringAsFixed(1)} MB -> '
+        '${(after / 1048576).toStringAsFixed(1)} MB',
+      );
+      return out;
+    } catch (e) {
+      debugPrint('[compose] compression unavailable, uploading original: $e');
+      return sourcePath;
+    }
+  }
+
+  /// Starts uploading a picked file immediately, returning its staged id.
+  ///
+  /// This is the whole point of the compose flow: picking a video and writing
+  /// a caption are the same span of time, and the upload used to wait for the
+  /// end of it. Failing here is not fatal — the media simply travels with the
+  /// post request as it always did.
+  Future<String?> _stageUpload(_ComposeMedia media) async {
+    try {
+      // Reports as it goes, so the compose sheet can show the video climbing
+      // while the caption is being written. Without this the indicator sat at
+      // 0% for the whole upload — the bytes were moving, nothing was watching.
+      final request = _ProgressMultipartRequest(
+        'POST',
+        stageUploadEndpoint,
+        onProgress: (sent, total) {
+          if (total <= 0) return;
+          final next = sent / total;
+          final shown = _uploadProgress.value;
+          if (shown != null && (next - shown).abs() < 0.01 && next < 1) return;
+          _uploadProgress.value = next;
+        },
+      )
+        ..headers.addAll(authGetHeaders(widget.session.token))
+        ..fields['type'] = media.type;
+
+      if (media.videoPath != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'file', media.videoPath!, filename: 'video.mp4'));
+      } else if (media.imageBytes != null) {
+        request.files.add(http.MultipartFile.fromBytes(
+          'file', media.imageBytes!, filename: 'image.jpg'));
+      } else {
+        return null; // a Giphy URL has nothing to upload
+      }
+
+      final res = await http.Response.fromStream(
+        await request.send().timeout(const Duration(seconds: 900)),
+      );
+      if (res.statusCode != 201) {
+        debugPrint('[compose] staging refused: ${res.statusCode}');
+        return null;
+      }
+      final id = (jsonDecode(res.body) as Map<String, dynamic>)['id']?.toString();
+      media.uploadId = id;
+      _uploadProgress.value = null;
+      debugPrint('[compose] staged ${media.type} as $id');
+      return id;
+    } catch (e) {
+      // Not fatal: the file travels with the post request instead, exactly as
+      // it did before staging existed.
+      _uploadProgress.value = null;
+      debugPrint('[compose] staging failed, will send with the post: $e');
+      return null;
+    }
+  }
+
+  /// Kicks off staging for [media] without waiting for it.
+  void _beginStaging(_ComposeMedia media) {
+    media.staging = _stageUpload(media);
+    unawaited(media.staging!);
+  }
+
   void _removeComposeMedia(int index, StateSetter setPageState) {
+    // Mid-upload the request already holds its own copy of this list, so
+    // removing an item here changed nothing visible and the X looked broken.
+    // Taking the media out of a post that is being sent means stopping it.
+    if (_posting) _cancelUpload();
     setState(() => _composeMedia.removeAt(index));
     setPageState(() {});
   }
@@ -1205,14 +1499,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             final cellPx =
                 (size * MediaQuery.devicePixelRatioOf(context)).round();
             Widget preview;
-            if (item.isVideo) {
-              preview = Container(
-                color: const Color(0xff141414),
-                child: const Center(
-                  child: Icon(Icons.videocam_rounded,
-                      color: Colors.white54, size: 36),
-                ),
-              );
+            if (item.isVideo && item.videoPath != null) {
+              preview = _ComposeVideoPreview(path: item.videoPath!);
             } else if (item.imageBytes != null) {
               preview = Image.memory(item.imageBytes!, fit: BoxFit.cover, cacheWidth: cellPx);
             } else if (item.externalUrl != null) {
@@ -1268,14 +1556,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               final singlePx =
                   (width * MediaQuery.devicePixelRatioOf(context)).round();
               Widget preview;
-              if (item.isVideo) {
-                preview = Container(
-                  color: const Color(0xff141414),
-                  child: const Center(
-                    child: Icon(Icons.videocam_rounded,
-                        color: Colors.white54, size: 48),
-                  ),
-                );
+              if (item.isVideo && item.videoPath != null) {
+                preview =
+                    _ComposeVideoPreview(path: item.videoPath!, badgeSize: 48);
               } else if (item.imageBytes != null) {
                 preview = Image.memory(item.imageBytes!, fit: BoxFit.cover, cacheWidth: singlePx);
               } else if (item.externalUrl != null) {
@@ -1307,6 +1590,37 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             color: Colors.white, size: 17),
                       ),
                     ),
+                  ),
+                  // A minute of video is a long enough upload that the button's
+                  // progress ring alone is too small to reassure anyone.
+                  // Listens, because the upload is usually already running
+                  // before this sheet's own state ever changes.
+                  ValueListenableBuilder<double?>(
+                    valueListenable: _uploadProgress,
+                    builder: (context, progress, _) {
+                      if (progress == null) return const SizedBox.shrink();
+                      return Positioned(
+                        left: 10,
+                        bottom: 10,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.62),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            AppLocalizations.of(context)
+                                .uploadingVideo((progress * 100).round()),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ]),
               );
@@ -1358,7 +1672,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           }
 
               return PopScope(
-                canPop: !_posting,
+                // Always poppable. Refusing to pop while posting is what left
+                // people stuck in this sheet with no way out; the upload is
+                // cancelled on the way instead.
+                canPop: true,
+                onPopInvokedWithResult: (didPop, _) {
+                  if (didPop) _cancelUpload();
+                },
                 child: Scaffold(
                 backgroundColor:
                     isLight ? Colors.white : const Color(0xff000000),
@@ -1373,9 +1693,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         child: Row(
                           children: [
                             TextButton(
-                              onPressed: _posting
-                                  ? null
-                                  : () => Navigator.of(pageContext).pop(),
+                              onPressed: () {
+                                _cancelUpload();
+                                Navigator.of(pageContext).pop();
+                              },
                               style: TextButton.styleFrom(
                                 foregroundColor: isLight ? Colors.black : Colors.white,
                                 disabledForegroundColor: const Color(0xff8a8a8a),
@@ -1427,6 +1748,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                           height: 16,
                                           child: CircularProgressIndicator(
                                             strokeWidth: 2,
+                                            // Determinate once there are
+                                            // megabytes in flight: a minute of
+                                            // video takes long enough that a
+                                            // spinner alone reads as a hang.
+                                            value: _uploadProgress.value,
                                             valueColor:
                                                 AlwaysStoppedAnimation<Color>(
                                               isLight ? Colors.white : Colors.black,
@@ -2095,6 +2421,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 _loadUnreadMessages();
               },
             ),
+            // Directly under the top bar, where Instagram puts it: in view
+            // but not in the way of whatever the user went back to.
+            _PostingBanner(
+              label: _postingLabel,
+              progress: _uploadProgress,
+              isLight: isLight,
+            ),
             Divider(
               height: 1,
               color: isLight ? const Color(0xffd6d9df) : const Color(0xff232323),
@@ -2235,23 +2568,89 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return ResizeImage(base, width: 288);
   }
 
+  /// The last picture handed to the native bar, so an unchanged one is not
+  /// re-encoded and pushed across the channel on every rebuild.
+  String _nativeProfileIconUrl = '';
+
+  /// Pushes the current avatar to the native iOS 26 tab bar.
+  ///
+  /// On iOS 26 the bottom bar is a real UITabBar owned by AppDelegate, and
+  /// Flutter renders only a transparent spacer where it sits — so nothing in
+  /// the Dart widget tree can repaint it. It has to be *told*, over the method
+  /// channel, every time the picture changes.
+  ///
+  /// This used to be called once, from _adoptNativeTabBar at startup. That is
+  /// why changing your profile picture updated the feed, your profile and your
+  /// posts immediately while the bar underneath them kept the old one until the
+  /// app was relaunched — the relaunch was not fixing anything, it was simply
+  /// the only time this ran.
   Future<void> _syncNativeProfileIcon() async {
-    final url = widget.session.user.avatarUrl;
-    if (url.isEmpty) return;
-    if (url.startsWith('data:')) {
-      final bytes = decodeAvatarUrl(url);
+    if (!_isIOS26) return;
+    // Resolve through the store: the session's copy can be older than the
+    // picture the user just chose.
+    final url = AvatarStore.resolve(
+      widget.session.user.username,
+      widget.session.user.avatarUrl,
+    );
+    if (url.isEmpty || url == _nativeProfileIconUrl) return;
+    _nativeProfileIconUrl = url;
+    try {
+      // Always bytes, never a URL.
+      //
+      // The native side would fetch a URL with URLSession, which knows nothing
+      // about the certificate pinning that lives in Dart's HTTP client — and
+      // the API is served from a bare IP with a self-signed certificate, so
+      // that download fails and the tab bar is left with no picture at all.
+      // Fetching here means it goes through the pinned client like every other
+      // request, and native only ever receives finished bytes.
+      final bytes = url.startsWith('data:')
+          ? decodeAvatarUrl(url)
+          : await _fetchAvatarBytes(url);
       if (bytes != null) {
         await _kTabChannel.invokeMethod('setProfileImage', {'bytes': bytes});
+      } else {
+        _nativeProfileIconUrl = '';
       }
-    } else {
-      final resolved = url.startsWith('/') ? '$apiBaseUrl$url' : url;
-      await _kTabChannel.invokeMethod('setProfileImage', {'url': resolved});
+    } catch (e) {
+      // A channel that isn't listening yet is not worth failing over; the next
+      // change (or _adoptNativeTabBar) will try again.
+      _nativeProfileIconUrl = '';
+      debugPrint('[tabbar] could not set profile image: $e');
     }
   }
 
+  /// Downloads an avatar through the app's own (certificate-pinned) client.
+  ///
+  /// Returns null if it cannot be fetched, which leaves the previous icon in
+  /// place rather than blanking it.
+  Future<Uint8List?> _fetchAvatarBytes(String url) async {
+    try {
+      final absolute = url.startsWith('/') ? '$apiBaseUrl$url' : url;
+      final res = await http
+          .get(Uri.parse(absolute))
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
+      return res.bodyBytes;
+    } catch (e) {
+      debugPrint('[tabbar] avatar fetch failed: $e');
+      return null;
+    }
+  }
+
+  /// Re-pushes the icon whenever the app's picture-of-record changes.
+  void _onAvatarRevisionChanged() => unawaited(_syncNativeProfileIcon());
+
   Widget _buildLegacyNavBar(bool isLight) {
     final activeColor   = isLight ? Colors.black : Colors.white;
-    final imageProvider = _resolveAvatarProvider(widget.session.user.avatarUrl);
+    // Same reasoning as LegacyNavBar: resolve by username so a picture changed
+    // this session reaches the bar on that frame, rather than waiting for the
+    // session to be refetched at next launch.
+    final imageProvider = _resolveAvatarProvider(
+      AvatarStore.resolve(
+        widget.session.user.username,
+        widget.session.user.avatarUrl,
+      ),
+    );
 
     Widget profileIcon({required bool active}) {
       if (!active) {
@@ -2809,7 +3208,11 @@ class _ViralViewState extends State<_ViralView> {
   _ViralScope _scope = _ViralScope.myCity;
   List<FeedPost> _viralPosts = [];
   bool _loadingViral = true;
-  _ViralPeriod _period = _ViralPeriod.weekly;
+  // Always start at the narrowest window. Widening happens below when a window
+  // turns out to be empty, so opening on `weekly` only meant today's posts were
+  // never looked at — a city with a single post today still landed the reader
+  // on the week's chart, and daily was reachable only by picking it by hand.
+  _ViralPeriod _period = _ViralPeriod.daily;
   // True when [_period] was reached by widening past an empty window rather
   // than chosen by the user.
   bool _periodAutoWidened = false;
@@ -3536,7 +3939,7 @@ class _ViralViewState extends State<_ViralView> {
     final user = _historyUsers[q];
     if (user != null) {
       // ── User profile entry ─────────────────────────────────────────────
-      final bytes = decodeAvatarUrl(AvatarStore.resolve(user.username, user.avatarUrl));
+      final avatar = avatarProvider(user.username, user.avatarUrl);
       final displayName =
           user.fullName.isNotEmpty ? user.fullName : user.username;
       return InkWell(
@@ -3549,8 +3952,8 @@ class _ViralViewState extends State<_ViralView> {
                 radius: 20,
                 backgroundColor:
                     isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-                child: bytes == null
+                foregroundImage: avatar,
+                child: avatar == null
                     ? Text(
                         initialFor(user.username),
                         style: TextStyle(
@@ -3776,7 +4179,7 @@ class _ViralViewState extends State<_ViralView> {
   }
 
   Widget _buildPostRow(FeedPost post, bool isLight) {
-    final bytes = decodeAvatarUrl(AvatarStore.resolve(post.author, post.avatarUrl));
+    final avatar = avatarProvider(post.author, post.avatarUrl);
     final muted = isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280);
     return InkWell(
       onTap: () => widget.onOpenUserProfile(post.author),
@@ -3788,8 +4191,8 @@ class _ViralViewState extends State<_ViralView> {
             CircleAvatar(
               radius: 20,
               backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-              child: bytes == null
+              foregroundImage: avatar,
+              child: avatar == null
                   ? Text(
                       initialFor(post.author),
                       style: TextStyle(
@@ -3851,7 +4254,7 @@ class _ViralViewState extends State<_ViralView> {
   }
 
   Widget _buildPersonRow(UserProfile user, bool isLight) {
-    final bytes = decodeAvatarUrl(AvatarStore.resolve(user.username, user.avatarUrl));
+    final avatar = avatarProvider(user.username, user.avatarUrl);
     final displayName = user.fullName.isNotEmpty ? user.fullName : user.username;
     return InkWell(
       onTap: () => _openProfile(user),
@@ -3862,8 +4265,8 @@ class _ViralViewState extends State<_ViralView> {
             CircleAvatar(
               radius: 20,
               backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-              child: bytes == null
+              foregroundImage: avatar,
+              child: avatar == null
                   ? Text(
                       initialFor(user.username),
                       style: TextStyle(
@@ -3931,7 +4334,7 @@ class _ViralViewState extends State<_ViralView> {
   }
 
   Widget _buildSuggestionCard(UserProfile user, bool isLight) {
-    final bytes = decodeAvatarUrl(AvatarStore.resolve(user.username, user.avatarUrl));
+    final avatar = avatarProvider(user.username, user.avatarUrl);
     final displayName = user.fullName.isNotEmpty ? user.fullName : user.username;
     return GestureDetector(
       onTap: () => widget.onOpenUserProfile(user.username),
@@ -3951,8 +4354,8 @@ class _ViralViewState extends State<_ViralView> {
             CircleAvatar(
               radius: 26,
               backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-              child: bytes == null
+              foregroundImage: avatar,
+              child: avatar == null
                   ? Text(
                       initialFor(user.username),
                       style: TextStyle(
@@ -4169,6 +4572,18 @@ class _ComposeMedia {
   final Uint8List? imageBytes; // local image bytes: used for preview and upload
   final String? videoPath;     // local video file path: streamed for upload
   final String? externalUrl;   // Giphy / remote URL: sent as-is
+
+  /// The staged upload this became, once it has finished going up.
+  ///
+  /// Media starts uploading the moment it is picked, while the caption is
+  /// still being written — so by the time Post is pressed the bytes are
+  /// usually already on the server and the post itself is a few hundred bytes.
+  /// Null means staging has not finished (or failed), and the file is attached
+  /// to the post request the old way instead.
+  String? uploadId;
+
+  /// The in-flight staging request, awaited if Post is pressed early.
+  Future<String?>? staging;
 
   bool get isVideo => type == 'video';
 }
@@ -4577,6 +4992,229 @@ class _NotifTile extends StatelessWidget {
   }
 }
 
+/// The strip at the top of the feed while a post is being delivered.
+///
+/// Posting no longer holds a screen open, so this is the only thing that says
+/// the work is still happening — a line of text and a bar, out of the way of
+/// whatever the user went back to doing. Instagram's is the same idea: the
+/// upload is not a modal state, it is a background one.
+class _PostingBanner extends StatelessWidget {
+  const _PostingBanner({
+    required this.label,
+    required this.progress,
+    required this.isLight,
+  });
+
+  final ValueListenable<String?> label;
+  final ValueListenable<double?> progress;
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: label,
+      builder: (context, text, _) {
+        // AnimatedSize rather than a hard show/hide: the feed below should
+        // settle into place, not jump.
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          child: text == null
+              ? const SizedBox(width: double.infinity)
+              : ValueListenableBuilder<double?>(
+                  valueListenable: progress,
+                  builder: (context, value, _) {
+                    final ink = isLight ? Colors.black : Colors.white;
+                    final track = isLight
+                        ? const Color(0xffe3e6ea)
+                        : const Color(0xff2a2a2a);
+                    final percent = value == null
+                        ? null
+                        : (value * 100).clamp(0, 100).round();
+                    return Container(
+                      width: double.infinity,
+                      color: isLight ? Colors.white : const Color(0xff0a0a0a),
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  percent == null ? text : '$text  $percent%',
+                                  style: TextStyle(
+                                    color: ink,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(2),
+                            child: LinearProgressIndicator(
+                              minHeight: 2.5,
+                              // Indeterminate until there are bytes to count —
+                              // a bar frozen at 0% reads as stuck.
+                              value: value,
+                              backgroundColor: track,
+                              valueColor: AlwaysStoppedAnimation<Color>(ink),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        );
+      },
+    );
+  }
+}
+
+/// A multipart request that reports how much of itself has gone out.
+///
+/// `http` gives no upload progress of its own, and the send is a single
+/// awaited future — fine when a post was four photos, useless now that it can
+/// be a minute of video. Wrapping the finalized byte stream is the whole
+/// trick: the transform sees every chunk on its way to the socket.
+class _ProgressMultipartRequest extends http.MultipartRequest {
+  _ProgressMultipartRequest(super.method, super.url, {required this.onProgress});
+
+  /// Called with bytes sent and the total, on every chunk.
+  final void Function(int sent, int total) onProgress;
+
+  @override
+  http.ByteStream finalize() {
+    final byteStream = super.finalize();
+    final total = contentLength;
+    var sent = 0;
+    return http.ByteStream(
+      byteStream.transform(
+        StreamTransformer<List<int>, List<int>>.fromHandlers(
+          handleData: (chunk, sink) {
+            sent += chunk.length;
+            onProgress(sent, total);
+            sink.add(chunk);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// First frame of a video that has been picked but not yet posted.
+///
+/// Compose used to draw a grey box with a camcorder glyph here, which told you
+/// a video was attached but not *which* one — picking the wrong clip from the
+/// gallery was invisible until after it was published. [video_player] can open
+/// the local file and hold frame 0, so the preview is the real thing at no
+/// cost beyond one decoder for as long as the sheet is open.
+class _ComposeVideoPreview extends StatefulWidget {
+  const _ComposeVideoPreview({required this.path, this.badgeSize = 36});
+  final String path;
+  final double badgeSize;
+
+  @override
+  State<_ComposeVideoPreview> createState() => _ComposeVideoPreviewState();
+}
+
+class _ComposeVideoPreviewState extends State<_ComposeVideoPreview> {
+  VideoPlayerController? _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final ctrl = VideoPlayerController.file(File(widget.path));
+      await ctrl.initialize();
+      if (!mounted) {
+        ctrl.dispose();
+        return;
+      }
+      setState(() => _ctrl = ctrl);
+    } catch (_) {
+      // An undecodable file still posts fine — the server transcodes it — so
+      // fall back to the placeholder rather than blocking the compose sheet.
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = _ctrl;
+    final ready = ctrl != null && ctrl.value.isInitialized;
+    return Container(
+      color: const Color(0xff141414),
+      child: Stack(
+        fit: StackFit.expand,
+        alignment: Alignment.center,
+        children: [
+          if (ready)
+            FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: ctrl.value.size.width,
+                height: ctrl.value.size.height,
+                child: VideoPlayer(ctrl),
+              ),
+            ),
+          // The play badge doubles as the "still loading" state: until the
+          // first frame arrives it is all there is to see, which is exactly
+          // what the old placeholder showed anyway.
+          Center(
+            child: Icon(
+              ready ? Icons.play_circle_fill : Icons.videocam_rounded,
+              color: ready ? Colors.white : Colors.white54,
+              size: widget.badgeSize,
+            ),
+          ),
+          if (ready)
+            Positioned(
+              left: 8,
+              bottom: 8,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  _clock(ctrl.value.duration),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  static String _clock(Duration d) {
+    final m = d.inMinutes;
+    final s = d.inSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+}
+
 // Small paused/muted first-frame thumbnail for video-post notifications.
 // No server-side thumbnail exists, so this decodes just enough of the
 // video to grab frame 0 — acceptable for a single 44x44 icon per row.
@@ -4704,6 +5342,8 @@ class _CommentSheetState extends State<_CommentSheet> {
   // send the correct parentId to the backend (replies are one level deep).
   int? _effectiveParentId;
   String _imageUrl = '';
+  /// The picked JPEG itself, so a comment image uploads as a file part.
+  Uint8List? _imageBytes;
   String _gifUrl   = '';
   bool _sending = false;
   bool _picking = false;
@@ -4850,7 +5490,13 @@ class _CommentSheetState extends State<_CommentSheet> {
       final bytes = await picked.readAsBytes();
       if (!mounted) return;
       final mime = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
-      setState(() { _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}'; _gifUrl = ''; });
+      setState(() {
+        _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}';
+        // Kept so the picture can go up as a file rather than as base64 in the
+        // JSON body, which costs a third more bytes.
+        _imageBytes = bytes;
+        _gifUrl = '';
+      });
     } finally {
       if (mounted) setState(() => _picking = false);
     }
@@ -4879,7 +5525,7 @@ class _CommentSheetState extends State<_CommentSheet> {
     final url = await completer.future;
     GiphyDialog.instance.removeListener(listener);
     if (!mounted || url == null || url.isEmpty) return;
-    setState(() { _gifUrl = url; _imageUrl = ''; });
+    setState(() { _gifUrl = url; _imageUrl = ''; _imageBytes = null; });
   }
 
 
@@ -4888,17 +5534,34 @@ class _CommentSheetState extends State<_CommentSheet> {
     if ((text.isEmpty && _imageUrl.isEmpty && _gifUrl.isEmpty) || _sending) return;
     setState(() => _sending = true);
     try {
-      final res = await http.post(
-        postCommentsEndpoint(widget.post.id),
-        headers: authJsonHeaders(widget.session.token),
-        body: jsonEncode({
-          'text': text,
-          if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
-          if (_gifUrl.isNotEmpty) 'imageUrl': _gifUrl,
-          if (_replyingTo != null) 'parentId': _effectiveParentId ?? _replyingTo!.id,
-          if (_effectiveParentId != null) 'replyToUsername': _replyingTo!.author,
-        }),
-      );
+      final fields = <String, String>{
+        'text': text,
+        if (_gifUrl.isNotEmpty) 'imageUrl': _gifUrl,
+        if (_replyingTo != null)
+          'parentId': '${_effectiveParentId ?? _replyingTo!.id}',
+        if (_effectiveParentId != null) 'replyToUsername': _replyingTo!.author,
+      };
+      final http.Response res;
+      if (_imageBytes != null) {
+        final request = http.MultipartRequest(
+          'POST', postCommentsEndpoint(widget.post.id),
+        )
+          ..headers.addAll(authGetHeaders(widget.session.token))
+          ..fields.addAll(fields)
+          ..files.add(http.MultipartFile.fromBytes(
+            'image', _imageBytes!, filename: 'comment.jpg',
+          ));
+        res = await http.Response.fromStream(await request.send());
+      } else {
+        res = await http.post(
+          postCommentsEndpoint(widget.post.id),
+          headers: authJsonHeaders(widget.session.token),
+          body: jsonEncode({
+            ...fields,
+            if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
+          }),
+        );
+      }
       if (!mounted) return;
       if (res.statusCode == 200 || res.statusCode == 201) {
         final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -4906,7 +5569,7 @@ class _CommentSheetState extends State<_CommentSheet> {
         setState(() {
           _replyingTo = null;
           _effectiveParentId = null;
-          _imageUrl = '';
+          _imageUrl = ''; _imageBytes = null;
           _gifUrl   = '';
         });
         _controller.clear();
@@ -5046,7 +5709,7 @@ class _CommentSheetState extends State<_CommentSheet> {
   }
 
   Widget _tile(BuildContext context, FeedComment c, bool isReply, bool isLight, {int? parentCommentId}) {
-    final bytes = decodeAvatarUrl(AvatarStore.resolve(c.author, c.avatarUrl));
+    final avatar = avatarProvider(c.author, c.avatarUrl);
     final isNetworkImg = c.imageUrl.startsWith('http');
     final imgBytes = (!isNetworkImg && c.imageUrl.isNotEmpty) ? decodeAvatarUrl(c.imageUrl) : null;
     final isLiked = _liked[c.id] ?? c.liked;
@@ -5074,8 +5737,8 @@ class _CommentSheetState extends State<_CommentSheet> {
             child: CircleAvatar(
               radius: isReply ? 14 : 18,
               backgroundColor: isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-              foregroundImage: bytes != null ? MemoryImage(bytes) : null,
-              child: bytes == null
+              foregroundImage: avatar,
+              child: avatar == null
                   ? Text(
                       initialFor(c.author),
                       style: TextStyle(
@@ -5330,7 +5993,7 @@ class _CommentSheetState extends State<_CommentSheet> {
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
-    final userBytes = decodeAvatarUrl(AvatarStore.resolve(widget.session.user.username, widget.session.user.avatarUrl));
+    final userAvatar = avatarProvider(widget.session.user.username, widget.session.user.avatarUrl);
     final previewBytes = _imageUrl.isNotEmpty ? decodeAvatarUrl(_imageUrl) : null;
     final hasGif = _gifUrl.isNotEmpty;
 
@@ -5405,7 +6068,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                           top: 4,
                           right: 4,
                           child: GestureDetector(
-                            onTap: () => setState(() => _imageUrl = ''),
+                            onTap: () => setState(() { _imageUrl = ''; _imageBytes = null; }),
                             child: Container(
                               padding: const EdgeInsets.all(2),
                               decoration: const BoxDecoration(
@@ -5493,8 +6156,8 @@ class _CommentSheetState extends State<_CommentSheet> {
                       radius: 16,
                       backgroundColor:
                           isLight ? const Color(0xffe6e9ef) : const Color(0xff2a2a2a),
-                      foregroundImage: userBytes != null ? MemoryImage(userBytes) : null,
-                      child: userBytes == null
+                      foregroundImage: userAvatar,
+                      child: userAvatar == null
                           ? Text(
                               initialFor(widget.session.user.username),
                               style: TextStyle(

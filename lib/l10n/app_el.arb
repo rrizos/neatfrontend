@@ -1,16 +1,13 @@
 {
   "@@locale": "el",
   "appTitle": "neat",
-
   "signUp": "Εγγραφή",
   "signIn": "Σύνδεση",
   "cancel": "Άκυρο",
-
   "landingSlogan": "Μια εφαρμογή, τα πάντα για την πόλη σου.",
-
   "username": "Όνομα χρήστη",
   "email": "Email",
-  "fullName": "Ονοματεπώνυμο",
+  "fullName": "Όνομα",
   "password": "Κωδικός πρόσβασης",
   "authAgreePrefix": "Με την εγγραφή αποδέχεσαι τους ",
   "termsOfService": "Όρους Χρήσης",
@@ -21,7 +18,6 @@
   "authSwitchToSignIn": "Έχεις ήδη λογαριασμό; Σύνδεση",
   "authSwitchToSignUp": "Νέος εδώ; Δημιούργησε λογαριασμό",
   "cityPickHint": "Συνδεθείτε στο For You της περιοχής σας, πατώντας την πινέζα της.",
-
   "introTitle": "Δες τι γίνεται στην πόλη σου",
   "introSubtitle": "Η Neat δείχνει αναρτήσεις, νέα και συζητήσεις μόνο από την περιοχή σου.",
   "introLocalFeedTitle": "Τοπικό feed",
@@ -31,7 +27,6 @@
   "introExploreTitle": "75+ πόλεις",
   "introExploreBody": "Περιηγήσου στον χάρτη και δες τι γίνεται σε όλη την Ελλάδα.",
   "introContinue": "Συνέχεια",
-
   "citySetupTitle": "Διάλεξε την πόλη σου",
   "citySetupSubtitle": "Η πόλη που θα διαλέξεις θα είναι η κοινότητά σου στη Neat.",
   "citySetupHomeCityTitle": "Η πόλη σου",
@@ -48,7 +43,6 @@
   "spectatorNoInteractionBody": "Μπορείς να βλέπεις τα πάντα, αλλά όχι να κάνεις post, likes ή σχόλια.",
   "spectatorMicrocopy": "Η πόλη σου παραμένει ο μόνος χώρος όπου συμμετέχεις.",
   "spectatorCta": "Συνέχεια",
-
   "forgotEnterEmailError": "Παρακαλώ εισάγετε το email ή το όνομα χρήστη σας",
   "forgotEnterAllDigits": "Παρακαλώ εισάγετε και τα 6 ψηφία",
   "passwordMinLength": "Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες",
@@ -66,7 +60,6 @@
   "newPassword": "Νέος κωδικός",
   "confirmPassword": "Επιβεβαίωση κωδικού",
   "resetPassword": "Επαναφορά κωδικού",
-
   "settings": "Ρυθμίσεις",
   "appearance": "Εμφάνιση",
   "language": "Γλώσσα",
@@ -88,7 +81,6 @@
   "blockedEmpty": "Δεν έχεις αποκλείσει κανέναν.",
   "unblock": "Άρση αποκλεισμού",
   "done": "Τέλος",
-
   "reportTitle": "Αναφορά",
   "reportWhyPost": "Γιατί αναφέρεις αυτή τη δημοσίευση;",
   "reportAnonymousNote": "Η αναφορά σου είναι ανώνυμη, εκτός αν αναφέρεις παραβίαση πνευματικής ιδιοκτησίας.",
@@ -142,7 +134,6 @@
   "reportSubPolitics": "Πολιτική",
   "reportSubSocialIssue": "Κοινωνικό ζήτημα",
   "reportSubSomethingElse": "Κάτι άλλο",
-
   "noMatchesInTown": "Καμία αντιστοιχία στην πόλη σου",
   "shareSendTo": "Αποστολή σε",
   "shareSearchHint": "Αναζήτηση ατόμων στην πόλη σου…",
@@ -151,7 +142,6 @@
   "sent": "Στάλθηκε",
   "send": "Αποστολή",
   "copyLink": "Αντιγραφή συνδέσμου",
-
   "justNow": "τώρα",
   "timeMinutes": "{n}λ",
   "timeHours": "{n}ω",
@@ -169,20 +159,17 @@
   "listAnd": " και ",
   "likedByOthers": "{count, plural, other{{count} ακόμη}}",
   "pollVotes": "{count, plural, =1{1 ψήφος} other{{count} ψήφοι}}",
-
   "navHome": "Αρχική",
   "navSearch": "Αναζήτηση",
   "navCreate": "Δημιουργία",
   "navMap": "Χάρτης",
   "navProfile": "Προφίλ",
-
   "postNotFound": "Η δημοσίευση δεν βρέθηκε",
   "couldNotLoadPost": "Δεν ήταν δυνατή η φόρτωση της δημοσίευσης",
   "couldNotOpenLink": "Δεν ήταν δυνατό το άνοιγμα του συνδέσμου",
   "openInApp": "Άνοιγμα στην εφαρμογή",
   "noCommentsYet": "Κανένα σχόλιο ακόμη",
   "commentsCount": "{count, plural, =1{1 σχόλιο} other{{count} σχόλια}}",
-
   "newPost": "Νέα δημοσίευση",
   "post": "Δημοσίευση",
   "pollOptionHint": "Επιλογή {n}",
@@ -191,6 +178,16 @@
   "networkError": "Σφάλμα δικτύου. Δοκίμασε ξανά.",
   "photosSkipped": "{count, plural, =1{1 φωτογραφία ήταν πολύ μεγάλη και παραλείφθηκε. Δοκίμασε να επιλέξεις άλλη φωτογραφία.} other{{count} φωτογραφίες ήταν πολύ μεγάλες και παραλείφθηκαν. Δοκίμασε να επιλέξεις άλλες φωτογραφίες.}}",
   "photoTooLarge": "Η φωτογραφία είναι πολύ μεγάλη. Δοκίμασε ξανά.",
+  "videoTooLarge": "Το βίντεο είναι πολύ μεγάλο ({size} MB). Το όριο είναι {max} MB — δοκίμασε ένα πιο σύντομο κλιπ.",
+  "uploadingVideo": "Μεταφόρτωση βίντεο… {percent}%",
+  "couldNotSaveProfile": "Δεν ήταν δυνατή η αποθήκευση του προφίλ. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά.",
+  "preparingPhoto": "Προετοιμασία φωτογραφίας…",
+  "videoProcessing": "Επεξεργασία βίντεο…",
+  "postShared": "Δημοσιεύτηκε",
+  "postingLabel": "Δημοσίευση…",
+  "videoProcessingPercent": "Επεξεργασία βίντεο… {percent}%",
+  "postDeleted": "Η δημοσίευση διαγράφηκε",
+  "preparingVideo": "Προετοιμασία βίντεο…",
   "noPostsYet": "Καμία δημοσίευση ακόμη.",
   "deletePost": "Διαγραφή δημοσίευσης",
   "reportPost": "Αναφορά δημοσίευσης",
@@ -236,7 +233,6 @@
   "addCommentHint": "Πρόσθεσε σχόλιο...",
   "noInternet": "Χωρίς σύνδεση στο διαδίκτυο",
   "noPostsInCity": "Καμία δημοσίευση στην {city} ακόμη",
-
   "somethingWentWrong": "Κάτι πήγε στραβά",
   "userBlocked": "Ο χρήστης αποκλείστηκε",
   "userUnblocked": "Ο χρήστης ξεμπλοκαρίστηκε",
@@ -268,7 +264,6 @@
   "followersTitle": "{count} Ακόλουθοι",
   "followingTitle": "{count} Ακολουθείτε",
   "city": "Πόλη",
-
   "eventsOfficial": "Επίσημες",
   "eventsCommunity": "Κοινότητα",
   "noEventsYet": "Καμία εκδήλωση ακόμη.",
@@ -317,7 +312,6 @@
   "couldNotLoad": "Δεν ήταν δυνατή η φόρτωση.",
   "noFriendsGoing": "Κανένας φίλος σου δεν πάει ακόμη.",
   "friendsGoing": "Φίλοι που πάνε",
-
   "couldNotStartChat": "Δεν ήταν δυνατή η έναρξη συνομιλίας",
   "newMessage": "Νέο μήνυμα",
   "activeNowHeader": "Ενεργοί τώρα",
@@ -349,7 +343,6 @@
   "readLabel": "Αναγνώστηκε",
   "replyingToUser": "Απάντηση στον @{sender}",
   "mapMobileOnly": "Ο χάρτης είναι διαθέσιμος μόνο σε κινητά.",
-
   "analyticsTab": "Στατιστικά",
   "securityTab": "Ασφάλεια",
   "reportsTab": "Αναφορές",
@@ -437,7 +430,6 @@
   "auditChainBroken": "Η αλυσίδα ελέγχου έσπασε από την εγγραφή #{id} — μια εγγραφή τροποποιήθηκε ή αφαιρέθηκε εκτός της εφαρμογής.",
   "reactionsTitle": "Αντιδράσεις",
   "tapToRemoveReaction": "Πατήστε για αφαίρεση",
-
   "addBio": "Προσθέσε bio",
   "joiningCity": "Μπαίνεις στην {city}...",
   "returningToCity": "Επιστροφή στην {city}...",
@@ -445,7 +437,6 @@
   "neatPoints": "Neat Points",
   "neatPassHowToEarn": "Εμφανίσου στο top-10 των Virals για να κερδίσεις Neat Points.",
   "neatPassCurrentPoints": "Υπόλοιπο Πόντων",
-
   "photoViewOnce": "Προβολή μία φορά",
   "photoAllowReplay": "Επαναπροβολή",
   "photoKeepInChat": "Διατήρηση στη συνομιλία",
@@ -455,5 +446,37 @@
   "photoOpened": "Ανοίχτηκε",
   "photoSentOnce": "Στάλθηκε · Προβολή μία φορά",
   "photoSentReplay": "Στάλθηκε · Επαναπροβολή",
-  "photoUnavailable": "Η φωτογραφία δεν είναι πλέον διαθέσιμη"
+  "photoUnavailable": "Η φωτογραφία δεν είναι πλέον διαθέσιμη",
+  "signUpMethodTitle": "Φτιάξε τον λογαριασμό σου",
+  "signUpMethodSubtitle": "Διάλεξε πώς θέλεις να εγγραφείς. Θα μπορείς να συνδέεσαι με τον ίδιο τρόπο κάθε φορά.",
+  "signUpWithApple": "Συνέχεια με Apple",
+  "signUpWithGoogle": "Συνέχεια με Google",
+  "signUpWithEmail": "Εγγραφή με email",
+  "signUpMethodHaveAccount": "Έχεις ήδη λογαριασμό;",
+  "signUpMethodSignIn": "Σύνδεση",
+  "signUpGoogleUnavailable": "Η σύνδεση με Google δεν έχει ρυθμιστεί ακόμη.",
+  "usernameSetupTitle": "Διάλεξε το username σου",
+  "usernameSetupSubtitle": "Έτσι θα σε βρίσκουν και θα σε αναφέρουν οι άλλοι. Μπορείς να το αλλάξεις αργότερα από το προφίλ σου.",
+  "usernameSetupHint": "username",
+  "usernameSetupRules": "Γράμματα, αριθμοί, τελείες και κάτω παύλες. 3–20 χαρακτήρες.",
+  "usernameSetupCta": "Συνέχεια",
+  "usernameSetupTaken": "Αυτό το username χρησιμοποιείται ήδη.",
+  "usernameSetupTooShort": "Το username πρέπει να έχει τουλάχιστον 3 χαρακτήρες.",
+  "usernameSetupTooLong": "Το username πρέπει να έχει το πολύ 20 χαρακτήρες.",
+  "usernameSetupBadChars": "Μόνο γράμματα, αριθμοί, τελείες και κάτω παύλες.",
+  "authOr": "ή",
+  "setPasswordTitle": "Ορισμός κωδικού",
+  "changePasswordTitle": "Αλλαγή κωδικού",
+  "setPasswordExplain": "Έκανες εγγραφή με Apple ή Google, οπότε ο λογαριασμός σου δεν έχει ακόμη κωδικό. Αν βάλεις έναν, θα μπορείς να συνδέεσαι και χωρίς αυτούς — χρήσιμο αν χάσεις την πρόσβαση σε εκείνον τον λογαριασμό.",
+  "changePasswordExplain": "Διάλεξε νέο κωδικό για τον λογαριασμό σου.",
+  "currentPasswordHint": "Τρέχων κωδικός",
+  "newPasswordHint": "Νέος κωδικός",
+  "confirmPasswordHint": "Επανάλαβε τον νέο κωδικό",
+  "passwordsDoNotMatch": "Οι δύο κωδικοί δεν είναι ίδιοι.",
+  "passwordSaved": "Ο κωδικός αποθηκεύτηκε.",
+  "savePassword": "Αποθήκευση",
+  "support": "Υποστήριξη",
+  "cityChangeLocked": "Θα μπορείς να αλλάξεις πόλη ξανά στις {date}.",
+  "cityChangeHint": "Πάτησε για αλλαγή. Μπορείς να αλλάξεις πόλη μία φορά τον μήνα.",
+  "cityChanged": "Η πόλη σου ενημερώθηκε."
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
+import 'avatar_store.dart';
 import 'post_card.dart' show decodeAvatarUrl;
 
 /// The Flutter-rendered bottom nav bar used on Android and pre-iOS26 devices
@@ -16,6 +17,7 @@ class LegacyNavBar extends StatelessWidget {
     required this.currentIndex,
     required this.onTap,
     required this.avatarUrl,
+    required this.username,
   });
 
   final bool isLight;
@@ -23,10 +25,20 @@ class LegacyNavBar extends StatelessWidget {
   final ValueChanged<int> onTap;
   final String avatarUrl;
 
+  /// Whose picture this is. Needed because [avatarUrl] may be a copy taken
+  /// before the picture changed, and the username is what the store can answer
+  /// definitively — see AvatarStore.resolve.
+  final String username;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final avatarBytes = decodeAvatarUrl(avatarUrl);
+    // Resolve by *username*, not by hoping this exact URL string is one the
+    // store happens to know it replaced. Every other avatar in the app goes
+    // through resolve(); this bar did not, which is why it alone kept the old
+    // picture until the app was restarted and the session refetched.
+    final avatarBytes =
+        decodeAvatarUrl(AvatarStore.resolve(username, avatarUrl));
     final activeColor = isLight ? Colors.black : Colors.white;
     final imageProvider = avatarBytes != null ? MemoryImage(avatarBytes) : null;
 

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
@@ -27,6 +28,19 @@ Uri linkPreviewEndpoint(String url) =>
     Uri.parse('$apiBaseUrl/api/link-preview/').replace(queryParameters: {'url': url});
 
 Uri postDetailEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/$id/');
+
+/// Uploads one file before the post that will use it exists, so composing a
+/// caption and uploading happen at the same time rather than one after the
+/// other. See posts/views.py stage_upload.
+/// Foreground heartbeat. The server turns these into sessions, which is where
+/// retention and time-in-app come from — see accounts/models.py AppSession.
+Uri get sessionPingEndpoint => Uri.parse('$apiBaseUrl/api/auth/session/ping/');
+
+Uri get stageUploadEndpoint => Uri.parse('$apiBaseUrl/api/posts/upload/');
+
+/// Which of [ids] still exist. One request for a whole thread's shared posts.
+Uri postsExistEndpoint(Iterable<int> ids) =>
+    Uri.parse('$apiBaseUrl/api/posts/exist/?ids=${ids.join(',')}');
 
 Uri postsEndpoint({bool fresh = false, String? city, int? before}) {
   final uri = Uri.parse('$apiBaseUrl/api/posts/');
@@ -115,6 +129,41 @@ Uri get forgotPasswordEndpoint => Uri.parse('$apiBaseUrl/api/auth/forgot-passwor
 Uri get resetPasswordEndpoint => Uri.parse('$apiBaseUrl/api/auth/reset-password/');
 Uri get signupEndpoint => Uri.parse('$apiBaseUrl/api/auth/signup/');
 Uri get loginEndpoint => Uri.parse('$apiBaseUrl/api/auth/login/');
+/// Apple and Google, for both signing up and signing back in — the app cannot
+/// know which it is, so the server decides from the provider identity.
+Uri get socialLoginEndpoint => Uri.parse('$apiBaseUrl/api/auth/social/');
+
+// ── Google sign-in client ids ───────────────────────────────────────────────
+//
+// Both come from the Firebase console (Authentication -> Sign-in method ->
+// Google). Until they are filled in, the Google button reports that sign-in is
+// not configured rather than failing in a way nobody can read.
+//
+//  * [googleClientId] identifies this app to Google. iOS only — on Android the
+//    app is identified by its signing certificate instead, so it stays null
+//    there and Google looks the app up by package name + SHA-1.
+//  * [googleServerClientId] is the *web* client id from the same project. It
+//    is what makes Google mint an ID token addressed to our backend; without
+//    it the token comes back with no audience the server will accept.
+const String _googleIosClientId =
+    '449378002358-i3dlqsb7rmff8jf05ag6slk7o21k8laq.apps.googleusercontent.com';
+const String _googleWebClientId =
+    '449378002358-430tlsk1shjrk07mv4nbcsjibtk9437a.apps.googleusercontent.com';
+
+String? get googleClientId {
+  if (kIsWeb || _googleIosClientId.isEmpty) return null;
+  return Platform.isIOS ? _googleIosClientId : null;
+}
+
+String? get googleServerClientId =>
+    _googleWebClientId.isEmpty ? null : _googleWebClientId;
+
+/// Whether the Google button can do anything yet.
+bool get googleSignInConfigured => _googleWebClientId.isNotEmpty;
+/// Sets a first password on a provider-only account, or replaces an
+/// existing one. See accounts/views.py set_password.
+Uri get setPasswordEndpoint =>
+    Uri.parse('$apiBaseUrl/api/auth/password/set/');
 Uri get logoutEndpoint => Uri.parse('$apiBaseUrl/api/auth/logout/');
 Uri get meEndpoint => Uri.parse('$apiBaseUrl/api/auth/me/');
 Uri get deleteAccountEndpoint => Uri.parse('$apiBaseUrl/api/auth/me/');
@@ -226,7 +275,13 @@ const jsonHeaders = {
 /// Marks this build as one that fetches DM media on demand rather than
 /// expecting it inline. The server keeps sending the old, heavy payloads to
 /// anything without it — see `_wants_lean_media` in dm_messages/views.py.
-const neatClientHeader = {'X-Neat-Client': '2'};
+// 3 tells the server this build renders avatar *URLs*, so it stops embedding
+// them as base64 in every payload that names a person. Measured against the
+// live server, that took notifications from 1191 KB to 19 KB and the inbox
+// from 125 KB to 5 KB. Only raise this once every screen can draw a URL
+// avatar — see avatarProvider in post_card.dart — because a build that still
+// decodes data URLs directly would show initials for everyone.
+const neatClientHeader = {'X-Neat-Client': '3'};
 
 Map<String, String> authJsonHeaders(String token) => {
   ...jsonHeaders,
