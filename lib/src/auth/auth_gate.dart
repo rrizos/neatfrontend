@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api.dart';
 import '../core/avatar_store.dart';
 import '../core/models.dart';
+import '../core/pending_post.dart';
 import '../core/profile_save_queue.dart';
 import '../core/push_service.dart';
 import '../core/session_tracker.dart';
@@ -69,6 +70,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     // a pocket is exactly when a connection returns, and the user has long
     // since moved on from the screen they saved on.
     ProfileSaveQueue.onSaved = _onQueuedSaveLanded;
+    // Uploads finish whether or not the app was alive to see it, including
+    // when iOS relaunches us solely to report one.
+    unawaited(PendingPostQueue.settle());
     AuthGate._activeForceLogout = _logout;
     _restore();
   }
@@ -90,6 +94,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       // Coming back into the app is exactly when a connection tends to return,
       // and by then the user is nowhere near the screen they saved on.
       unawaited(ProfileSaveQueue.retryPending(token));
+      // A background upload may have finished while the app was away; this is
+      // where the post it belonged to gets made.
+      unawaited(PendingPostQueue.settle());
     }
   }
 

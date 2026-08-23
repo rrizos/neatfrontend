@@ -7,6 +7,8 @@ import UserNotifications
 
     private var tabChannel: FlutterMethodChannel?
     private var badgeChannel: FlutterMethodChannel?
+    private var uploadTaskChannel: FlutterMethodChannel?
+    private var backgroundUploadChannel: FlutterMethodChannel?
     private var nativeTabBar: UITabBar?
     // Held so we can replay the launch notification into firebase_messaging after
     // it registers late — see replayLaunchNotificationForFirebaseMessaging(_:).
@@ -39,6 +41,10 @@ import UserNotifications
         registerNativeCityMap(with: engineBridge.pluginRegistry)
         MapSnapshot.register(with: engineBridge.pluginRegistry)
         registerShareChannel(with: engineBridge.pluginRegistry)
+        registerUploadTaskChannel(with: engineBridge.pluginRegistry)
+        registerBackgroundUploadChannel(with: engineBridge.pluginRegistry)
+        // Reconnects to transfers still running from a previous launch.
+        BackgroundUploader.shared.start()
 
         if #available(iOS 26, *) {
             setupNativeTabBar(with: engineBridge.pluginRegistry)
@@ -109,6 +115,113 @@ import UserNotifications
             }
         }
         badgeChannel = channel
+    }
+
+    // MARK: - Uploads that outlive the app
+
+    private func registerBackgroundUploadChannel(with registry: FlutterPluginRegistry) {
+        guard let r = registry.registrar(forPlugin: "NeatBackgroundUpload") else { return }
+        let channel = FlutterMethodChannel(name: "com.neat/bgupload",
+                                           binaryMessenger: r.messenger())
+        channel.setMethodCallHandler { call, result in
+            switch call.method {
+            case "enqueue":
+                guard
+                    let a = call.arguments as? [String: Any],
+                    let name = a["name"] as? String,
+                    let urlString = a["url"] as? String,
+                    let url = URL(string: urlString),
+                    let path = a["filePath"] as? String
+                else {
+                    result(false)
+                    return
+                }
+                BackgroundUploader.shared.enqueue(
+                    name: name,
+                    url: url,
+                    headers: a["headers"] as? [String: String] ?? [:],
+                    fileURL: URL(fileURLWithPath: path),
+                    fieldName: a["field"] as? String ?? "file",
+                    fileName: a["fileName"] as? String ?? "upload.bin",
+                    fields: a["fields"] as? [String: String] ?? [:]
+                ) { ok, reason in
+                    DispatchQueue.main.async {
+                        result(ok ? "ok" : reason)
+                    }
+                }
+            case "drain":
+                result(BackgroundUploader.shared.drainResults())
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+        backgroundUploadChannel = channel
+        BackgroundUploader.shared.channel = channel
+    }
+
+    /// iOS relaunches the app when a background transfer finishes with nobody
+    /// listening. Holding the handler until the session says it has delivered
+    /// everything is what stops the app being suspended again mid-report.
+    override func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        BackgroundUploader.shared.backgroundCompletion = completionHandler
+        BackgroundUploader.shared.start()
+    }
+
+    // MARK: - Keeping an upload alive in the background
+
+    /// Background task assertions held while a post is uploading.
+    ///
+    /// Leaving the app suspends the process, and a suspended process has its
+    /// sockets torn down — which is why walking away mid-post lost the upload.
+    /// An assertion asks iOS to keep the app running a little longer after it
+    /// leaves the screen; the system grants around thirty seconds, which at
+    /// this app's measured upload speed covers a typical compressed video.
+    ///
+    /// Deliberately not a promise of unlimited time: a very large upload can
+    /// still be cut short when the assertion expires, and the only real cure
+    /// for that is a background URLSession, which continues out of process.
+    private var uploadTasks: [String: UIBackgroundTaskIdentifier] = [:]
+
+    private func registerUploadTaskChannel(with registry: FlutterPluginRegistry) {
+        guard let r = registry.registrar(forPlugin: "NeatUploadTask") else { return }
+        let channel = FlutterMethodChannel(name: "com.neat/uploadtask",
+                                           binaryMessenger: r.messenger())
+        channel.setMethodCallHandler { [weak self] call, result in
+            guard let self, let name = call.arguments as? String else {
+                result(FlutterMethodNotImplemented)
+                return
+            }
+            DispatchQueue.main.async {
+                switch call.method {
+                case "begin":
+                    // Replacing an assertion under the same name would leak the
+                    // previous one, and iOS kills an app that leaks them.
+                    self.endUploadTask(name)
+                    let id = UIApplication.shared.beginBackgroundTask(withName: name) {
+                        // Time is up. Ending it here is required — the system
+                        // terminates an app that lets one expire unattended.
+                        self.endUploadTask(name)
+                    }
+                    if id != .invalid { self.uploadTasks[name] = id }
+                    result(id != .invalid)
+                case "end":
+                    self.endUploadTask(name)
+                    result(nil)
+                default:
+                    result(FlutterMethodNotImplemented)
+                }
+            }
+        }
+        uploadTaskChannel = channel
+    }
+
+    private func endUploadTask(_ name: String) {
+        guard let id = uploadTasks.removeValue(forKey: name) else { return }
+        UIApplication.shared.endBackgroundTask(id)
     }
 
     // MARK: - Native share sheet

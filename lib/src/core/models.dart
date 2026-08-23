@@ -226,7 +226,8 @@ class UserProfile {
       hasPassword: json['hasPassword'] != false,
       canChangeCity: json['canChangeCity'] != false,
       cityChangeAllowedAt:
-          DateTime.tryParse(json['cityChangeAllowedAt']?.toString() ?? ''),
+          DateTime.tryParse(json['cityChangeAllowedAt']?.toString() ?? '')
+              ?.toLocal(),
       avatarUrl: json['avatarUrl']?.toString() ?? '',
       avatarFullUrl: json['avatarFullUrl']?.toString() ?? '',
       followers: parseInt(json['followers']),
@@ -543,7 +544,7 @@ class NotificationItem {
       videoUrl: _resolveMediaUrl(json['videoUrl']?.toString() ?? ''),
       isRead: json['isRead'] == true,
       created:
-          DateTime.tryParse(json['created']?.toString() ?? '') ??
+          DateTime.tryParse(json['created']?.toString() ?? '')?.toLocal() ??
           DateTime.now(),
     );
   }
@@ -588,12 +589,15 @@ class ConversationSummary {
       lastMessage: json['lastMessage']?.toString() ?? '',
       lastSender: json['lastSender']?.toString() ?? '',
       updated:
-          DateTime.tryParse(json['updated']?.toString() ?? '') ??
+          DateTime.tryParse(json['updated']?.toString() ?? '')?.toLocal() ??
           DateTime.now(),
       unreadCount: parseInt(json['unreadCount']),
-      lastReadAt: DateTime.tryParse(json['lastReadAt']?.toString() ?? ''),
-      otherLastActive: DateTime.tryParse(json['otherLastActive']?.toString() ?? ''),
-      otherLastReadAt: DateTime.tryParse(json['otherLastReadAt']?.toString() ?? ''),
+      lastReadAt:
+          DateTime.tryParse(json['lastReadAt']?.toString() ?? '')?.toLocal(),
+      otherLastActive: DateTime.tryParse(
+          json['otherLastActive']?.toString() ?? '')?.toLocal(),
+      otherLastReadAt: DateTime.tryParse(
+          json['otherLastReadAt']?.toString() ?? '')?.toLocal(),
       isTyping: json['otherIsTyping'] == true,
     );
   }
@@ -702,7 +706,7 @@ class MessageItem {
       sender: json['sender']?.toString() ?? '',
       text: text,
       created:
-          DateTime.tryParse(json['created']?.toString() ?? '') ??
+          DateTime.tryParse(json['created']?.toString() ?? '')?.toLocal() ??
           DateTime.now(),
       reactions: reactions,
       edited: json['edited'] == true,

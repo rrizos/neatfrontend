@@ -24,11 +24,14 @@ import 'package:video_player/video_player.dart';
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
 import '../core/avatar_store.dart';
+import '../core/background_upload.dart';
 import '../core/link_preview.dart';
 import '../core/media_cache.dart';
 import '../core/mentions.dart';
 import '../core/models.dart';
 import '../core/neat_loader.dart';
+import '../core/pending_post.dart';
+import '../core/upload_task.dart';
 import '../core/post_card.dart';
 import '../core/push_service.dart';
 import '../core/realtime_service.dart';
@@ -138,6 +141,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// compose sheet's indicator from outside that sheet's own setState.
   final ValueNotifier<double?> _uploadProgress = ValueNotifier<double?>(null);
 
+  /// The posting banner, held in the navigator's overlay rather than in the
+  /// feed's own tree.
+  ///
+  /// Composing a second post pushes a full-screen route over the home page,
+  /// which took the banner with it — the upload was still running, but the bar
+  /// was underneath the new screen. In the overlay it sits above every route,
+  /// so it stays visible wherever the user goes while a post is on its way.
+  OverlayEntry? _postingBannerEntry;
+
+  /// Names for the background assertions held while bytes are moving. Two,
+  /// because staging and delivering can overlap.
+  static const _kStageUploadTask = 'neat.stage-upload';
+  static const _kPostUploadTask = 'neat.post-upload';
+
   /// How many items one post may carry. Matches the server, which takes
   /// `media_info[:4]` — going past it here would silently drop the extras.
   static const _kMaxComposeMedia = 4;
@@ -152,7 +169,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// closing a client is what cancels its in-flight request — and closing the
   /// shared one would take every other request in the app down with it.
   http.Client? _uploadClient;
-  bool _cancelledUpload = false;
 
   /// Follow-up refresh while a just-posted video is still encoding.
   /// See _scheduleProcessingRefresh.
@@ -179,6 +195,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     AvatarStore.revision.addListener(_onAvatarRevisionChanged);
+    _postingLabel.addListener(_syncPostingBanner);
     _setupNativeTabChannel();
     // Paint last-known posts instantly instead of a blank spinner while the
     // network round-trip for fresh ones is still in flight.
@@ -296,6 +313,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       PushService.instance.onNotificationTap = null;
     }
     _processingPollTimer?.cancel();
+    _postingLabel.removeListener(_syncPostingBanner);
+    _postingBannerEntry?.remove();
+    _postingBannerEntry = null;
     _uploadProgress.dispose();
     _postingLabel.dispose();
     _compose.dispose();
@@ -679,6 +699,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
     setState(() => _posting = true);
     _postingLabel.value = AppLocalizations.of(context).postingLabel;
+    // Buys the upload some time if the app is put away mid-post; see
+    // UploadTask. Released in the finally below, without exception.
+    unawaited(UploadTask.begin(_kPostUploadTask));
 
     // The banner follows the item this post is actually sending, so opening
     // the composer again for a second post cannot touch it. Pressing Post
@@ -709,6 +732,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         },
       )..headers['Authorization'] = 'Token ${widget.session.token}';
       request.fields['text'] = text;
+
+      // Written down before the wait, in case the app does not survive it.
+      // The system finishes the transfer either way; this is what remembers
+      // that a post was meant to be made out of it.
+      await _rememberIfUploading(media, text, pollOptions);
 
       // Anything still going up gets waited on here rather than re-sent. By
       // this point it has had the whole caption-writing to finish, so it is
@@ -761,7 +789,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       // be long enough not to kill an upload that is genuinely still moving.
       final client = http.Client();
       _uploadClient = client;
-      _cancelledUpload = false;
       final streamed = await client
           .send(request)
           .timeout(Duration(seconds: hasVideo ? 900 : 180));
@@ -789,15 +816,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         );
       }
     } catch (e) {
-      // An aborted upload throws on the way out; that is the user's own doing,
-      // not a failure to report back to them.
-      if (mounted && !_cancelledUpload) {
+      if (mounted) {
         final msg = e.toString().contains('TimeoutException')
             ? AppLocalizations.of(context).uploadTimedOut
             : AppLocalizations.of(context).networkError;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     } finally {
+      // Delivered (or refused) here, so the disk record is no longer needed;
+      // leaving it would post the same thing again on the next launch.
+      unawaited(PendingPostQueue.forget());
+      unawaited(UploadTask.end(_kPostUploadTask));
       if (hasVideo && tracked != null) {
         tracked.progress.removeListener(followTracked);
       }
@@ -808,28 +837,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _posting = false;
         });
         _uploadProgress.value = null;
-      }
-    }
-  }
-
-  /// Stops an upload in progress and lets the sheet close.
-  ///
-  /// Closing the client aborts the request it is carrying — the only way to
-  /// actually stop a send in flight. Without this, Cancel and the media X were
-  /// both dead while a video uploaded: the sheet refused to pop, the buttons
-  /// were disabled, and a minute-long upload (or a stalled one) left the user
-  /// with nowhere to go but force-quitting the app.
-  void _cancelUpload() {
-    if (!_posting) return;
-    _cancelledUpload = true;
-    _uploadClient?.close();
-    _uploadClient = null;
-    if (mounted) {
-      setState(() => _posting = false);
-      _uploadProgress.value = null;
-      // Left standing only when it says "Posted", which clears itself.
-      if (_postingLabel.value == AppLocalizations.of(context).postingLabel) {
-        _postingLabel.value = null;
       }
     }
   }
@@ -975,6 +982,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// end of it. Failing here is not fatal — the media simply travels with the
   /// post request as it always did.
   Future<String?> _stageUpload(_ComposeMedia media) async {
+    // A video goes to the system rather than up from inside the app. It is the
+    // long transfer, it runs while the caption is being written, and that is
+    // exactly when somebody switches away — at which point an in-app request
+    // is torn down with the process. See BackgroundUpload.
+    final videoPath = media.uploadPath ?? media.videoPath;
+    if (media.isVideo && videoPath != null && BackgroundUpload.supported) {
+      final staged = await _stageInBackground(media, videoPath);
+      if (staged != null) return staged;
+      // Could not be handed over; fall through to the in-app upload, which is
+      // exactly what happened before any of this existed.
+    }
+
+    await UploadTask.begin(_kStageUploadTask);
     try {
       // Reports as it goes, so the compose sheet can show the video climbing
       // while the caption is being written. Without this the indicator sat at
@@ -1022,7 +1042,113 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       media.progress.value = null;
       debugPrint('[compose] staging failed, will send with the post: $e');
       return null;
+    } finally {
+      unawaited(UploadTask.end(_kStageUploadTask));
     }
+  }
+
+  /// Records the post on disk when a background upload is still carrying part
+  /// of it, so being killed mid-transfer does not lose it.
+  ///
+  /// Only when every piece can actually be reconstructed later: a local image
+  /// that has not been staged exists solely in memory, and a record referring
+  /// to it would be a post that can never be completed.
+  Future<void> _rememberIfUploading(
+    List<_ComposeMedia> media,
+    String text,
+    List<String> pollOptions,
+  ) async {
+    if (!BackgroundUpload.supported) return;
+    final waiting = media.any((m) => m.bgName != null && m.uploadId == null);
+    if (!waiting) return;
+
+    final info = <Map<String, dynamic>>[];
+    final uploads = <String, int>{};
+    for (final m in media) {
+      final order = info.length;
+      if (m.externalUrl != null) {
+        info.add({'type': m.type, 'url': m.externalUrl!, 'order': order});
+      } else if (m.uploadId != null) {
+        info.add({'type': m.type, 'upload_id': m.uploadId, 'order': order});
+      } else if (m.bgName != null) {
+        info.add({'type': m.type, 'order': order});
+        uploads[m.bgName!] = order;
+      } else {
+        // Something that only exists in this process; the post cannot be
+        // rebuilt without it, so nothing is written down at all.
+        return;
+      }
+    }
+    await PendingPostQueue.remember(
+      token: widget.session.token,
+      text: text,
+      media: info,
+      uploads: uploads,
+      pollOptions: pollOptions,
+    );
+  }
+
+  /// Hands [path] to the system to upload, and waits for it here.
+  ///
+  /// Returns the staged id, or null if the handover itself failed. The wait is
+  /// only for this launch: if the app is killed first the transfer still
+  /// finishes, and PendingPostQueue completes the post from the result on a
+  /// later launch.
+  Future<String?> _stageInBackground(_ComposeMedia media, String path) async {
+    final name = 'stage-${DateTime.now().microsecondsSinceEpoch}';
+    final done = Completer<String?>();
+
+    BackgroundUpload.watch(
+      name,
+      onProgress: (value) => media.progress.value = value,
+      onDone: (result) {
+        media.progress.value = null;
+        if (!result.ok) {
+          debugPrint('[compose] background staging refused ${result.status}');
+          if (!done.isCompleted) done.complete(null);
+          return;
+        }
+        try {
+          final id = (jsonDecode(result.body) as Map<String, dynamic>)['id']
+              ?.toString();
+          media.uploadId = id;
+          if (!done.isCompleted) done.complete(id);
+        } catch (e) {
+          debugPrint('[compose] unreadable staging reply: $e');
+          if (!done.isCompleted) done.complete(null);
+        }
+      },
+    );
+
+    final started = await BackgroundUpload.enqueue(
+      name: name,
+      url: stageUploadEndpoint,
+      headers: authGetHeaders(widget.session.token),
+      filePath: path,
+      fileName: 'video.mp4',
+      fields: {'type': media.type},
+    );
+    if (!started) {
+      BackgroundUpload.unwatch(name);
+      // Loud on purpose. The fallback still uploads, so without this the only
+      // symptom is an upload that dies when the app is put away — which is
+      // exactly the thing this was built to stop.
+      debugPrint('[compose] background handover failed: '
+          '${BackgroundUpload.lastFailure}');
+      // Not shown to the user: the fallback uploads perfectly well, and a
+      // message about an internal handover is noise to everyone but us. The
+      // reason is in the log for whoever is looking for it.
+      return null;
+    }
+    media.bgName = name;
+    media.progress.value = 0;
+    // The system owns the transfer now, but a reply that never arrives must
+    // not leave the post waiting for ever. If this expires the upload is still
+    // running — PendingPostQueue finishes the post when it lands.
+    return done.future.timeout(
+      const Duration(minutes: 30),
+      onTimeout: () => null,
+    );
   }
 
   /// Kicks off preparing and staging for [media] without waiting for either.
@@ -1118,11 +1244,55 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
+  /// Shows or hides the floating posting banner to match [_postingLabel].
+  ///
+  /// Deferred a frame on purpose: the label is set from inside setState in
+  /// places, and touching the overlay while a build is running throws.
+  void _syncPostingBanner() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applyPostingBanner());
+  }
+
+  void _applyPostingBanner() {
+    if (!mounted) return;
+    final showing = _postingLabel.value != null;
+    if (showing && _postingBannerEntry == null) {
+      final overlay = Navigator.of(context, rootNavigator: true).overlay;
+      if (overlay == null) return;
+      _postingBannerEntry = OverlayEntry(
+        builder: (overlayContext) {
+          final isLight =
+              Theme.of(overlayContext).brightness == Brightness.light;
+          return Positioned(
+            top: MediaQuery.paddingOf(overlayContext).top,
+            left: 0,
+            right: 0,
+            // Nothing in the banner is tappable, and swallowing touches this
+            // far up the tree would break whatever is underneath it.
+            child: IgnorePointer(
+              child: Material(
+                color: isLight ? Colors.white : const Color(0xff000000),
+                child: _PostingBanner(
+                  label: _postingLabel,
+                  progress: _uploadProgress,
+                  isLight: isLight,
+                ),
+              ),
+            ),
+          );
+        },
+      );
+      overlay.insert(_postingBannerEntry!);
+    } else if (!showing && _postingBannerEntry != null) {
+      _postingBannerEntry!.remove();
+      _postingBannerEntry = null;
+    }
+  }
+
   void _removeComposeMedia(int index, StateSetter setPageState) {
-    // Mid-upload the request already holds its own copy of this list, so
-    // removing an item here changed nothing visible and the X looked broken.
-    // Taking the media out of a post that is being sent means stopping it.
-    if (_posting) _cancelUpload();
+    // Only ever touches this draft. A post already being delivered holds its
+    // own copy of the list and is not affected — and must not be, since it was
+    // sent from a sheet that closed before this one opened.
     setState(() => _composeMedia.removeAt(index));
     setPageState(() {});
   }
@@ -1779,10 +1949,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 // Always poppable. Refusing to pop while posting is what left
                 // people stuck in this sheet with no way out; the upload is
                 // cancelled on the way instead.
+                // Always poppable, and closing it stops nothing. A post is
+                // sent from a sheet that has already been popped, so any
+                // delivery still running belongs to an *earlier* composer —
+                // cancelling here used to abort that one, which is how
+                // pressing Cancel killed the bar for a post already on its
+                // way. Media staged for this abandoned draft is swept
+                // server-side by purge_staged_uploads.
                 canPop: true,
-                onPopInvokedWithResult: (didPop, _) {
-                  if (didPop) _cancelUpload();
-                },
                 child: Scaffold(
                 backgroundColor:
                     isLight ? Colors.white : const Color(0xff000000),
@@ -1797,10 +1971,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         child: Row(
                           children: [
                             TextButton(
-                              onPressed: () {
-                                _cancelUpload();
-                                Navigator.of(pageContext).pop();
-                              },
+                              onPressed: () => Navigator.of(pageContext).pop(),
                               style: TextButton.styleFrom(
                                 foregroundColor: isLight ? Colors.black : Colors.white,
                                 disabledForegroundColor: const Color(0xff8a8a8a),
@@ -1974,11 +2145,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                         const SizedBox(height: 14),
                                         Row(
                                           children: [
-                                            // Photos (max 4, disabled if video or poll present)
+                                            // Photos. A video alongside them
+                                            // is fine — the server takes four
+                                            // items of any mix.
                                             if (!_composePollActive &&
                                                 !_composeMediaLoading &&
-                                                !_composeMedia.any(
-                                                (m) => m.isVideo) &&
                                                 _composeMedia.length < _kMaxComposeMedia)
                                               _ComposeAction(
                                                 icon: Icons.photo_library_outlined,
@@ -1986,11 +2157,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                     _pickComposeImages(
                                                         setPageState),
                                               ),
-                                            // Camera (disabled if video or poll present or 4 photos)
+                                            // Camera
                                             if (!_composePollActive &&
                                                 !_composeMediaLoading &&
-                                                !_composeMedia.any(
-                                                (m) => m.isVideo) &&
                                                 _composeMedia.length < _kMaxComposeMedia)
                                               _ComposeAction(
                                                 icon: Icons.camera_alt_outlined,
@@ -1998,10 +2167,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                     _pickComposeCamera(
                                                         setPageState),
                                               ),
-                                            // Video (disabled if any media or poll present)
+                                            // Video, including a second one
+                                            // next to the first.
                                             if (!_composePollActive &&
                                                 !_composeMediaLoading &&
-                                                _composeMedia.isEmpty)
+                                                _composeMedia.length < _kMaxComposeMedia)
                                               _ComposeAction(
                                                 icon: Icons
                                                     .videocam_outlined,
@@ -2010,7 +2180,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                         setPageState),
                                               ),
                                             // GIF (disabled if any media or poll present)
-                                            if (!_composePollActive && _composeMedia.isEmpty)
+                                            if (!_composePollActive &&
+                                                _composeMedia.length < _kMaxComposeMedia)
                                               _ComposeAction(
                                                 icon: Icons
                                                     .gif,
@@ -2527,13 +2698,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 _loadUnreadMessages();
               },
             ),
-            // Directly under the top bar, where Instagram puts it: in view
-            // but not in the way of whatever the user went back to.
-            _PostingBanner(
-              label: _postingLabel,
-              progress: _uploadProgress,
-              isLight: isLight,
-            ),
+            // The banner itself lives in the navigator's overlay so it
+            // survives the compose screen being pushed over this one — see
+            // _syncPostingBanner.
             Divider(
               height: 1,
               color: isLight ? const Color(0xffd6d9df) : const Color(0xff232323),
@@ -4679,6 +4846,9 @@ class _ComposeMedia {
   final String? videoPath;     // local video file path: streamed for upload
   final String? externalUrl;   // Giphy / remote URL: sent as-is
 
+  /// The background upload carrying this file, when the system is doing it.
+  String? bgName;
+
   /// How far this item's own upload has got, 0-1, or null when nothing is
   /// moving.
   ///
@@ -5845,7 +6015,7 @@ class _CommentSheetState extends State<_CommentSheet> {
     final highlighted = c.id == _highlightedCommentId;
     final commentKey = _commentKeys.putIfAbsent(c.id, () => GlobalKey());
     DateTime? created;
-    try { created = DateTime.parse(c.createdAt); } catch (_) {}
+    try { created = DateTime.parse(c.createdAt).toLocal(); } catch (_) {}
     final pressed = c.id == _pressedCommentId;
     return AnimatedContainer(
       key: commentKey,

@@ -2767,7 +2767,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
     final isLiked = _liked[c.id] ?? c.liked;
     final likeCount = _likes[c.id] ?? c.likes;
     DateTime? created;
-    try { created = DateTime.parse(c.createdAt); } catch (_) {}
+    try { created = DateTime.parse(c.createdAt).toLocal(); } catch (_) {}
     return Padding(
       padding: EdgeInsets.fromLTRB(isReply ? 52 : 16, 10, 16, 2),
       child: Row(

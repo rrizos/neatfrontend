@@ -1940,12 +1940,12 @@ class _ConversationPageState extends State<ConversationPage>
       case 'read_receipt':
         if (payload['conversation_id'] != widget.conversationId) return;
         if (payload['reader']?.toString() != widget.otherUsername) return;
-        final readAt = DateTime.tryParse(payload['read_at']?.toString() ?? '');
+        final readAt = DateTime.tryParse(payload['read_at']?.toString() ?? '')?.toLocal();
         if (readAt != null) setState(() => _otherLastReadAt = readAt);
         return;
       case 'presence':
         if (payload['username']?.toString() != widget.otherUsername) return;
-        final lastActive = DateTime.tryParse(payload['last_active']?.toString() ?? '');
+        final lastActive = DateTime.tryParse(payload['last_active']?.toString() ?? '')?.toLocal();
         if (lastActive != null) setState(() => _otherLastActive = lastActive);
         return;
       case 'block':
@@ -2041,8 +2041,8 @@ class _ConversationPageState extends State<ConversationPage>
       }
       final hadNewFromOther = merged.length > _messages.length &&
           merged.last.sender != widget.currentUsername;
-      final lastActive  = DateTime.tryParse(conv?['otherLastActive']?.toString() ?? '');
-      final otherReadAt = DateTime.tryParse(conv?['otherLastReadAt']?.toString() ?? '');
+      final lastActive  = DateTime.tryParse(conv?['otherLastActive']?.toString() ?? '')?.toLocal();
+      final otherReadAt = DateTime.tryParse(conv?['otherLastReadAt']?.toString() ?? '')?.toLocal();
       setState(() {
         _messages = merged;
         if (lastActive != null)  _otherLastActive  = lastActive;
@@ -2131,7 +2131,7 @@ class _ConversationPageState extends State<ConversationPage>
           .toList();
       final merged = [...olderPages, ...msgs, ...pending]
         ..sort((a, b) => a.created.compareTo(b.created));
-      final otherReadAt = DateTime.tryParse(conv?['otherLastReadAt']?.toString() ?? '');
+      final otherReadAt = DateTime.tryParse(conv?['otherLastReadAt']?.toString() ?? '')?.toLocal();
       setState(() {
         _messages = merged;
         _loading = false;
