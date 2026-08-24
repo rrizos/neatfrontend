@@ -393,7 +393,7 @@ class _EventsPageState extends State<EventsPage> {
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff000000),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -486,7 +486,7 @@ class _EventsPageState extends State<EventsPage> {
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff000000),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -543,7 +543,7 @@ class _EventsPageState extends State<EventsPage> {
       useRootNavigator: true,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff000000),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -646,16 +646,16 @@ class _EventsPageState extends State<EventsPage> {
     final visible = _tab == 0 ? _filteredOfficial : _community;
 
     return Scaffold(
-      backgroundColor: isLight ? Colors.white : const Color(0xff000000),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       appBar: AppBar(
-        backgroundColor: isLight ? Colors.white : const Color(0xff000000),
+        backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
         title: Row(
           children: [
             Container(
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                color: isLight ? Colors.white : const Color(0xff000000),
+                color: isLight ? Colors.white : const Color(0xff0a0a0a),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: isLight ? const Color(0xffd9dee6) : const Color(0xff262626)),
               ),
@@ -2385,7 +2385,7 @@ class _ComposerAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xff000000),
+      color: const Color(0xff0a0a0a),
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
@@ -2719,7 +2719,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
       context: context,
       useRootNavigator: true,
       showDragHandle: true,
-      backgroundColor: isLight ? Colors.white : const Color(0xff000000),
+      backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
       builder: (sheetCtx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -3111,7 +3111,7 @@ class _EventDetailSheetState extends State<_EventDetailSheet> {
                                 useRootNavigator: true,
                                 isScrollControlled: true,
                                 useSafeArea: true,
-                                backgroundColor: isLight ? Colors.white : const Color(0xff000000),
+                                backgroundColor: isLight ? Colors.white : const Color(0xff0a0a0a),
                                 shape: const RoundedRectangleBorder(
                                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                                 ),
