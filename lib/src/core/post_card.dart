@@ -1219,6 +1219,7 @@ class FeedPostCard extends StatefulWidget {
     this.onShowNavBar,
     this.likingEnabled = true,
     this.onVote,
+    this.showCity = false,
   });
 
   final FeedPost post;
@@ -1242,6 +1243,9 @@ class FeedPostCard extends StatefulWidget {
   final VoidCallback? onShowNavBar;
   final bool likingEnabled;
   final Future<bool> Function(int optionId)? onVote;
+  /// When true, append the post's city to the age line ("3h · Thessaloniki").
+  /// Used in the Virals "Other cities" tab so readers know where each post is from.
+  final bool showCity;
 
   @override
   State<FeedPostCard> createState() => _FeedPostCardState();
@@ -1471,7 +1475,9 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                             ],
                           ),
                           Text(
-                            postAge(widget.post.minutesAgo, AppLocalizations.of(context)),
+                            widget.showCity && widget.post.city.isNotEmpty
+                                ? '${postAge(widget.post.minutesAgo, AppLocalizations.of(context))} · ${widget.post.city}'
+                                : postAge(widget.post.minutesAgo, AppLocalizations.of(context)),
                             style: TextStyle(
                               fontSize: 12,
                               color: isLight ? const Color(0xff616161) : const Color(0xffb3b3b3),
@@ -1630,7 +1636,10 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                                     color: isLight ? Colors.black : Colors.white, size: 26),
                                 CustomPaint(
                                   size: const Size(26, 26),
-                                  painter: _SlashPainter(color: isLight ? Colors.black : Colors.white),
+                                  painter: _SlashPainter(
+                                    color: isLight ? Colors.black : Colors.white,
+                                    bgColor: isLight ? Colors.white : const Color(0xff000000),
+                                  ),
                                 ),
                               ]),
                             ),
@@ -1743,21 +1752,30 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
 }
 
 class _SlashPainter extends CustomPainter {
-  const _SlashPainter({required this.color});
+  const _SlashPainter({required this.color, required this.bgColor});
   final Color color;
+  final Color bgColor;
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawLine(
-      Offset(size.width * 0.72, size.height * 0.04),
-      Offset(size.width * 0.28, size.height * 0.96),
-      Paint()
-        ..color = color
-        ..strokeWidth = 2.2
-        ..strokeCap = StrokeCap.round,
-    );
+    final start = Offset(size.width * 0.75, size.height * 0.06);
+    final end   = Offset(size.width * 0.25, size.height * 0.94);
+    // Background stroke — wider than the line — punches through the heart
+    // outline where they cross so the slash reads as cutting the heart
+    // rather than floating over it.
+    canvas.drawLine(start, end,
+        Paint()
+          ..color = bgColor
+          ..strokeWidth = 4.5
+          ..strokeCap = StrokeCap.round);
+    // Foreground line on top.
+    canvas.drawLine(start, end,
+        Paint()
+          ..color = color
+          ..strokeWidth = 2.0
+          ..strokeCap = StrokeCap.round);
   }
   @override
-  bool shouldRepaint(_SlashPainter old) => old.color != color;
+  bool shouldRepaint(_SlashPainter old) => old.color != color || old.bgColor != bgColor;
 }
 
 // ── Poll widgets ──────────────────────────────────────────────────────────────

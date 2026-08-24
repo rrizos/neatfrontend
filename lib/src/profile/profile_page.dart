@@ -1892,21 +1892,14 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   /// Refused politely when the month is not up. The server decides, so this
   /// only saves somebody choosing a city on a map and then being told no.
   Future<void> _changeCity() async {
-    final l10n = AppLocalizations.of(context);
-    final messenger = ScaffoldMessenger.of(context);
-    if (!widget.profile.canChangeCity) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(l10n.cityChangeLocked(
-            _formatCityUnlock(widget.profile.cityChangeAllowedAt),
-          )),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
+    if (!widget.profile.canChangeCity) return;
     final picked = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => CityPickPage(token: widget.token)),
+      MaterialPageRoute(
+        builder: (_) => CityPickPage(
+          token: widget.token,
+          homeCity: widget.profile.city, // hides current city pin on bio map
+        ),
+      ),
     );
     if (!mounted || picked == null || picked.isEmpty) return;
     if (picked == _cityController.text) return;
@@ -1928,6 +1921,9 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
       decoration: BoxDecoration(
         color: isLight ? Colors.white : const Color(0xff000000),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: isLight
+            ? null
+            : Border.all(color: const Color(0xff2a2a2a), width: 0.5),
       ),
       child: SafeArea(
         child: SingleChildScrollView(
@@ -2580,35 +2576,29 @@ class _UserListPageState extends State<_UserListPage>
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-          child: TextField(
-            controller: searchCtrl,
-            onChanged: onSearch,
-            style: TextStyle(
-                color: isLight ? Colors.black : Colors.white, fontSize: 15),
-            cursorColor: const Color(0xff3897f0),
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: isLight
-                  ? const Color(0xffefefef)
-                  : const Color(0xff1c1c1e),
-              hintText: AppLocalizations.of(context).navSearch,
-              hintStyle: TextStyle(
-                  color: isLight
-                      ? const Color(0xff737373)
-                      : const Color(0xff8e8e8e),
-                  fontSize: 15),
-              prefixIcon: Icon(Icons.search_rounded,
-                  color: isLight
-                      ? const Color(0xff737373)
-                      : const Color(0xff8e8e8e),
-                  size: 20),
-              contentPadding: const EdgeInsets.symmetric(vertical: 9),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none),
+          child: Container(
+            height: 40,
+            decoration: BoxDecoration(
+              color: isLight ? const Color(0xfff4f6f8) : const Color(0xff141414),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a)),
+            ),
+            child: TextField(
+              controller: searchCtrl,
+              onChanged: onSearch,
+              style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 15),
+              cursorColor: const Color(0xff3897f0),
+              decoration: InputDecoration(
+                hintText: AppLocalizations.of(context).navSearch,
+                hintStyle: TextStyle(
+                    color: isLight ? const Color(0xff737373) : const Color(0xff8e8e8e),
+                    fontSize: 15),
+                prefixIcon: Icon(Icons.search_rounded,
+                    color: isLight ? const Color(0xff737373) : const Color(0xff8e8e8e),
+                    size: 19),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                border: InputBorder.none,
+              ),
             ),
           ),
         ),

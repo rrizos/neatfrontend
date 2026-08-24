@@ -447,6 +447,8 @@ class _MessagesPageState extends State<MessagesPage>
   }
 
   Future<void> _open(ConversationSummary s) async {
+    // Close any open trash reveal before navigating into a conversation.
+    if (_openSwipeId.value != null) _openSwipeId.value = null;
     await Navigator.of(context).push(PageRouteBuilder<void>(
       opaque: false, // allows previous route to show through during swipe-back
       pageBuilder: (ctx, anim, secAnim) => ConversationPage(
@@ -554,24 +556,22 @@ class _MessagesPageState extends State<MessagesPage>
       ),
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        // Either direction leaves the inbox. Dragging right is the platform
-        // back gesture; dragging left is how people reach for the feed, since
-        // that is the direction the inbox was opened from — and having it do
-        // nothing read as the screen being stuck.
+        // Right-drag only: left-drags are handled inside each row (trash reveal).
+        // This fires for drags starting on non-row areas (search bar, header).
         onHorizontalDragUpdate: (d) {
           if (_swipeCtrlInbox.isAnimating) _swipeCtrlInbox.stop();
-          // A notifier, not setState: this fires on every frame of the drag,
-          // and rebuilding the whole inbox — app bar, search field and the
-          // entire conversation list — sixty times a second is what made the
-          // gesture stutter. Only the Transform needs to change.
-          _swipeOffset.value += d.delta.dx;
+          // Clamp to [0, ∞]: leftward drags do nothing at the page level.
+          if (d.delta.dx > 0 || _swipeOffset.value > 0) {
+            // Close any open trash reveal the moment the page starts sliding.
+            if (_openSwipeId.value != null) _openSwipeId.value = null;
+            _swipeOffset.value =
+                (_swipeOffset.value + d.delta.dx).clamp(0, double.infinity);
+          }
         },
         onHorizontalDragEnd: (d) {
           final sw = MediaQuery.sizeOf(context).width;
           final velocity = d.primaryVelocity ?? 0;
-          final farEnough = _swipeOffset.value.abs() > sw * 0.35;
-          final fastEnough = velocity.abs() > 400;
-          if (farEnough || fastEnough) {
+          if (_swipeOffset.value > sw * 0.35 || velocity > 400) {
             _leaveInbox();
           } else {
             _snapBackInbox();
@@ -854,6 +854,17 @@ class _InboxRow extends StatelessWidget {
 }
 
 // ─── Swipeable inbox row ──────────────────────────────────────────────────────
+//
+// The delete-reveal gesture uses a Listener (raw pointer events, outside the
+// gesture arena) so it never competes with the page-level back-swipe
+// GestureDetector. The page-level GD is the only arena participant for
+// horizontal drags, so rightward swipes are claimed by it from anywhere on
+// screen — exactly the same mechanism as the DM page.
+//
+// Listener tracks leftward-only motion independently:
+//   • right swipe → page GD wins arena, inbox slides back to home ✓
+//   • left swipe  → Listener updates _ctrl; arena is irrelevant          ✓
+//   • vertical    → _isHorizontal guard ignores it                        ✓
 
 class _SwipeableInboxRow extends StatefulWidget {
   const _SwipeableInboxRow({
@@ -888,6 +899,15 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
 
   bool _open = false;
 
+  // Raw-pointer drag state for the delete-reveal gesture.
+  int?      _ptr;           // active pointer id
+  double    _startX = 0;
+  double    _startY = 0;
+  bool?     _isHorizontal;  // null = undecided
+  bool      _isBackSwipe = false; // true once pointer has moved right ≥ 10 px
+  int       _lastMs  = 0;
+  double    _velPxMs = 0;   // leftward velocity (negative = leftward)
+
   @override
   void initState() {
     super.initState();
@@ -908,15 +928,13 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
     }
   }
 
-  /// Slides the delete action in, and remembers that this row is the open one
-  /// so opening another closes it.
-  void _reveal() {
+  void _revealDelete() {
     _ctrl.animateTo(1.0, curve: Curves.easeOut);
     widget.openSwipeId.value = widget.summary.id;
     if (!_open) setState(() => _open = true);
   }
 
-  void _close() {
+  void _closeDelete() {
     _ctrl.animateTo(0.0, curve: Curves.easeOut);
     if (widget.openSwipeId.value == widget.summary.id) {
       widget.openSwipeId.value = null;
@@ -924,51 +942,122 @@ class _SwipeableInboxRowState extends State<_SwipeableInboxRow>
     setState(() => _open = false);
   }
 
+  // ── Listener callbacks ──────────────────────────────────────────────────────
+
+  void _onPtrDown(PointerDownEvent e) {
+    if (_ptr != null) return; // single-touch only
+    _ptr          = e.pointer;
+    _startX       = e.localPosition.dx;
+    _startY       = e.localPosition.dy;
+    _isHorizontal = null;
+    _isBackSwipe  = false;
+    _lastMs       = e.timeStamp.inMilliseconds;
+    _velPxMs      = 0;
+    if (_ctrl.isAnimating) _ctrl.stop();
+  }
+
+  void _onPtrMove(PointerMoveEvent e) {
+    if (e.pointer != _ptr) return;
+    // Once the pointer has moved rightward enough to be a back-swipe (the
+    // page-level GD is handling it), lock out delete for the rest of this
+    // gesture — including if the user reverses direction back left.
+    if (_isBackSwipe) return;
+
+    final totalDx = e.localPosition.dx - _startX;
+    final totalDy = e.localPosition.dy - _startY;
+
+    // If the net displacement is rightward by ≥ 10 px, this is a back-swipe.
+    // Mark it and stop processing so a direction-reversal can't open delete.
+    if (totalDx > 10) {
+      _isBackSwipe = true;
+      return;
+    }
+
+    // Direction not yet committed: wait for ≥ 6 px of movement.
+    if (_isHorizontal == null) {
+      if (totalDx.abs() < 6 && totalDy.abs() < 6) return;
+      _isHorizontal = totalDx.abs() > totalDy.abs();
+    }
+
+    // Only leftward horizontal motion triggers delete reveal.
+    if (!_isHorizontal! || e.delta.dx >= 0) return;
+
+    // Velocity tracking (px/ms, negative = leftward).
+    final ms = e.timeStamp.inMilliseconds;
+    final dt = ms - _lastMs;
+    if (dt > 0) _velPxMs = e.delta.dx / dt;
+    _lastMs = ms;
+
+    // Drive the animation directly — no setState needed.
+    _ctrl.value = (_ctrl.value + (-e.delta.dx / _actionWidth)).clamp(0.0, 1.0);
+  }
+
+  void _onPtrUp(PointerUpEvent e) {
+    if (e.pointer != _ptr) return;
+    _ptr         = null;
+    _isBackSwipe = false;
+    if (_isHorizontal != true) return; // tap, vertical scroll, or back-swipe
+    // Snap open if dragged past 40 % or flicked leftward fast enough.
+    if (_ctrl.value > 0.4 || _velPxMs < -0.3) {
+      _revealDelete();
+    } else {
+      _closeDelete();
+    }
+    _isHorizontal = null;
+  }
+
+  void _onPtrCancel(PointerCancelEvent e) {
+    if (e.pointer != _ptr) return;
+    _ptr          = null;
+    _isHorizontal = null;
+    _isBackSwipe  = false;
+    if (_ctrl.value > 0) _closeDelete();
+  }
+
   @override
   Widget build(BuildContext context) {
     final bg = widget.isLight ? _kBgLgt : _kBgDark;
-    // Delete is on long-press, not on a swipe.
-    //
-    // A row that claimed horizontal drags won the gesture arena against the
-    // page behind it, so swiping anywhere on the list revealed a delete button
-    // instead of going back to the feed — and since the list is almost
-    // entirely rows, "swipe to leave the inbox" effectively did not exist.
-    // Only one of the two can own that gesture, and leaving the screen is the
-    // thing people do constantly; deleting a conversation is rare and is
-    // exactly what a long-press is for.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onLongPress: _open ? _close : _reveal,
-      child: Stack(
-        clipBehavior: Clip.hardEdge,
-        children: [
-          Positioned(
-            top: 0, bottom: 0, right: 0, width: _actionWidth,
-            child: GestureDetector(
-              onTap: widget.onDelete,
-              child: Container(
-                color: Colors.red,
-                alignment: Alignment.center,
-                child: const Icon(Icons.delete_outline, color: Colors.white, size: 26),
-              ),
-            ),
-          ),
-          AnimatedBuilder(
-            animation: _ctrl,
-            builder: (ctx, child) => Transform.translate(
-              offset: Offset(-_ctrl.value * _actionWidth, 0),
-              child: ColoredBox(
-                color: bg,
-                child: _InboxRow(
-                  summary: widget.summary,
-                  currentUsername: widget.currentUsername,
-                  isLight: widget.isLight,
-                  onTap: _open ? _close : widget.onTap,
+      // Long-press closes an open trash action without tapping the red button.
+      onLongPress: _open ? _closeDelete : null,
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown:   _onPtrDown,
+        onPointerMove:   _onPtrMove,
+        onPointerUp:     _onPtrUp,
+        onPointerCancel: _onPtrCancel,
+        child: Stack(
+          clipBehavior: Clip.hardEdge,
+          children: [
+            Positioned(
+              top: 0, bottom: 0, right: 0, width: _actionWidth,
+              child: GestureDetector(
+                onTap: widget.onDelete,
+                child: Container(
+                  color: Colors.red,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.delete_outline, color: Colors.white, size: 26),
                 ),
               ),
             ),
-          ),
-        ],
+            AnimatedBuilder(
+              animation: _ctrl,
+              builder: (ctx, child) => Transform.translate(
+                offset: Offset(-_ctrl.value * _actionWidth, 0),
+                child: ColoredBox(
+                  color: bg,
+                  child: _InboxRow(
+                    summary: widget.summary,
+                    currentUsername: widget.currentUsername,
+                    isLight: widget.isLight,
+                    onTap: _open ? _closeDelete : widget.onTap,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1078,20 +1167,25 @@ class _SearchField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 15),
-      cursorColor: _kBlue,
-      decoration: InputDecoration(
-        filled: true,
-        fillColor: isLight ? const Color(0xffefefef) : const Color(0xff1c1c1e),
-        hintText: AppLocalizations.of(context).navSearch,
-        hintStyle: TextStyle(color: isLight ? _kSubLgt : _kSubDark, fontSize: 15),
-        prefixIcon: Icon(Icons.search_rounded, color: isLight ? _kSubLgt : _kSubDark, size: 20),
-        contentPadding: const EdgeInsets.symmetric(vertical: 9),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: isLight ? const Color(0xfff4f6f8) : const Color(0xff141414),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isLight ? const Color(0xffe8eaed) : const Color(0xff2a2a2a)),
+      ),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 15),
+        cursorColor: _kBlue,
+        decoration: InputDecoration(
+          hintText: AppLocalizations.of(context).navSearch,
+          hintStyle: TextStyle(color: isLight ? _kSubLgt : _kSubDark, fontSize: 15),
+          prefixIcon: Icon(Icons.search_rounded, color: isLight ? _kSubLgt : _kSubDark, size: 19),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          border: InputBorder.none,
+        ),
       ),
     );
   }
@@ -1326,7 +1420,7 @@ class _EmptyInbox extends StatelessWidget {
       title = l10n.noConnectionTitle;
       subtitle = l10n.noConnectionSubtitle;
     } else if (hasSearch) {
-      icon = Icons.chat_bubble_outline_rounded;
+      icon = Icons.search_off_rounded;
       title = l10n.noResultsTitle;
       subtitle = l10n.noResultsSubtitle;
     } else {
@@ -2642,7 +2736,8 @@ class _ConversationPageState extends State<ConversationPage>
     final name    = widget.otherFullName.isNotEmpty ? widget.otherFullName : widget.otherUsername;
 
     return AnimatedBuilder(
-      animation: _swipeCtrl,
+      // Both: the controller drives snap-back, the notifier drives live drag.
+      animation: Listenable.merge([_swipeCtrl, _swipeOffset]),
       builder: (context, child) => Transform.translate(
         offset: Offset(
           _swipeCtrl.isAnimating ? _swipeAnim.value : _swipeOffset.value, 0),

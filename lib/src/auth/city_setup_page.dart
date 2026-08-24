@@ -278,9 +278,20 @@ class _HomePin extends StatelessWidget {
 /// Public because changing your city later is the same act as choosing it at
 /// sign-up, and a second map would be a second set of bugs.
 class CityPickPage extends StatelessWidget {
-  const CityPickPage({super.key, required this.token});
+  const CityPickPage({
+    super.key,
+    required this.token,
+    /// Current home city, non-empty when opened from the bio edit sheet.
+    /// When provided the map hides that city's pin (no point offering the
+    /// city the user is already in) and shows heat data instead of the
+    /// sign-up fly-to animation.
+    this.homeCity = '',
+  });
 
   final String token;
+  final String homeCity;
+
+  bool get _isSignUp => homeCity.isEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -292,12 +303,42 @@ class CityPickPage extends StatelessWidget {
           children: [
             CityMapView(
               token: token,
-              homeCity: '',
-              isSignUp: true,
+              homeCity: homeCity,
+              isSignUp: _isSignUp,
               onOpenUserProfile: (_) {},
               onCitySelected: (city) {
                 Navigator.of(context).pop(city);
               },
+            ),
+            // Back button — lets the user exit without picking a city.
+            Positioned(
+              top: 12,
+              left: 16,
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).pop(),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(50),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.52),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.12),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
             Positioned(
               bottom: 56,

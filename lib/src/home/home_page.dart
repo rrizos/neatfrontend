@@ -795,16 +795,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final res = await http.Response.fromStream(streamed);
       if (!mounted) return;
       if (res.statusCode == 201) {
-        // Deliberately does not navigate anywhere. The sheet closed when Post
-        // was tapped and the user has been reading the feed ever since —
-        // yanking them to their profile now would be the app grabbing the
-        // wheel back long after they let go.
         if (mounted) {
           _postingLabel.value = AppLocalizations.of(context).postShared;
           _load();
           Future<void>.delayed(const Duration(seconds: 2), () {
             if (mounted) _postingLabel.value = null;
           });
+          // Take the user straight to their profile so they can see the post.
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).popUntil((route) => route.isFirst);
+          }
+          setState(() {
+            _nav = 4;
+            _visitedTabs.add(4);
+            _inlineProfileUsername = widget.session.user.username;
+            _inlinePostId = null;
+            _showInlineProfile = true;
+            _profileRefreshKey++;
+          });
+          if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 4);
         }
       } else if (res.statusCode == 413) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2551,7 +2560,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  Widget _buildViralPostCard(FeedPost post, {required bool interactive}) {
+  Widget _buildViralPostCard(FeedPost post, {required bool interactive, bool showCity = false}) {
     return FeedPostCard(
       key: ValueKey('viral_${post.id}'),
       post: post,
@@ -2560,6 +2569,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       followingAuthors: _followingAuthors,
       followerAuthors: _followerAuthors,
       likingEnabled: interactive,
+      showCity: showCity,
       onLike: interactive ? () => _likePost(post) : () async => false,
       onSave: interactive ? () => _savePost(post) : () async => false,
       onShare: () async {
@@ -2794,16 +2804,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           if (returningCity != null)
             Positioned.fill(
               child: ColoredBox(
-                color: Colors.black,
+                color: isLight ? Colors.white : Colors.black,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const NeatLoader(size: 72, color: Colors.white),
+                    NeatLoader(size: 72, color: isLight ? Colors.black : Colors.white),
                     const SizedBox(height: 24),
                     Text(
                       AppLocalizations.of(context).returningToCity(returningCity),
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: isLight ? Colors.black : Colors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
                       ),
@@ -3460,7 +3470,7 @@ class _ViralView extends StatefulWidget {
   final UserProfile currentUser;
   final Set<String> followingAuthors;
   final Set<String> followerAuthors;
-  final Widget Function(FeedPost, {required bool interactive}) buildPostCard;
+  final Widget Function(FeedPost, {required bool interactive, bool showCity}) buildPostCard;
   final ValueChanged<String> onOpenUserProfile;
   final VoidCallback onHideNavBar;
   final VoidCallback onShowNavBar;
@@ -3949,10 +3959,10 @@ class _ViralViewState extends State<_ViralView> {
                     color: mc!.withValues(alpha: 0.03),
                     border: Border(left: BorderSide(color: mc.withValues(alpha: 0.25), width: 3.5)),
                   ),
-                  child: widget.buildPostCard(post, interactive: _scope == _ViralScope.myCity),
+                  child: widget.buildPostCard(post, interactive: _scope == _ViralScope.myCity, showCity: _scope == _ViralScope.otherCities),
                 )
               else
-                widget.buildPostCard(post, interactive: _scope == _ViralScope.myCity),
+                widget.buildPostCard(post, interactive: _scope == _ViralScope.myCity, showCity: _scope == _ViralScope.otherCities),
               Divider(height: 1, color: isLight ? const Color(0xffe8eaed) : const Color(0xff141414)),
             ],
           );
@@ -6254,6 +6264,9 @@ class _CommentSheetState extends State<_CommentSheet> {
                             color: isLight
                                 ? const Color(0xffa0a0a0)
                                 : const Color(0xff6a6a6a),
+                            bgColor: isLight
+                                ? Colors.white
+                                : const Color(0xff000000),
                           ),
                         ),
                       ],
@@ -6602,21 +6615,28 @@ class _GifPickerListener implements GiphyMediaSelectionListener {
 
 
 class _SlashPainterSmall extends CustomPainter {
-  const _SlashPainterSmall({required this.color});
+  const _SlashPainterSmall({required this.color, required this.bgColor});
   final Color color;
+  final Color bgColor;
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawLine(
-      Offset(size.width * 0.72, size.height * 0.04),
-      Offset(size.width * 0.28, size.height * 0.96),
-      Paint()
-        ..color = color
-        ..strokeWidth = 1.6
-        ..strokeCap = StrokeCap.round,
-    );
+    final start = Offset(size.width * 0.75, size.height * 0.06);
+    final end   = Offset(size.width * 0.25, size.height * 0.94);
+    // Wider background stroke punches through the heart outline at the
+    // crossing so the slash reads as cutting the heart, not floating on it.
+    canvas.drawLine(start, end,
+        Paint()
+          ..color = bgColor
+          ..strokeWidth = 3.5
+          ..strokeCap = StrokeCap.round);
+    canvas.drawLine(start, end,
+        Paint()
+          ..color = color
+          ..strokeWidth = 1.5
+          ..strokeCap = StrokeCap.round);
   }
   @override
-  bool shouldRepaint(_SlashPainterSmall old) => old.color != color;
+  bool shouldRepaint(_SlashPainterSmall old) => old.color != color || old.bgColor != bgColor;
 }
 
 /// The strip at the end of the feed that asks for the next page.

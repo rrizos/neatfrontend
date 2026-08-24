@@ -131,6 +131,13 @@ class _NeatAppState extends State<NeatApp> {
         selectedItemColor: Colors.white,
         unselectedItemColor: Color(0xffa9a9a9),
       ),
+      // Subtle top border so dark sheets don't disappear into the black bg.
+      bottomSheetTheme: const BottomSheetThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          side: BorderSide(color: Color(0xff2a2a2a), width: 0.5),
+        ),
+      ),
     );
   }
 

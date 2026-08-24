@@ -1199,7 +1199,7 @@ class _CityCard extends StatelessWidget {
                 const Padding(
                   padding: EdgeInsets.fromLTRB(22, 18, 22, 0),
                   child: Text(
-                    'Επιλέξτε προσεκτικά την πόλη σας! Μπορείτε να αλλάξετε πόλη μετά από 6 μήνες.',
+                    'Επιλέξτε προσεκτικά την πόλη σας! Μπορείτε να αλλάξετε πόλη μετά από 1 μήνα.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white,

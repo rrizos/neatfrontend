@@ -116,7 +116,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get citySetupMicrocopy =>
-      'Choose carefully — you can change city after 6 months.';
+      'Choose carefully — you can change city after 1 month.';
 
   @override
   String get citySetupCta => 'Open the map';

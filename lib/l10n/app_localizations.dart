@@ -299,7 +299,7 @@ abstract class AppLocalizations {
   /// No description provided for @citySetupMicrocopy.
   ///
   /// In en, this message translates to:
-  /// **'Choose carefully — you can change city after 6 months.'**
+  /// **'Choose carefully — you can change city after 1 month.'**
   String get citySetupMicrocopy;
 
   /// No description provided for @citySetupCta.
