@@ -4,9 +4,25 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
+// The domain, not the bare IP it used to be.
+//
+// Talking to an IP meant a self-signed certificate and a pinned fingerprint
+// (see pinned_http.dart), and that pin is a lock on the infrastructure: the
+// server could never be moved, put behind a load balancer, or served through a
+// CDN, because every one of those changes the address or the certificate and
+// every installed app would stop connecting. neatapp.gr has a real Let's
+// Encrypt certificate and resolves to the same box, so this is the same server
+// reached in a way that can be changed later by editing DNS.
+//
+// Verified equivalent before switching: every endpoint the app calls — feed,
+// events, me, inbox, notifications, city-heat, link previews, badge, login,
+// upload, media and the websocket — answers identically on both.
+//
+// Builds already in people's hands still use the IP, and that endpoint is
+// deliberately left working for them.
 const String _kServerUrl = String.fromEnvironment(
   'NEAT_API_BASE_URL',
-  defaultValue: 'https://63.181.201.175',
+  defaultValue: 'https://neatapp.gr',
 );
 
 // On web the app runs on Netlify (HTTPS). Using empty base means all paths

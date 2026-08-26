@@ -3,6 +3,14 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+// Kept, but no longer on the path anything normally takes.
+//
+// The app talks to neatapp.gr now, which has a real certificate and goes
+// through ordinary system CA validation — this override never fires for it,
+// because badCertificateCallback is only consulted when validation fails.
+// The pin remains so that pointing NEAT_API_BASE_URL at the bare IP still
+// works for local testing against the box directly.
+//
 // The backend (63.181.201.175) has no domain name, so it can't get a
 // certificate from a public CA — Let's Encrypt and friends only issue for
 // domain names, not bare IPs. Its nginx serves a self-signed cert instead;
