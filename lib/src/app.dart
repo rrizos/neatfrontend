@@ -71,10 +71,16 @@ class _NeatAppState extends State<NeatApp> {
   }
 
   void _handleUri(Uri uri) {
-    if (uri.scheme != 'neat') return;
     int? postId;
-    if (uri.host == 'post' && uri.pathSegments.isNotEmpty) {
+    if (uri.scheme == 'neat' && uri.host == 'post' && uri.pathSegments.isNotEmpty) {
+      // Custom scheme:  neat://post/123
       postId = int.tryParse(uri.pathSegments.first);
+    } else if ((uri.scheme == 'https' || uri.scheme == 'http') &&
+               uri.host == 'neatapp.gr' &&
+               uri.pathSegments.length >= 2 &&
+               uri.pathSegments[0] == 'post') {
+      // Universal / App Link:  https://neatapp.gr/post/123
+      postId = int.tryParse(uri.pathSegments[1]);
     }
     if (postId == null) return;
     NeatApp.navigatorKey.currentState?.push(
