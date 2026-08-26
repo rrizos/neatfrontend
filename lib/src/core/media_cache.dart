@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -30,16 +31,40 @@ final videoCacheManager = CacheManager(
 /// offline playback works without any network attempt when the video was
 /// previously downloaded. Falls back to downloading (and caching) when the
 /// file isn't cached yet. Returns null on web or on any error.
+/// The video's local copy, or null if there isn't one yet.
+///
+/// Local-only, and deliberately so. This used to fall back to downloading the
+/// whole file and returning it, which meant the first view of a video showed
+/// nothing at all until every byte had arrived — nine seconds for a six-second
+/// clip on a phone connection, when streaming can start playing in about one.
+/// A miss now returns null so the caller streams instead, and [warmVideoCache]
+/// fills the cache for next time.
 Future<File?> getCachedVideoFile(String url) async {
   if (kIsWeb) return null;
   try {
-    // Local-only lookup — no network request, works offline.
     final cached = await videoCacheManager.getFileFromCache(url);
-    if (cached != null) return cached.file;
-    // Not cached yet: download and store for future offline use.
-    return await videoCacheManager.getSingleFile(url);
+    return cached?.file;
   } catch (e) {
-    debugPrint('[media_cache] video cache miss for $url: $e');
+    debugPrint('[media_cache] video cache lookup failed for $url: $e');
     return null;
   }
+}
+
+/// Downloads [url] into the cache in the background, so a later view of the
+/// same video plays instantly from disk.
+///
+/// Costs a second copy of the file on the first view, which is why it is
+/// started only once playback is already underway: the bytes are spent while
+/// somebody is watching rather than while they wait.
+void warmVideoCache(String url) {
+  if (kIsWeb || url.isEmpty || url.startsWith('data:')) return;
+  unawaited(() async {
+    try {
+      await videoCacheManager.getSingleFile(url);
+    } catch (e) {
+      // Nothing to recover: the video already played from the network, and
+      // the only cost is that the next view streams again.
+      debugPrint('[media_cache] warm failed for $url: $e');
+    }
+  }());
 }

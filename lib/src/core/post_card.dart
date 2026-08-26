@@ -275,8 +275,23 @@ class _ProcessingMedia extends StatelessWidget {
 // play/pause, seek bar, time counter, and mute button.
 
 class _FeedVideoPlayer extends StatefulWidget {
-  const _FeedVideoPlayer({required this.url, this.onTap, this.fullscreen = false, this.onDoubleTap});
+  const _FeedVideoPlayer({
+    required this.url,
+    this.thumbUrl = '',
+    this.onTap,
+    this.fullscreen = false,
+    this.onDoubleTap,
+  });
   final String url;
+
+  /// A still from the video, shown while the video itself is still arriving.
+  ///
+  /// The server generates one for every upload, and until now nothing used it:
+  /// a video in the feed was a black rectangle with a spinner until enough of
+  /// a multi-megabyte file had downloaded to initialise the player. The poster
+  /// is a few tens of kilobytes and appears almost at once, so the feed looks
+  /// finished while the video is still on its way.
+  final String thumbUrl;
   final VoidCallback? onTap; // feed: opens fullscreen; null in fullscreen mode
   final bool fullscreen;
   final VoidCallback? onDoubleTap;
@@ -349,13 +364,19 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
         }
         ctrl = VideoPlayerController.file(File(path));
       } else {
-        // Cache the video to disk once so scrolling away and back (or
-        // reopening the same post) replays from local storage instead of
-        // re-streaming from the server every time.
+        // A local copy plays instantly; without one, stream rather than wait
+        // for a download. The cache lookup no longer fetches the file, so a
+        // first view starts playing after a second of buffering instead of
+        // after the whole clip has arrived.
         final cached = await getCachedVideoFile(url);
-        ctrl = cached != null
-            ? VideoPlayerController.file(cached)
-            : VideoPlayerController.networkUrl(Uri.parse(url));
+        if (cached != null) {
+          ctrl = VideoPlayerController.file(cached);
+        } else {
+          ctrl = VideoPlayerController.networkUrl(Uri.parse(url));
+          // Filled in behind the playback that just started, so the next view
+          // of this video is instant.
+          warmVideoCache(url);
+        }
       }
       await ctrl.initialize();
       ctrl.setLooping(true);
@@ -468,8 +489,18 @@ class _FeedVideoPlayerState extends State<_FeedVideoPlayer> {
         onDoubleTap: widget.onDoubleTap,
         child: Container(
           color: Colors.black,
-          child: const Center(
-            child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (widget.thumbUrl.isNotEmpty)
+                _FeedMedia(url: widget.thumbUrl),
+              // Kept over the poster rather than instead of it: the picture
+              // says what the video is, the spinner says it is still coming.
+              const Center(
+                child: CircularProgressIndicator(
+                    color: Colors.white54, strokeWidth: 2),
+              ),
+            ],
           ),
         ),
       );
@@ -684,6 +715,7 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
     if (item.isVideo) {
       return _FeedVideoPlayer(
         url: item.url,
+        thumbUrl: item.thumbUrl,
         onTap: () => widget.onTap(index),
         onDoubleTap: widget.onDoubleTap,
       );
@@ -896,7 +928,10 @@ class _FullscreenMediaViewerState extends State<_FullscreenMediaViewer> {
                   return _ProcessingMedia(progress: item.progress);
                 }
                 if (item.isVideo) {
-                  return _FeedVideoPlayer(url: item.url, fullscreen: true);
+                  return _FeedVideoPlayer(
+                      url: item.url,
+                      thumbUrl: item.thumbUrl,
+                      fullscreen: true);
                 }
                 return _photoPage(
                   _FeedMedia(url: item.url, fit: BoxFit.contain),
