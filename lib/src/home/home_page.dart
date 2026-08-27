@@ -22,6 +22,7 @@ import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../app.dart';
 import '../core/api.dart';
 import '../core/avatar_store.dart';
 import '../core/background_upload.dart';
@@ -221,6 +222,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // simply never fires there.
     _realtimeBadgeSub = _realtime.events.listen((_) => _loadUnreadMessages());
     WidgetsBinding.instance.addObserver(this);
+    // Deep-link: open the author's profile at this post when a neat://post/NNN
+    // or https://neatapp.gr/post/NNN link is tapped outside the app.
+    NeatApp.pendingDeepLinkPost.addListener(_onDeepLinkPost);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && NeatApp.pendingDeepLinkPost.value != null) _onDeepLinkPost();
+    });
   }
 
   @override
@@ -324,6 +331,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _followingScroll.dispose();
     _realtimeBadgeSub?.cancel();
     _realtime.dispose();
+    NeatApp.pendingDeepLinkPost.removeListener(_onDeepLinkPost);
     super.dispose();
   }
 
@@ -1591,6 +1599,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       created: DateTime.now(),
     );
     await _openNotificationTarget(item);
+  }
+
+  /// Handles a deep-link to a post (neat://post/NNN or https://neatapp.gr/post/NNN).
+  /// Fetches the post to find its author, then navigates to that author's
+  /// profile scrolled to the post — the same experience as tapping a post
+  /// notification, no custom overlay involved.
+  void _onDeepLinkPost() {
+    final postId = NeatApp.pendingDeepLinkPost.value;
+    if (postId == null || !mounted) return;
+    NeatApp.pendingDeepLinkPost.value = null; // consume so it doesn't re-fire
+    unawaited(_openDeepLinkedPost(postId));
+  }
+
+  Future<void> _openDeepLinkedPost(int postId) async {
+    try {
+      final res = await http.get(
+        postDetailEndpoint(postId),
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 401) { await widget.onLogout(); return; }
+      if (res.statusCode != 200) return;
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final author = (data['author'] as String? ?? '').trim();
+      if (author.isEmpty) return;
+      _pushProfileRoute(author, postId: postId);
+    } catch (_) {
+      // Silently ignore network errors on deep-link open.
+    }
   }
 
   /// TikTok-style comment-notification flow: land on the exact post (scrolled

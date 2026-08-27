@@ -10,12 +10,15 @@ import '../l10n/app_localizations.dart';
 import 'core/avatar_store.dart';
 import 'auth/auth_gate.dart';
 import 'core/neat_loader.dart';
-import 'core/post_deep_link_page.dart';
 
 class NeatApp extends StatefulWidget {
   const NeatApp({super.key});
 
   static final navigatorKey = GlobalKey<NavigatorState>();
+
+  /// Set by [_handleUri] when a deep-link post arrives.
+  /// [_HomePageState] listens and navigates to the author's profile.
+  static final ValueNotifier<int?> pendingDeepLinkPost = ValueNotifier<int?>(null);
 
   // The app's active language. Defaults to Greek; the user can switch it from
   // Settings. The chosen locale is persisted and restored on launch, and the
@@ -46,7 +49,6 @@ class _NeatAppState extends State<NeatApp> {
   static const _themeKey = 'neat_theme_mode';
   ThemeMode _themeMode = ThemeMode.dark;
   bool _loading = true;
-  int? _deepLinkPostId;
   StreamSubscription<Uri>? _linkSub;
 
   @override
@@ -55,7 +57,8 @@ class _NeatAppState extends State<NeatApp> {
     _restoreTheme();
     if (kIsWeb) {
       final match = RegExp(r'^/post/(\d+)$').firstMatch(Uri.base.path);
-      if (match != null) _deepLinkPostId = int.tryParse(match.group(1)!);
+      final postId = match != null ? int.tryParse(match.group(1)!) : null;
+      if (postId != null) NeatApp.pendingDeepLinkPost.value = postId;
     } else {
       _initAppLinks();
     }
@@ -83,11 +86,11 @@ class _NeatAppState extends State<NeatApp> {
       postId = int.tryParse(uri.pathSegments[1]);
     }
     if (postId == null) return;
-    NeatApp.navigatorKey.currentState?.push(
-      MaterialPageRoute(
-        builder: (_) => PostDeepLinkPage(postId: postId!, themeMode: _themeMode),
-      ),
-    );
+    // Signal the home page to navigate to the author's profile at this post.
+    // Using a ValueNotifier keeps this decoupled from the navigator stack:
+    // HomePageState picks it up once it's mounted and has the session context
+    // needed to build a ProfilePage.
+    NeatApp.pendingDeepLinkPost.value = postId;
   }
 
   @override
@@ -221,9 +224,7 @@ class _NeatAppState extends State<NeatApp> {
             },
             child: child,
           ),
-          home: _deepLinkPostId != null
-              ? PostDeepLinkPage(postId: _deepLinkPostId!, themeMode: _themeMode)
-              : AuthGate(
+          home: AuthGate(
                   themeMode: _themeMode,
                   onThemeModeChanged: _setTheme,
                 ),
