@@ -1624,7 +1624,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final author = (data['author'] as String? ?? '').trim();
       if (author.isEmpty) return;
-      _pushProfileRoute(author, postId: postId);
+      _pushProfileRoute(author, postId: postId, bouncePost: true);
     } catch (_) {
       // Silently ignore network errors on deep-link open.
     }
