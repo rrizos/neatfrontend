@@ -250,13 +250,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     ?.findRenderObject() as RenderBox?;
                 targetOffset += box?.size.height ?? 480.0;
               }
-              // Center the post on screen
-              final targetBox = _postKeys[userPosts[postIdx].id]
-                  ?.currentContext
-                  ?.findRenderObject() as RenderBox?;
-              final targetHeight = targetBox?.size.height ?? 480.0;
+              // Position the top of the post 1/4 down the visible area.
+              // Pure vertical-center overshoots for tall photo/video posts
+              // (their top ends up near the viewport edge). 1/4 feels natural
+              // for all post sizes and leaves room to see what's below.
               final viewportHeight = innerCtrl.position.viewportDimension;
-              targetOffset = targetOffset - viewportHeight / 2 + targetHeight / 2;
+              targetOffset = targetOffset - viewportHeight * 0.25;
               await innerCtrl.animateTo(
                 targetOffset.clamp(0.0, innerCtrl.position.maxScrollExtent),
                 duration: const Duration(milliseconds: 700),
