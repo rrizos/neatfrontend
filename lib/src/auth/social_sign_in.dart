@@ -113,20 +113,48 @@ Future<AuthSession> signInWithApple() async {
   );
 }
 
+/// Google's sign-in manager may only be initialised once per process — the
+/// plugin documents anything else as undefined behaviour — so the future is
+/// kept and reused rather than the call being made per tap.
+Future<void>? _googleInit;
+
+Future<void> _initializeGoogle() {
+  return _googleInit ??= GoogleSignIn.instance
+      .initialize(
+        // The iOS client id identifies this app to Google; the server client id
+        // is what makes Google mint an ID token our backend can verify. Both
+        // come from the Firebase/Google Cloud project — see googleClientId in
+        // api.dart. On Android clientId is null on purpose: there the app is
+        // identified by its package name and signing certificate instead.
+        clientId: googleClientId,
+        serverClientId: googleServerClientId,
+      )
+      // A failed initialise must not be cached as the answer forever, or the
+      // button is dead for the rest of the session over one bad moment.
+      .onError((error, stack) {
+        _googleInit = null;
+        Error.throwWithStackTrace(error!, stack);
+      });
+}
+
+/// How long Google's sheet is given before the attempt is abandoned.
+///
+/// Android hands the whole flow to Credential Manager, which shows the account
+/// list itself and — when the app's signing certificate is not registered in
+/// the Google Cloud project — can sit on that list without ever calling back.
+/// Waiting forever leaves the button spinning with no way out, so the attempt
+/// is cut loose and the user is told what to do. Generous, because a real
+/// sign-in on a slow connection is allowed to take a while.
+const Duration _googleSignInTimeout = Duration(seconds: 90);
+
 Future<AuthSession> signInWithGoogle() async {
-  final signIn = GoogleSignIn.instance;
   try {
-    // The iOS client id identifies this app to Google; the server client id is
-    // what makes Google mint an ID token our backend can verify. Both come
-    // from the Firebase/Google Cloud project — see googleClientId in api.dart.
-    await signIn.initialize(
-      clientId: googleClientId,
-      serverClientId: googleServerClientId,
-    );
+    await _initializeGoogle();
   } catch (e) {
     throw SocialSignInError('$e');
   }
 
+  final signIn = GoogleSignIn.instance;
   if (!signIn.supportsAuthenticate()) {
     throw const SocialSignInError(
       'Google sign-in is not available on this device.',
@@ -135,12 +163,18 @@ Future<AuthSession> signInWithGoogle() async {
 
   final GoogleSignInAccount account;
   try {
-    account = await signIn.authenticate();
+    account = await signIn.authenticate().timeout(
+      _googleSignInTimeout,
+      onTimeout: () => throw const SocialSignInError(
+        'Google did not finish signing in. If this keeps happening, this '
+        'build of the app is not registered with Google — see the SHA-1 '
+        'fingerprints in the Firebase console.',
+      ),
+    );
   } on GoogleSignInException catch (e) {
-    if (e.code == GoogleSignInExceptionCode.canceled) {
-      throw const SocialSignInCancelled();
-    }
-    throw SocialSignInError(e.description ?? e.code.name);
+    throw _googleFailure(e);
+  } on SocialSignInError {
+    rethrow;
   } catch (e) {
     throw SocialSignInError('$e');
   }
@@ -157,6 +191,38 @@ Future<AuthSession> signInWithGoogle() async {
     idToken: idToken,
     fullName: account.displayName ?? '',
   );
+}
+
+/// Turns a plugin exception into something worth showing.
+///
+/// The configuration codes are all the same mistake wearing different hats:
+/// this app, as signed and installed right now, is not a client Google
+/// recognises. On iOS that means the bundle id; on Android it means the
+/// package name paired with the SHA-1 of whichever key signed the build —
+/// debug, upload and Play's own app-signing key are three different keys and
+/// every one of them has to be registered separately.
+Exception _googleFailure(GoogleSignInException e) {
+  switch (e.code) {
+    case GoogleSignInExceptionCode.canceled:
+      return const SocialSignInCancelled();
+    case GoogleSignInExceptionCode.interrupted:
+      return const SocialSignInError(
+        'Google sign-in was interrupted. Please try again.',
+      );
+    case GoogleSignInExceptionCode.clientConfigurationError:
+    case GoogleSignInExceptionCode.providerConfigurationError:
+      return SocialSignInError(
+        'Google sign-in is not configured for this build. '
+        '${e.description ?? e.code.name}',
+      );
+    case GoogleSignInExceptionCode.uiUnavailable:
+      return const SocialSignInError(
+        'Google sign-in could not open. Please try again.',
+      );
+    case GoogleSignInExceptionCode.unknownError:
+    case GoogleSignInExceptionCode.userMismatch:
+      return SocialSignInError(e.description ?? e.code.name);
+  }
 }
 
 Future<AuthSession> _exchange({

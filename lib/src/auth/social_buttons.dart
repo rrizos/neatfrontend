@@ -68,15 +68,22 @@ class _SocialSignInButtonsState extends State<SocialSignInButtons> {
       // Backing out of the provider's sheet is a normal thing to do.
       _setBusy(false);
     } on SocialSignInError catch (e) {
-      if (!mounted) return;
-      _setBusy(false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _fail(e.message);
+    } catch (e) {
+      // Nothing below is expected to throw anything else, but a provider SDK
+      // that fails in a way we did not anticipate must not leave the button
+      // disabled with no explanation — that is indistinguishable from the app
+      // having hung.
+      _fail('$e');
     }
+  }
+
+  void _fail(String message) {
+    if (!mounted) return;
+    _setBusy(false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
   }
 
   @override
