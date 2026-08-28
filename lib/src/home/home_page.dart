@@ -1621,10 +1621,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (!mounted) return;
       if (res.statusCode == 401) { await widget.onLogout(); return; }
       if (res.statusCode != 200) return;
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
-      final author = (data['author'] as String? ?? '').trim();
-      if (author.isEmpty) return;
-      _pushProfileRoute(author, postId: postId, bouncePost: true);
+      final post = FeedPost.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+      if (post.author.isEmpty) return;
+      // ProfilePage's scroll logic measures post heights from widget.posts
+      // (_posts). If the linked post isn't in the current feed (e.g. it's
+      // older than what the city feed loaded), inject it so scroll works —
+      // same technique the notification flow uses for out-of-feed posts.
+      if (!_posts.any((p) => p.id == post.id)) {
+        _posts.insert(0, post);
+      }
+      _pushProfileRoute(post.author, postId: postId, bouncePost: true);
     } catch (_) {
       // Silently ignore network errors on deep-link open.
     }
