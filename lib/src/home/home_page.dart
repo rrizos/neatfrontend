@@ -2793,6 +2793,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                 followerAuthors: _followerAuthors,
                                 buildPostCard: _buildViralPostCard,
                                 onOpenUserProfile: _pushProfileRoute,
+                                onOpenProfileAtPost: (u, id) => _pushProfileRoute(u, postId: id, bouncePost: true),
                                 onHideNavBar: _hideNativeBar,
                                 onShowNavBar: _showNativeBar,
                               )
@@ -3505,6 +3506,7 @@ class _ViralView extends StatefulWidget {
     required this.followerAuthors,
     required this.buildPostCard,
     required this.onOpenUserProfile,
+    required this.onOpenProfileAtPost,
     required this.onHideNavBar,
     required this.onShowNavBar,
   });
@@ -3515,6 +3517,7 @@ class _ViralView extends StatefulWidget {
   final Set<String> followerAuthors;
   final Widget Function(FeedPost, {required bool interactive, bool showCity}) buildPostCard;
   final ValueChanged<String> onOpenUserProfile;
+  final void Function(String username, int postId) onOpenProfileAtPost;
   final VoidCallback onHideNavBar;
   final VoidCallback onShowNavBar;
 
@@ -4508,7 +4511,7 @@ class _ViralViewState extends State<_ViralView> {
     final avatar = avatarProvider(post.author, post.avatarUrl);
     final muted = isLight ? const Color(0xff9ca3af) : const Color(0xff6b7280);
     return InkWell(
-      onTap: () => widget.onOpenUserProfile(post.author),
+      onTap: () => widget.onOpenProfileAtPost(post.author, post.id),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
