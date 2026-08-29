@@ -1181,6 +1181,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     key: const PageStorageKey('posts'),
                     // ignore: deprecated_member_use
                     cacheExtent: _autoNavigating ? 30000.0 : null,
+                    padding: const EdgeInsets.only(bottom: 120),
                     itemCount: userPosts.length,
                     itemBuilder: (_, i) {
                       final post = userPosts[i];
@@ -1214,6 +1215,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
     return ListView.builder(
       key: const PageStorageKey('liked'),
+      padding: const EdgeInsets.only(bottom: 120),
       itemCount: liked.length,
       itemBuilder: (_, i) => _buildPostCard(liked[i], key: ValueKey(liked[i].id)),
     );
@@ -1231,6 +1233,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
     return ListView.builder(
       key: const PageStorageKey('saved'),
+      padding: const EdgeInsets.only(bottom: 120),
       itemCount: saved.length,
       itemBuilder: (_, i) => _buildPostCard(saved[i], key: ValueKey(saved[i].id)),
     );
