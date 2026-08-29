@@ -1223,12 +1223,16 @@ class _CityCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(30),
                       ),
                     ),
-                    child: Text(
-                      isSignUp ? 'Συνδέσου ${city.name}' : 'Παρακολούθησε ${city.name}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        isSignUp ? 'Συνδέσου ${city.name}' : 'Παρακολούθησε ${city.name}',
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
                       ),
                     ),
                   ),
