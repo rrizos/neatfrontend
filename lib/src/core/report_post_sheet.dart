@@ -347,7 +347,7 @@ class _ReasonPage extends StatelessWidget {
                     r.label,
                     style: TextStyle(fontSize: 15, color: textColor),
                   ),
-                  trailing: Icon(Icons.chevron_right_rounded, color: subtitleColor, size: 22),
+                  trailing: r.subReasons.isEmpty ? null : Icon(Icons.chevron_right_rounded, color: subtitleColor, size: 22),
                   onTap: () => onTap(r),
                 );
               },
