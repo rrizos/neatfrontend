@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:gal/gal.dart';
 import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -1535,6 +1536,11 @@ class _ConversationPageState extends State<ConversationPage>
   // found here, so a slow PATCH can't be clobbered by a concurrent poll.
   final _pendingEdits = <int, MessageItem>{};
   StreamSubscription<RealtimeEvent>? _realtimeSub;
+  // Scroll-to-bottom button — shown when scrolled more than 200 px up from the
+  // newest message. Incoming messages from the other person increment the badge
+  // instead of auto-scrolling.
+  bool _showScrollDown   = false;
+  int  _unreadScrollCount = 0;
 
   // Slide-to-reveal timestamps
   double _slideOffset = 0;
@@ -1682,6 +1688,13 @@ class _ConversationPageState extends State<ConversationPage>
               title: Text(AppLocalizations.of(context).reply, style: TextStyle(color: fgClr)),
               onTap: () { Navigator.of(sheetCtx).pop(); _setReplyTo(msg); },
             ),
+            if (!msg.isTemporaryPhoto &&
+                (msg.mediaUrl.isNotEmpty || _imagePrefixOf(msg.text) != null))
+              ListTile(
+                leading: Icon(Icons.download_rounded, color: fgClr),
+                title: Text('Αποθήκευση', style: TextStyle(color: fgClr)),
+                onTap: () { Navigator.of(sheetCtx).pop(); _saveMessageImage(msg); },
+              ),
             if (_copyableText(msg) != null)
               ListTile(
                 leading: Icon(Icons.copy_rounded, color: fgClr),
@@ -2012,8 +2025,9 @@ class _ConversationPageState extends State<ConversationPage>
         });
         _saveCache(_messages);
         if (e.type == 'message.new' && msg.sender != widget.currentUsername) {
-          _scrollToBottom();
           widget.realtime?.send({'action': 'mark_read', 'conversation_id': widget.conversationId});
+          // Don't auto-scroll — show the badge on the scroll-down button instead.
+          if (_showScrollDown) setState(() => _unreadScrollCount++);
         }
         return;
       case 'message.deleted':
@@ -2028,7 +2042,6 @@ class _ConversationPageState extends State<ConversationPage>
         final typing = payload['typing'] == true;
         if (typing != _otherTyping) {
           setState(() => _otherTyping = typing);
-          if (typing) _scrollToBottom();
         }
         return;
       case 'read_receipt':
@@ -2114,17 +2127,23 @@ class _ConversationPageState extends State<ConversationPage>
           .toList();
       final serverIds  = msgs.map((m) => m.id).toSet();
       final serverKeys = msgs.map((m) => '${m.sender}\x00${m.text}').toSet();
-      // Only ever preserve *unconfirmed optimistic* sends (negative ids) here.
-      // A real (server-assigned) id missing from the server's response means
-      // it was deleted server-side, not that it's "pending" — treating it as
-      // local-only would make deleted messages reappear and never go away.
+      // Unconfirmed optimistic sends (negative ids).
       final localOnly  = _messages
           .where((m) => m.id < 0)
           .where((m) => !serverIds.contains(m.id))
           .where((m) => !serverKeys.contains('${m.sender}\x00${m.text}'))
           .where((m) => DateTime.now().difference(m.created) < const Duration(seconds: 20))
           .toList();
-      final merged = [...msgs, ...localOnly]..sort((a, b) => a.created.compareTo(b.created));
+      // Older messages the user loaded by scrolling up (via _loadOlder). The
+      // server's latest page doesn't include these — dropping them causes the
+      // list to shrink and the scroll position to jump while the user is
+      // reading history. Keep them unless the server explicitly returned a
+      // delete event for that id (which would show up as absent from serverIds
+      // AND absent from _messages at that id on the next deleteEvent handling).
+      final olderLoaded = _messages
+          .where((m) => m.id > 0 && !serverIds.contains(m.id))
+          .toList();
+      final merged = [...olderLoaded, ...msgs, ...localOnly]..sort((a, b) => a.created.compareTo(b.created));
       // If a PATCH is still in-flight, don't let the stale server text overwrite
       // the optimistic edit — substitute the local version for those messages.
       if (_pendingEdits.isNotEmpty) {
@@ -2133,8 +2152,6 @@ class _ConversationPageState extends State<ConversationPage>
           if (pending != null) merged[i] = pending;
         }
       }
-      final hadNewFromOther = merged.length > _messages.length &&
-          merged.last.sender != widget.currentUsername;
       final lastActive  = DateTime.tryParse(conv?['otherLastActive']?.toString() ?? '')?.toLocal();
       final otherReadAt = DateTime.tryParse(conv?['otherLastReadAt']?.toString() ?? '')?.toLocal();
       setState(() {
@@ -2146,7 +2163,6 @@ class _ConversationPageState extends State<ConversationPage>
       _saveCache(merged);
       _prefetchMedia(merged);
       _checkSharedPosts(merged);
-      if (hadNewFromOther) _scrollToBottom();
     }
 
     // ── typing ────────────────────────────────────────────────────────
@@ -2155,7 +2171,6 @@ class _ConversationPageState extends State<ConversationPage>
       final isTyping = (jsonDecode(typRes.body) as Map<String, dynamic>)['otherIsTyping'] == true;
       if (isTyping != _otherTyping) {
         setState(() => _otherTyping = isTyping);
-        if (isTyping) _scrollToBottom();
       }
     }
   }
@@ -2169,7 +2184,11 @@ class _ConversationPageState extends State<ConversationPage>
   void _scrollToBottom({bool jump = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
-      // reverse: true means pixels=0 is the visual bottom (newest messages).
+      // reverse:true — pixels=0 is the visual bottom (newest messages).
+      // Don't auto-scroll if the user has scrolled up to read older messages
+      // (more than 400px away from the bottom), unless this is a hard jump
+      // (e.g. first load or user sent a message).
+      if (!jump && _scroll.position.pixels > 400) return;
       if (jump) {
         _scroll.jumpTo(0);
       } else {
@@ -2238,7 +2257,7 @@ class _ConversationPageState extends State<ConversationPage>
       _saveCache(merged);
       _prefetchMedia(merged);
       _checkSharedPosts(merged);
-      _scrollToBottom(jump: initial);
+      if (initial) _scrollToBottom(jump: true);
     } catch (_) {
       // keep whatever messages are already loaded rather than blanking the screen
       if (mounted) setState(() { _loading = false; _isOffline = true; });
@@ -2287,10 +2306,21 @@ class _ConversationPageState extends State<ConversationPage>
   /// Pulls the next page in as the oldest message on screen comes into view,
   /// so scrolling back through a conversation never stops at a wall.
   void _onScroll() {
-    if (!_scroll.hasClients || !_hasOlder || _loadingOlder) return;
+    if (!_scroll.hasClients) return;
     final position = _scroll.position;
+    // Show/hide scroll-down button (reverse:true — pixels=0 is newest/bottom).
+    final scrolledUp = position.pixels > 200;
+    if (scrolledUp != _showScrollDown || (!scrolledUp && _unreadScrollCount > 0)) {
+      setState(() {
+        _showScrollDown = scrolledUp;
+        if (!scrolledUp) _unreadScrollCount = 0;
+      });
+    }
+    // Load older messages when approaching the top.
     // reverse: true — maxScrollExtent is the far end, which is the top.
-    if (position.pixels > position.maxScrollExtent - 600) _loadOlder();
+    if (_hasOlder && !_loadingOlder && position.pixels > position.maxScrollExtent - 600) {
+      _loadOlder();
+    }
   }
 
   Future<void> _sendRaw(
@@ -2496,6 +2526,41 @@ class _ConversationPageState extends State<ConversationPage>
         mediaKind: 'voice',
         mediaSuffix: '|$durationSecs',
       );
+
+  Future<void> _saveMessageImage(MessageItem msg) async {
+    try {
+      final hasAccess = await Gal.hasAccess(toAlbum: false);
+      if (!hasAccess) {
+        final granted = await Gal.requestAccess(toAlbum: false);
+        if (!granted) return;
+      }
+      if (msg.mediaUrl.isNotEmpty) {
+        final absUrl = msg.mediaUrl.startsWith('/')
+            ? '${apiBaseUrl}${msg.mediaUrl}'
+            : msg.mediaUrl;
+        final res = await http.get(Uri.parse(absUrl));
+        await Gal.putImageBytes(res.bodyBytes);
+      } else {
+        final prefix = _imagePrefixOf(msg.text);
+        if (prefix != null) {
+          final b64 = msg.text.substring(prefix.length);
+          final bytes = base64Decode(b64.contains(',') ? b64.split(',').last : b64);
+          await Gal.putImageBytes(bytes);
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Αποθηκεύτηκε'), duration: Duration(seconds: 2)),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Αποτυχία αποθήκευσης'), duration: Duration(seconds: 2)),
+        );
+      }
+    }
+  }
 
   void _setReplyTo(MessageItem msg) => setState(() => _replyTo = msg);
   void _clearReply() => setState(() => _replyTo = null);
@@ -2826,8 +2891,10 @@ class _ConversationPageState extends State<ConversationPage>
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
+          Column(
+            children: [
           Expanded(
             child: Listener(
               onPointerDown: (e) {
@@ -3014,8 +3081,62 @@ class _ConversationPageState extends State<ConversationPage>
               editingMessage: _editingMessage,
               onCancelEdit: _cancelEdit,
             ),
-        ],
-      ),
+          ],
+        ), // Column
+          // ── Scroll-to-bottom button (Instagram-style) ──────────────────────
+          if (_showScrollDown)
+            Positioned(
+              right: 14,
+              bottom: 104,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() { _showScrollDown = false; _unreadScrollCount = 0; });
+                  _scrollToBottom(jump: true);
+                },
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.topRight,
+                  children: [
+                    Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(
+                        color: isLight ? Colors.white : const Color(0xff2c2c2e),
+                        shape: BoxShape.circle,
+                        boxShadow: const [
+                          BoxShadow(color: Color(0x44000000), blurRadius: 8, offset: Offset(0, 2)),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: isLight ? Colors.black87 : Colors.white,
+                        size: 26,
+                      ),
+                    ),
+                    if (_unreadScrollCount > 0)
+                      Positioned(
+                        top: -4, right: -4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _kBlue,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            _unreadScrollCount > 9 ? '9+' : '$_unreadScrollCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+        ], // Stack children
+      ), // Stack
         ), // Scaffold
       ), // GestureDetector
     ); // AnimatedBuilder

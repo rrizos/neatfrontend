@@ -70,6 +70,7 @@ dependencies:
   # server verifies against the provider's own keys — see accounts/social_auth.py.
   sign_in_with_apple: ^7.0.1
   google_sign_in: ^7.2.0
+  gal: ^2.3.0
 
 dev_dependencies:
   flutter_test:

@@ -1446,6 +1446,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           onPostTapWithHighlight: (post, actor) => _openComments(post, highlightActor: actor),
           onOpenCommentsExact: (post, commentId, actor) =>
               _openComments(post, highlightCommentId: commentId, highlightActor: actor),
+          onOpenComments: (post, {bool commentingEnabled = true}) =>
+              _openComments(post, commentingEnabled: commentingEnabled),
           initialPostId: postId,
           bouncePost: bouncePost,
           autoOpenCommentActor: highlightCommentActor,
@@ -1736,7 +1738,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           otherLastActive: conv.otherLastActive,
           onLogout: widget.onLogout,
           onOpenPost: (author, postId) {
-            _pushProfileRoute(author, postId: postId);
+            _openDeepLinkedPost(postId);
           },
           onOpenUserProfile: _pushProfileRoute,
           realtime: _realtime,
@@ -1752,7 +1754,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  void _openComments(FeedPost post, {String? highlightActor, int? highlightCommentId}) {
+  void _openComments(FeedPost post, {String? highlightActor, int? highlightCommentId, bool commentingEnabled = true}) {
     _hideNativeBar();
     final isLight = Theme.of(context).brightness == Brightness.light;
     showModalBottomSheet(
@@ -1766,7 +1768,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         session: widget.session,
         onRefresh: () {},
         onOpenUserProfile: _pushProfileRoute,
-        likingEnabled: _activeCity == null,
+        // liking/commenting disabled when viewing other-city content OR when
+        // the caller (e.g. other-city profile) explicitly says so.
+        likingEnabled: commentingEnabled && _activeCity == null,
         highlightActor: highlightActor,
         highlightCommentId: highlightCommentId,
         onHideNavBar: _hideNativeBar,
@@ -2735,7 +2739,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       suggestedUsers: _followingProfiles,
                       onLogout: widget.onLogout,
                       onOpenPost: (author, postId) {
-                        _pushProfileRoute(author, postId: postId);
+                        _openDeepLinkedPost(postId);
                       },
                       onOpenUserProfile: _pushProfileRoute,
                       realtime: _realtime,
@@ -5832,7 +5836,45 @@ class _CommentSheetState extends State<_CommentSheet> {
     Future.microtask(() => _inputFocus.requestFocus());
   }
 
+  /// Returns true if the user is OK to proceed (no existing attachment, or
+  /// they confirmed they want to replace it).
+  Future<bool> _confirmReplace() async {
+    if (_imageUrl.isEmpty && _gifUrl.isEmpty) return true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final isLight = Theme.of(ctx).brightness == Brightness.light;
+        return AlertDialog(
+          backgroundColor: isLight ? Colors.white : const Color(0xff1c1c1e),
+          title: Text(
+            'Αντικατάσταση;',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: isLight ? Colors.black : Colors.white,
+            ),
+          ),
+          content: Text(
+            'Η νέα επιλογή θα αντικαταστήσει αυτό που έχεις ήδη επισυνάψει.',
+            style: TextStyle(color: isLight ? const Color(0xff555555) : const Color(0xffaaaaaa)),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Ακύρωση'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Αντικατάσταση', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed == true;
+  }
+
   Future<void> _pickImage() async {
+    if (!await _confirmReplace()) return;
     setState(() => _picking = true);
     try {
       final picked = await _picker.pickImage(
@@ -5857,6 +5899,7 @@ class _CommentSheetState extends State<_CommentSheet> {
   }
 
   Future<void> _pickGif() async {
+    if (!await _confirmReplace()) return;
     final completer = Completer<String?>();
     final listener = _GifPickerListener(
       onSelect: (GiphyMedia media) {
@@ -6159,16 +6202,16 @@ class _CommentSheetState extends State<_CommentSheet> {
                         TextSpan(
                           text: '  ▶  ',
                           style: TextStyle(
-                            color: isLight ? const Color(0xffa0a0a8) : const Color(0xff666672),
-                            fontSize: isReply ? 11 : 12,
+                            color: isLight ? const Color(0xffa0a0a8) : const Color(0xff888888),
+                            fontSize: isReply ? 10 : 11,
                             height: 1.4,
                           ),
                         ),
                         TextSpan(
                           text: c.replyToUsername,
                           style: TextStyle(
-                            color: isLight ? const Color(0xff536471) : const Color(0xff8899a6),
-                            fontWeight: FontWeight.w600,
+                            color: isLight ? const Color(0xff555555) : const Color(0xffaaaaaa),
+                            fontWeight: FontWeight.w400,
                             fontSize: isReply ? 13.5 : 15,
                             height: 1.4,
                           ),
@@ -6411,25 +6454,76 @@ class _CommentSheetState extends State<_CommentSheet> {
               if (widget.likingEnabled) ...[
               Divider(height: 1, color: isLight ? const Color(0xffd9dee6) : const Color(0xff2a2a2a)),
               if (previewBytes != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: SizedBox(
-                    height: 72,
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: SizedBox(
+                      width: 80,
+                      height: 80,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.memory(
+                              previewBytes,
+                              width: 80,
+                              height: 80,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          Positioned(
+                            top: -8,
+                            right: -8,
+                            child: GestureDetector(
+                              onTap: () => setState(() { _imageUrl = ''; _imageBytes = null; }),
+                              child: Container(
+                                width: 22,
+                                height: 22,
+                                decoration: const BoxDecoration(
+                                  color: Colors.black,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close, size: 14, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              if (hasGif)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: SizedBox(
+                      width: 80,
+                      height: 80,
                     child: Stack(
+                      clipBehavior: Clip.none,
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(10),
-                          child: Image.memory(previewBytes, height: 72, fit: BoxFit.cover),
+                          child: Image.network(
+                            _gifUrl,
+                            width: 80,
+                            height: 80,
+                            fit: BoxFit.cover,
+                          ),
                         ),
                         Positioned(
-                          top: 4,
-                          right: 4,
+                          top: -8,
+                          right: -8,
                           child: GestureDetector(
-                            onTap: () => setState(() { _imageUrl = ''; _imageBytes = null; }),
+                            onTap: () => setState(() => _gifUrl = ''),
                             child: Container(
-                              padding: const EdgeInsets.all(2),
+                              width: 22,
+                              height: 22,
                               decoration: const BoxDecoration(
-                                color: Colors.black54,
+                                color: Colors.black,
                                 shape: BoxShape.circle,
                               ),
                               child: const Icon(Icons.close, size: 14, color: Colors.white),
@@ -6440,35 +6534,6 @@ class _CommentSheetState extends State<_CommentSheet> {
                     ),
                   ),
                 ),
-              if (hasGif)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: SizedBox(
-                    height: 72,
-                    child: Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: Image.network(_gifUrl, height: 72, fit: BoxFit.cover),
-                        ),
-                        Positioned(
-                          top: 4,
-                          right: 4,
-                          child: GestureDetector(
-                            onTap: () => setState(() => _gifUrl = ''),
-                            child: Container(
-                              padding: const EdgeInsets.all(2),
-                              decoration: const BoxDecoration(
-                                color: Colors.black54,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.close, size: 14, color: Colors.white),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               if (_replyingTo != null)
                 Padding(

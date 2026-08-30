@@ -114,6 +114,7 @@ class ProfilePage extends StatefulWidget {
     this.autoOpenCommentPost,
     this.onPostTapWithHighlight,
     this.onOpenCommentsExact,
+    this.onOpenComments,
     this.realtime,
   });
   final String username;
@@ -137,6 +138,9 @@ class ProfilePage extends StatefulWidget {
   final int? autoOpenCommentId;
   final FeedPost? autoOpenCommentPost;
   final void Function(FeedPost post, int? commentId, String? actor)? onOpenCommentsExact;
+  /// Called instead of [onPostTap] when the caller needs to pass extra context
+  /// (e.g. `commentingEnabled: false` for other-city profiles).
+  final void Function(FeedPost post, {bool commentingEnabled})? onOpenComments;
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
   final bool followEnabled;
@@ -170,6 +174,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   final Set<String> _followingAuthors = {};
   List<FeedPost>? _otherCityPosts;
   bool _otherCityPostsLoading = false;
+  // True when a same-city-mode profile turns out to belong to another city
+  // (e.g. opened from a DM shared post). Triggers other-city post fetch and
+  // disables follow/DM/like even though widget.followEnabled may be true.
+  bool _forceOtherCity = false;
   final Set<int> _deletedPostIds = {};
 
   @override
@@ -219,8 +227,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       if (_tabController.index == 2) _loadSavedPosts();
       // If server didn't supply followsYou, check followers list as fallback
       if (!(_profile?.followsYou ?? false)) _checkFollowsYou();
-      // For other-city profiles, fetch their posts from the API
-      if (!widget.followEnabled) _loadOtherCityPosts();
+      // For other-city profiles, fetch their posts from the API.
+      // Also handle the case where followEnabled=true but the profile turns out
+      // to be from a different city (e.g. opened via a DM shared post).
+      final isOtherCity = _profile!.city.isNotEmpty &&
+          widget.currentUser.city.isNotEmpty &&
+          _profile!.city != widget.currentUser.city;
+      if (isOtherCity && !_forceOtherCity) {
+        setState(() => _forceOtherCity = true);
+      }
+      if (!widget.followEnabled || isOtherCity) _loadOtherCityPosts();
       if (widget.initialPostId != null) {
         final bool wantsComments = widget.autoOpenCommentActor != null ||
             widget.autoOpenCommentId != null ||
@@ -667,7 +683,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Widget _buildPostCard(FeedPost post, {Key? key}) {
-    final interactive = widget.followEnabled;
+    final interactive = widget.followEnabled && !_forceOtherCity;
     return FeedPostCard(
       key: key,
       post: post,
@@ -695,7 +711,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       },
       onVote: interactive ? (optionId) => _voteOnPoll(post, optionId) : null,
       onMore: () => _openMoreSheet(post),
-      onComment: () => widget.onPostTap(post),
+      onComment: () {
+        // When we know commenting should be disabled (other-city profile),
+        // pass that flag; otherwise fall back to the plain onPostTap.
+        if (widget.onOpenComments != null) {
+          widget.onOpenComments!(post, commentingEnabled: interactive);
+        } else {
+          widget.onPostTap(post);
+        }
+      },
       onProfileTap: () => widget.onOpenUserProfile(post.author),
       onOpenUserProfile: widget.onOpenUserProfile,
       onHideNavBar: widget.onHideNavBar,
@@ -816,7 +840,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           username: profile.username,
           isSelf: isSelf,
           initialFollowing: _followingOverride ?? profile.isFollowing,
-          onToggleFollow: isSelf ? null : _toggleFollow,
+          onToggleFollow: (isSelf || _forceOtherCity || !widget.followEnabled) ? null : _toggleFollow,
         ),
         transitionsBuilder: (_, anim, a2, child) =>
             FadeTransition(opacity: anim, child: child),
@@ -897,9 +921,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       return const Scaffold(body: NeatLoader());
     }
     final isOwn = profile.username == widget.currentUser.username;
+    // followEnabled may be true even for an other-city profile (DM shared post).
+    // _forceOtherCity overrides it after we load the profile and detect the city.
+    final effectiveFollowEnabled = widget.followEnabled && !_forceOtherCity;
     final feedPosts = widget.posts.where((p) => p.author == profile.username && !_deletedPostIds.contains(p.id)).toList();
     final fetched = _otherCityPosts?.where((p) => !_deletedPostIds.contains(p.id)).toList();
-    final userPosts = widget.followEnabled
+    final userPosts = effectiveFollowEnabled
         ? feedPosts
         : ((fetched != null && fetched.isNotEmpty) ? fetched : feedPosts);
     return AbsorbPointer(
@@ -1118,7 +1145,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                     Expanded(
                                       child: (_followingOverride ?? profile.isFollowing)
                                           ? OutlinedButton(
-                                              onPressed: widget.followEnabled ? _toggleFollow : null,
+                                              onPressed: effectiveFollowEnabled ? _toggleFollow : null,
                                               style: OutlinedButton.styleFrom(
                                                 side: BorderSide(color: isLight ? Colors.black : Colors.white),
                                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1126,9 +1153,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                                               ),
                                               child: Text(AppLocalizations.of(context).following, style: const TextStyle(fontWeight: FontWeight.w600)),
                                             )
-                                          : FilledButton(onPressed: widget.followEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? AppLocalizations.of(context).followBack : AppLocalizations.of(context).follow)),
+                                          : FilledButton(onPressed: effectiveFollowEnabled ? _toggleFollow : null, child: Text(profile.followsYou ? AppLocalizations.of(context).followBack : AppLocalizations.of(context).follow)),
                                     ),
-                                    if (widget.followEnabled) ...[
+                                    if (effectiveFollowEnabled) ...[
                                     const SizedBox(width: 12),
                                     SizedBox(
                                       height: 42,
@@ -1173,7 +1200,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           controller: _tabController,
           children: [
             // Tab 0: Posts
-            (!widget.followEnabled && _otherCityPostsLoading)
+            (!effectiveFollowEnabled && _otherCityPostsLoading && feedPosts.isEmpty)
                 ? const Center(child: CircularProgressIndicator())
                 : userPosts.isEmpty
                 ? CustomScrollView(slivers: [SliverFillRemaining(hasScrollBody: false, child: Center(child: Text(AppLocalizations.of(context).noPostsYet, style: const TextStyle(color: Color(0xffb3b3b3)))))])
@@ -1342,8 +1369,8 @@ class _AvatarFullscreenPageState extends State<_AvatarFullscreenPage> {
                     ),
                   ),
                   const Spacer(),
-                  // Follow button (other users only)
-                  if (!widget.isSelf)
+                  // Follow button (other users in same city only)
+                  if (!widget.isSelf && widget.onToggleFollow != null)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
                       child: GestureDetector(

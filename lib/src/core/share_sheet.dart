@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:gal/gal.dart';
+import 'package:path_provider/path_provider.dart';
 import 'http_client.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -84,6 +87,7 @@ class _ShareSheetState extends State<_ShareSheet> {
   Timer? _debounce;
   Timer? _linkCopiedTimer;
   bool _linkCopied = false;
+  bool _mediaSaved = false;
 
   @override
   void initState() {
@@ -313,6 +317,46 @@ class _ShareSheetState extends State<_ShareSheet> {
     });
   }
 
+  Future<void> _saveMedia() async {
+    if (kIsWeb) return;
+    final post = widget.post;
+    // Build the list of URLs+types to save. Prefer media array; fall back to
+    // the legacy imageUrl so older posts still work.
+    final List<({String url, bool isVideo})> items;
+    if (post.media.isNotEmpty) {
+      items = post.media.map((m) => (url: m.url, isVideo: m.isVideo)).toList();
+    } else if (post.imageUrl.isNotEmpty) {
+      items = [(url: post.imageUrl, isVideo: false)];
+    } else {
+      return; // text-only post — nothing to save
+    }
+
+    try {
+      final hasAccess = await Gal.hasAccess(toAlbum: false);
+      if (!hasAccess) {
+        final granted = await Gal.requestAccess(toAlbum: false);
+        if (!granted) return;
+      }
+      for (final item in items) {
+        final absUrl = item.url.startsWith('/') ? '$apiBaseUrl${item.url}' : item.url;
+        if (item.isVideo) {
+          final res  = await http.get(Uri.parse(absUrl));
+          final tmp  = await getTemporaryDirectory();
+          final file = File('${tmp.path}/neat_vid_${DateTime.now().millisecondsSinceEpoch}.mp4');
+          await file.writeAsBytes(res.bodyBytes);
+          await Gal.putVideo(file.path);
+          await file.delete();
+        } else {
+          final res = await http.get(Uri.parse(absUrl));
+          await Gal.putImageBytes(res.bodyBytes);
+        }
+      }
+      if (mounted) setState(() => _mediaSaved = true);
+    } catch (_) {
+      // silent fail — user can try again
+    }
+  }
+
   static const _shareChannel = MethodChannel('com.neat/share');
 
   Future<void> _nativeShare() async {
@@ -531,6 +575,16 @@ class _ShareSheetState extends State<_ShareSheet> {
                     const SizedBox(width: 16),
                     _ExtBtn(label: 'Facebook', onTap: () async { await _launch('https://www.facebook.com/sharer/sharer.php?u=${Uri.encodeComponent(_shareLink)}'); widget.onShared?.call(); }, child: const _FbIcon()),
                     const SizedBox(width: 16),
+                    if (!kIsWeb && (widget.post.media.isNotEmpty || widget.post.imageUrl.isNotEmpty)) ...[
+                      _ExtBtn(
+                        label: _mediaSaved ? 'Αποθηκεύτηκε' : 'Αποθήκευση',
+                        onTap: _mediaSaved ? null : _saveMedia,
+                        child: _mediaSaved
+                            ? _CheckIcon(isLight: isLight)
+                            : _SaveIcon(isLight: isLight),
+                      ),
+                      const SizedBox(width: 16),
+                    ],
                     _ExtBtn(label: l10n.copyLink, onTap: _linkCopied ? null : _copyLink, child: _linkCopied ? _CheckIcon(isLight: isLight) : _LinkIcon(isLight: isLight)),
                   ],
                 ),
@@ -784,6 +838,22 @@ class _CheckIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Icon(Icons.check_rounded, color: isLight ? Colors.black : Colors.white, size: 28),
+    );
+  }
+}
+
+class _SaveIcon extends StatelessWidget {
+  const _SaveIcon({required this.isLight});
+  final bool isLight;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 56, height: 56,
+      decoration: BoxDecoration(
+        color: isLight ? const Color(0xffe5e7eb) : const Color(0xff2a2a2a),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Icon(Icons.download_rounded, color: isLight ? Colors.black : Colors.white, size: 28),
     );
   }
 }
