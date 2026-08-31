@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:gal/gal.dart';
 import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -1688,13 +1687,6 @@ class _ConversationPageState extends State<ConversationPage>
               title: Text(AppLocalizations.of(context).reply, style: TextStyle(color: fgClr)),
               onTap: () { Navigator.of(sheetCtx).pop(); _setReplyTo(msg); },
             ),
-            if (!msg.isTemporaryPhoto &&
-                (msg.mediaUrl.isNotEmpty || _imagePrefixOf(msg.text) != null))
-              ListTile(
-                leading: Icon(Icons.download_rounded, color: fgClr),
-                title: Text('Αποθήκευση', style: TextStyle(color: fgClr)),
-                onTap: () { Navigator.of(sheetCtx).pop(); _saveMessageImage(msg); },
-              ),
             if (_copyableText(msg) != null)
               ListTile(
                 leading: Icon(Icons.copy_rounded, color: fgClr),
@@ -2526,41 +2518,6 @@ class _ConversationPageState extends State<ConversationPage>
         mediaKind: 'voice',
         mediaSuffix: '|$durationSecs',
       );
-
-  Future<void> _saveMessageImage(MessageItem msg) async {
-    try {
-      final hasAccess = await Gal.hasAccess(toAlbum: false);
-      if (!hasAccess) {
-        final granted = await Gal.requestAccess(toAlbum: false);
-        if (!granted) return;
-      }
-      if (msg.mediaUrl.isNotEmpty) {
-        final absUrl = msg.mediaUrl.startsWith('/')
-            ? '${apiBaseUrl}${msg.mediaUrl}'
-            : msg.mediaUrl;
-        final res = await http.get(Uri.parse(absUrl));
-        await Gal.putImageBytes(res.bodyBytes);
-      } else {
-        final prefix = _imagePrefixOf(msg.text);
-        if (prefix != null) {
-          final b64 = msg.text.substring(prefix.length);
-          final bytes = base64Decode(b64.contains(',') ? b64.split(',').last : b64);
-          await Gal.putImageBytes(bytes);
-        }
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Αποθηκεύτηκε'), duration: Duration(seconds: 2)),
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Αποτυχία αποθήκευσης'), duration: Duration(seconds: 2)),
-        );
-      }
-    }
-  }
 
   void _setReplyTo(MessageItem msg) => setState(() => _replyTo = msg);
   void _clearReply() => setState(() => _replyTo = null);
@@ -4087,7 +4044,27 @@ class _ComposerState extends State<_Composer> {
     }
   }
 
+  /// The picker is a process-wide singleton that hands a selection to *every*
+  /// listener registered on it, so a listener that outlives its own attempt
+  /// keeps sending. Both of these exist to make sure exactly one is registered
+  /// at a time: the flag stops a second tap opening a second attempt, and the
+  /// field is the handle needed to clear a listener the SDK never called back
+  /// on — the dialog can be dismissed without either callback firing, and that
+  /// one would otherwise sit there and fire alongside the next attempt's.
+  /// Either path ended with the same GIF arriving in the conversation twice.
+  /// Static because the dialog is: a listener left behind by a chat screen
+  /// that was closed mid-pick would otherwise be unreachable from the next
+  /// screen, and still registered.
+  bool _gifPickerOpen = false;
+  static _GiphyListener? _giphyListener;
+
   Future<void> _pickGif() async {
+    if (_gifPickerOpen) return;
+    _gifPickerOpen = true;
+
+    final stale = _giphyListener;
+    if (stale != null) GiphyDialog.instance.removeListener(stale);
+
     final completer = Completer<String?>();
     final listener = _GiphyListener(
       onSelect: (GiphyMedia media) {
@@ -4100,6 +4077,7 @@ class _ComposerState extends State<_Composer> {
         if (!completer.isCompleted) completer.complete(null);
       },
     );
+    _giphyListener = listener;
     GiphyDialog.instance.addListener(listener);
     GiphyDialog.instance.configure(
       settings: GiphySettings(
@@ -4111,15 +4089,22 @@ class _ComposerState extends State<_Composer> {
       ),
     );
     GiphyDialog.instance.show();
-    final url = await completer.future;
-    GiphyDialog.instance.removeListener(listener);
-    if (!mounted || url == null) return;
+
     try {
+      final url = await completer.future;
+      if (!mounted || url == null) return;
       final res = await http.get(Uri.parse(url));
       if (res.statusCode == 200) {
         await widget.onSendImage(res.bodyBytes, _PhotoMode.keep);
       }
-    } catch (_) {}
+    } catch (_) {
+      // A GIF that would not download is not worth interrupting the thread
+      // for; the picker simply closes with nothing sent.
+    } finally {
+      GiphyDialog.instance.removeListener(listener);
+      if (identical(_giphyListener, listener)) _giphyListener = null;
+      _gifPickerOpen = false;
+    }
   }
 
   // ── Voice recording ───────────────────────────────────────────────────────

@@ -81,8 +81,6 @@
 	<string>Neat uses your microphone to record voice messages.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Neat needs access to your photo library to send photos.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Neat needs access to save images to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
