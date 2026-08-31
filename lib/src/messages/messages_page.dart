@@ -49,6 +49,10 @@ const _kDivLgt    = Color(0xffe0e0e0);
 
 const _kPostPrefix        = '__neat_post__:';
 const _kImagePrefix       = '__neat_image__:';
+// A Giphy GIF sent as a direct URL — no bytes uploaded, no backend re-encoding.
+// Carrying the URL in the message text preserves animation; uploading the bytes
+// would cause the server to JPEG-convert them and strip every frame but the first.
+const _kGifUrlPrefix      = '__neat_gif_url__:';
 
 /// How long a sent photo lives, in the recipient's hands.
 ///
@@ -247,6 +251,13 @@ Uint8List? _parseImage(String t) {
   if (prefix == null) return null;
   try { return base64Decode(t.substring(prefix.length)); }
   catch (_) { return null; }
+}
+
+/// Returns the Giphy URL if this message carries a GIF sent via [_kGifUrlPrefix].
+String? _parseGifUrl(String t) {
+  if (!t.startsWith(_kGifUrlPrefix)) return null;
+  final url = t.substring(_kGifUrlPrefix.length);
+  return url.isNotEmpty ? url : null;
 }
 
 ({Uint8List bytes, int secs})? _parseVoice(String t) {
@@ -729,10 +740,11 @@ class _InboxRow extends StatelessWidget {
     final msg = summary.lastMessage;
     final me  = summary.lastSender == currentUsername;
     if (msg.isEmpty) return 'Πάτησε για να ξεκινήσεις συνομιλία';
-    if (msg.startsWith(_kPostPrefix))  return me ? 'Έστειλες μια δημοσίευση'    : 'Έστειλε μια δημοσίευση';
-    if (_imagePrefixOf(msg) != null)   return me ? 'Έστειλες μια φωτογραφία'    : 'Έστειλε μια φωτογραφία';
-    if (msg.startsWith(_kVoicePrefix)) return me ? 'Έστειλες ένα ηχητικό μήνυμα' : 'Έστειλε ένα ηχητικό μήνυμα';
-    if (msg.startsWith(_kReplyPrefix)) return me ? 'Απάντησες'                  : 'Απάντησε';
+    if (msg.startsWith(_kPostPrefix))   return me ? 'Έστειλες μια δημοσίευση'    : 'Έστειλε μια δημοσίευση';
+    if (_imagePrefixOf(msg) != null)    return me ? 'Έστειλες μια φωτογραφία'    : 'Έστειλε μια φωτογραφία';
+    if (msg.startsWith(_kGifUrlPrefix)) return me ? 'Έστειλες ένα GIF'           : 'Έστειλε ένα GIF';
+    if (msg.startsWith(_kVoicePrefix))  return me ? 'Έστειλες ένα ηχητικό μήνυμα' : 'Έστειλε ένα ηχητικό μήνυμα';
+    if (msg.startsWith(_kReplyPrefix))  return me ? 'Απάντησες'                  : 'Απάντησε';
     return me ? 'Εσύ: $msg' : msg;
   }
 
@@ -2135,7 +2147,7 @@ class _ConversationPageState extends State<ConversationPage>
       final olderLoaded = _messages
           .where((m) => m.id > 0 && !serverIds.contains(m.id))
           .toList();
-      final merged = [...olderLoaded, ...msgs, ...localOnly]..sort((a, b) => a.created.compareTo(b.created));
+      final merged = _dedup([...olderLoaded, ...msgs, ...localOnly]..sort((a, b) => a.created.compareTo(b.created)));
       // If a PATCH is still in-flight, don't let the stale server text overwrite
       // the optimistic edit — substitute the local version for those messages.
       if (_pendingEdits.isNotEmpty) {
@@ -2234,8 +2246,8 @@ class _ConversationPageState extends State<ConversationPage>
           .where((m) => !serverKeys.contains('${m.sender}\x00${m.text}'))
           .where((m) => DateTime.now().difference(m.created) < const Duration(seconds: 20))
           .toList();
-      final merged = [...olderPages, ...msgs, ...pending]
-        ..sort((a, b) => a.created.compareTo(b.created));
+      final merged = _dedup([...olderPages, ...msgs, ...pending]
+        ..sort((a, b) => a.created.compareTo(b.created)));
       final otherReadAt = DateTime.tryParse(conv?['otherLastReadAt']?.toString() ?? '')?.toLocal();
       setState(() {
         _messages = merged;
@@ -2254,6 +2266,16 @@ class _ConversationPageState extends State<ConversationPage>
       // keep whatever messages are already loaded rather than blanking the screen
       if (mounted) setState(() { _loading = false; _isOffline = true; });
     }
+  }
+
+  /// Removes duplicate message IDs from a sorted list.
+  ///
+  /// GlobalKeys are keyed by message ID — two items with the same ID would map
+  /// to the same GlobalKey and crash Flutter with "Multiple widgets used the
+  /// same GlobalKey." Call this after every merge+sort to make that impossible.
+  List<MessageItem> _dedup(List<MessageItem> list) {
+    final seen = <int>{};
+    return list.where((m) => seen.add(m.id)).toList();
   }
 
   /// Fetches the page before the oldest message on screen.
@@ -2282,8 +2304,8 @@ class _ConversationPageState extends State<ConversationPage>
           .map(MessageItem.fromJson)
           .toList();
       setState(() {
-        _messages = [...older, ..._messages]
-          ..sort((a, b) => a.created.compareTo(b.created));
+        _messages = _dedup([...older, ..._messages]
+          ..sort((a, b) => a.created.compareTo(b.created)));
         _hasOlder = body['has_more'] == true;
       });
       _prefetchMedia(older);
@@ -2525,6 +2547,7 @@ class _ConversationPageState extends State<ConversationPage>
   bool _isPlainText(String text) =>
       !text.startsWith(_kPostPrefix) &&
       _imagePrefixOf(text) == null &&
+      !text.startsWith(_kGifUrlPrefix) &&
       !text.startsWith(_kVoicePrefix) &&
       !text.startsWith(_kReplyPrefix);
 
@@ -2653,6 +2676,7 @@ class _ConversationPageState extends State<ConversationPage>
   String _replyPreview(MessageItem msg) {
     if (msg.isTemporaryPhoto) return '📷 Photo';
     if (_parseImage(msg.text) != null) return '📷 Photo';
+    if (_parseGifUrl(msg.text) != null) return '🎞 GIF';
     if (_parseVoice(msg.text) != null) return '🎤 Voice message';
     if (_parsePost(msg.text) != null) return '📎 Post';
     // Unwrap nested reply so we never store raw JSON as preview.
@@ -3033,6 +3057,7 @@ class _ConversationPageState extends State<ConversationPage>
               onSendText: _sendText,
               onSendImage: _sendImage,
               onSendVoice: _sendVoice,
+              onSendGifUrl: (url) => _sendRaw('$_kGifUrlPrefix$url'),
               replyTo: _replyTo,
               onClearReply: _clearReply,
               editingMessage: _editingMessage,
@@ -3162,6 +3187,19 @@ class _MessageRow extends StatelessWidget {
     final replyData = _parseReply(message.text);
     if (replyData != null) {
       return _ReplyMessageBubble(replyData: replyData, mine: mine, isLast: isLast, isLight: isLight, token: token, onTapQuote: onTapQuote);
+    }
+
+    // A Giphy GIF sent as a direct URL — check before the __neat_image__ path
+    // so that the URL is used as-is rather than being treated as a broken image.
+    final gifUrl = _parseGifUrl(message.text);
+    if (gifUrl != null) {
+      return _ImageBubble(
+        bytes: null,
+        mediaUrl: gifUrl,
+        messageId: message.id,
+        conversationId: conversationId,
+        token: token,
+      );
     }
 
     final imgBytes = _parseImage(message.text);
@@ -3501,6 +3539,12 @@ class _ImageBubbleState extends State<_ImageBubble> {
     final decodeWidth = (width * MediaQuery.devicePixelRatioOf(context)).round();
     final bytes = _bytes;
 
+    // GIF magic: 'GIF' (0x47 0x49 0x46). When cacheWidth/memCacheWidth is set
+    // the native codec decodes only the first frame — skip it for animated GIFs.
+    final isGifBytes = bytes != null && bytes.length >= 3 &&
+        bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46;
+    final isGifUrl = widget.mediaUrl.toLowerCase().contains('.gif');
+
     return GestureDetector(
       onTap: () {
         if (bytes != null) {
@@ -3519,7 +3563,8 @@ class _ImageBubbleState extends State<_ImageBubble> {
               ? Image.memory(
                   bytes,
                   fit: BoxFit.cover,
-                  cacheWidth: decodeWidth,
+                  // Don't constrain GIFs — the codec would only decode frame 1.
+                  cacheWidth: isGifBytes ? null : decodeWidth,
                   gaplessPlayback: true,
                 )
               : widget.mediaUrl.isNotEmpty
@@ -3527,7 +3572,7 @@ class _ImageBubbleState extends State<_ImageBubble> {
                   imageUrl: widget.mediaUrl,
                   cacheManager: imageCacheManager,
                   fit: BoxFit.cover,
-                  memCacheWidth: decodeWidth,
+                  memCacheWidth: isGifUrl ? null : decodeWidth,
                   fadeInDuration: Duration.zero,
                   errorWidget: (_, _, _) => ColoredBox(
                     color: isLight
@@ -3956,6 +4001,7 @@ class _Composer extends StatefulWidget {
     required this.onSendText,
     required this.onSendImage,
     required this.onSendVoice,
+    required this.onSendGifUrl,
     this.replyTo,
     this.onClearReply,
     this.editingMessage,
@@ -3968,6 +4014,7 @@ class _Composer extends StatefulWidget {
   final VoidCallback onSendText;
   final Future<void> Function(Uint8List, _PhotoMode) onSendImage;
   final Future<void> Function(Uint8List, int) onSendVoice;
+  final Future<void> Function(String url) onSendGifUrl;
   final MessageItem? replyTo;
   final VoidCallback? onClearReply;
   final MessageItem? editingMessage;
@@ -4093,13 +4140,13 @@ class _ComposerState extends State<_Composer> {
     try {
       final url = await completer.future;
       if (!mounted || url == null) return;
-      final res = await http.get(Uri.parse(url));
-      if (res.statusCode == 200) {
-        await widget.onSendImage(res.bodyBytes, _PhotoMode.keep);
-      }
+      // Send the Giphy URL directly instead of downloading and re-uploading the
+      // bytes. The backend would JPEG-convert any uploaded bytes, stripping all
+      // animation frames. By storing the URL in the message text under the
+      // __neat_gif_url__ prefix, the GIF loads straight from Giphy and animates.
+      await widget.onSendGifUrl(url);
     } catch (_) {
-      // A GIF that would not download is not worth interrupting the thread
-      // for; the picker simply closes with nothing sent.
+      // A GIF URL that fails to send is not worth interrupting the thread for.
     } finally {
       GiphyDialog.instance.removeListener(listener);
       if (identical(_giphyListener, listener)) _giphyListener = null;
@@ -5172,6 +5219,8 @@ class _ReplyPreviewBar extends StatelessWidget {
     String preview;
     if (_parseImage(replyTo.text) != null) {
       preview = '📷 Photo';
+    } else if (_parseGifUrl(replyTo.text) != null) {
+      preview = '🎞 GIF';
     } else if (_parseVoice(replyTo.text) != null) {
       preview = '🎤 Voice message';
     } else if (_parsePost(replyTo.text) != null) {
