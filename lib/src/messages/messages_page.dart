@@ -5,7 +5,6 @@ import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:gal/gal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/dto/giphy_content_type.dart';
@@ -1700,13 +1699,6 @@ class _ConversationPageState extends State<ConversationPage>
               title: Text(AppLocalizations.of(context).reply, style: TextStyle(color: fgClr)),
               onTap: () { Navigator.of(sheetCtx).pop(); _setReplyTo(msg); },
             ),
-            if (!msg.isTemporaryPhoto &&
-                (msg.mediaUrl.isNotEmpty || _imagePrefixOf(msg.text) != null))
-              ListTile(
-                leading: Icon(Icons.download_rounded, color: fgClr),
-                title: Text('Αποθήκευση', style: TextStyle(color: fgClr)),
-                onTap: () { Navigator.of(sheetCtx).pop(); _saveMessageImage(msg); },
-              ),
             if (_copyableText(msg) != null)
               ListTile(
                 leading: Icon(Icons.copy_rounded, color: fgClr),
@@ -2548,41 +2540,6 @@ class _ConversationPageState extends State<ConversationPage>
         mediaKind: 'voice',
         mediaSuffix: '|$durationSecs',
       );
-
-  Future<void> _saveMessageImage(MessageItem msg) async {
-    try {
-      final hasAccess = await Gal.hasAccess(toAlbum: false);
-      if (!hasAccess) {
-        final granted = await Gal.requestAccess(toAlbum: false);
-        if (!granted) return;
-      }
-      if (msg.mediaUrl.isNotEmpty) {
-        final absUrl = msg.mediaUrl.startsWith('/')
-            ? '${apiBaseUrl}${msg.mediaUrl}'
-            : msg.mediaUrl;
-        final res = await http.get(Uri.parse(absUrl));
-        await Gal.putImageBytes(res.bodyBytes);
-      } else {
-        final prefix = _imagePrefixOf(msg.text);
-        if (prefix != null) {
-          final b64 = msg.text.substring(prefix.length);
-          final bytes = base64Decode(b64.contains(',') ? b64.split(',').last : b64);
-          await Gal.putImageBytes(bytes);
-        }
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Αποθηκεύτηκε'), duration: Duration(seconds: 2)),
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Αποτυχία αποθήκευσης'), duration: Duration(seconds: 2)),
-        );
-      }
-    }
-  }
 
   void _setReplyTo(MessageItem msg) => setState(() => _replyTo = msg);
   void _clearReply() => setState(() => _replyTo = null);
