@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
 import '../core/models.dart';
 import '../map/city_map_view.dart';
+import '../map/map_snapshot.dart';
 import 'sign_up_method_page.dart';
 import '../core/onboarding_ui.dart';
 
@@ -36,10 +37,12 @@ class _AppIntroPageState extends State<AppIntroPage> {
     // typing in the app, and it hides the mapkit.js parse entirely.
     if (!_cityMapPrewarmed) {
       _cityMapPrewarmed = true;
-      unawaited(prewarmCityMap(
-        homeCity: '',
-        isDark: Theme.of(context).brightness == Brightness.dark,
-      ));
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      unawaited(prewarmCityMap(homeCity: '', isDark: isDark));
+      // The hero picture above the city-setup copy is a separate render from
+      // the map itself, and it is the one the user meets first.
+      unawaited(prewarmCityMapHero(isDark: isDark));
+      unawaited(prewarmCityMapSnapshot(isDark: isDark, context: context));
     }
   }
 

@@ -155,7 +155,9 @@ class _CitySetupPageState extends State<CitySetupPage> {
   }
 }
 
-const _heroFraction = 0.34;
+// Shared with the prewarm, which caches by rendered size — see
+// kMapHeroFraction in map_snapshot.dart.
+const _heroFraction = kMapHeroFraction;
 
 /// The map, as a picture, with a single pin standing in for the one city the
 /// user is about to claim — the whole point of the screen. It fades into the

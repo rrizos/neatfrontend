@@ -10,6 +10,7 @@ import '../core/api.dart';
 import '../core/models.dart';
 import '../core/legal_links.dart';
 import '../map/city_map_view.dart';
+import '../map/map_snapshot.dart';
 import 'app_intro_page.dart';
 import 'social_buttons.dart';
 import 'forgot_password_screen.dart';
@@ -51,7 +52,10 @@ super.didChangeDependencies();
 // whatever time the user spends filling in the form.
 if (_signup && !_cityMapPrewarmed) {
 _cityMapPrewarmed = true;
-unawaited(prewarmCityMap(homeCity: '', isDark: Theme.of(context).brightness == Brightness.dark));
+final isDark = Theme.of(context).brightness == Brightness.dark;
+unawaited(prewarmCityMap(homeCity: '', isDark: isDark));
+unawaited(prewarmCityMapHero(isDark: isDark));
+unawaited(prewarmCityMapSnapshot(isDark: isDark, context: context));
 }
 }
 

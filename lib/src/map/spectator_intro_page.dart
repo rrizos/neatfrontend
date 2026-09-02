@@ -27,7 +27,8 @@ class SpectatorIntroPage extends StatefulWidget {
 }
 
 class _SpectatorIntroPageState extends State<SpectatorIntroPage> {
-  static const _heroFraction = 0.34;
+  // Shared with the prewarm, which caches by rendered size.
+  static const _heroFraction = kMapHeroFraction;
 
   Uint8List? _mapImage;
   bool _snapshotRequested = false;

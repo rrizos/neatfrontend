@@ -126,9 +126,28 @@ class _AndroidMap {
     return _build(homeCity: homeCity, isDark: isDark);
   }
 
-  /// A one-off map for the onboarding hero: framed tight on Greece, never
-  /// cached, and never handed the prewarmed instance.
-  static Future<_AndroidMap> buildHero({required bool isDark}) => _build(
+  /// The hero's own warm slot, kept apart from [_warmed] because that one
+  /// belongs to the map tab and is claimed destructively by [obtain].
+  ///
+  /// Unlike the tab's, this instance is *kept* rather than handed over: the
+  /// hero appears on two different screens and may be revisited, and building
+  /// a WebView costs the same second every time. One live map is a fair price
+  /// for a hero that is there the moment the screen is.
+  static final Map<bool, Future<_AndroidMap>> _heroes = {};
+
+  /// The already-built hero for [isDark], or null if it is still building.
+  ///
+  /// Synchronous on purpose: the widget needs an answer during `initState`, and
+  /// going through the future would cost a frame of empty placeholder even when
+  /// the map has been ready for minutes.
+  static _AndroidMap? _readyHeroes(bool isDark) => _heroesReady[isDark];
+  static final Map<bool, _AndroidMap> _heroesReady = {};
+
+  static _AndroidMap? warmHero({required bool isDark}) => _readyHeroes(isDark);
+
+  /// A map for the onboarding hero: framed tight on Greece, and reused.
+  static Future<_AndroidMap> buildHero({required bool isDark}) =>
+      _heroes[isDark] ??= _build(
         homeCity: '',
         isDark: isDark,
         // Matches MapSnapshot.overview on iOS, so the two platforms open on
@@ -137,7 +156,10 @@ class _AndroidMap {
         centerLng: 24.0,
         spanLat: 5.2,
         spanLng: 5.2,
-      );
+      ).then((map) {
+        _heroesReady[isDark] = map;
+        return map;
+      });
 
   static Future<_AndroidMap> _build({
     required String homeCity,
@@ -238,13 +260,28 @@ class _AndroidCityMapHeroState extends State<AndroidCityMapHero> {
   @override
   void initState() {
     super.initState();
-    _build();
+    // Synchronously if it is already warm: awaiting an already-complete future
+    // still costs a frame with nothing in it, and that frame is the flash of
+    // empty grey this is here to remove.
+    final warm = _AndroidMap.warmHero(isDark: widget.isDark);
+    if (warm != null) {
+      _map = warm;
+    } else {
+      _build();
+    }
   }
 
   @override
   void didUpdateWidget(AndroidCityMapHero old) {
     super.didUpdateWidget(old);
-    if (old.isDark != widget.isDark) _build();
+    if (old.isDark != widget.isDark) {
+      final warm = _AndroidMap.warmHero(isDark: widget.isDark);
+      if (warm != null) {
+        setState(() => _map = warm);
+      } else {
+        _build();
+      }
+    }
   }
 
   Future<void> _build() async {
@@ -270,6 +307,23 @@ class _AndroidCityMapHeroState extends State<AndroidCityMapHero> {
       ),
     );
   }
+}
+
+/// Builds the onboarding hero's map before a screen asks for it.
+///
+/// Android has no snapshotter, so the hero is the live map held still — and
+/// building it means booting a WebView and fetching tiles, which took the top
+/// third of the first screen a new user sees and left it empty until the
+/// network answered. Warmed from the screens before it, that work happens
+/// while they are reading something else.
+Future<void> prewarmCityMapHero({required bool isDark}) {
+  if (kIsWeb || !Platform.isAndroid) return Future.value();
+  // Both themes: the hero follows the system, and a switch should not put
+  // somebody back to watching an empty band.
+  return Future.wait([
+    _AndroidMap.buildHero(isDark: isDark),
+    _AndroidMap.buildHero(isDark: !isDark),
+  ]).then((_) {});
 }
 
 Future<void> prewarmCityMap({required String homeCity, required bool isDark}) {
