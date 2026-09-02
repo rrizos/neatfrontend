@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:gal/gal.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -834,7 +835,7 @@ Future<void> openPhotoViewer(BuildContext context, Uint8List bytes) {
     PageRouteBuilder<void>(
       opaque: true,
       pageBuilder: (_, _, _) =>
-          _FullscreenMediaViewer(media: const [], initialIndex: 0, bytes: bytes),
+          _FullscreenMediaViewer(media: const [], initialIndex: 0, bytes: bytes, showSave: true),
       transitionsBuilder: (_, animation, _, child) =>
           FadeTransition(opacity: animation, child: child),
     ),
@@ -849,6 +850,7 @@ Future<void> openPhotoUrlViewer(BuildContext context, String url) {
       pageBuilder: (_, _, _) => _FullscreenMediaViewer(
         media: [MediaItem(type: 'image', url: url)],
         initialIndex: 0,
+        showSave: true,
       ),
       transitionsBuilder: (_, animation, _, child) =>
           FadeTransition(opacity: animation, child: child),
@@ -861,9 +863,13 @@ class _FullscreenMediaViewer extends StatefulWidget {
     required this.media,
     required this.initialIndex,
     this.bytes,
+    this.showSave = false,
   });
   final List<MediaItem> media;
   final int initialIndex;
+  /// Whether to show the save-to-gallery button (true for DM viewers,
+  /// false for post viewers where save lives in the share sheet).
+  final bool showSave;
 
   /// A single in-memory image, used instead of [media] when set.
   final Uint8List? bytes;
@@ -889,6 +895,50 @@ class _FullscreenMediaViewerState extends State<_FullscreenMediaViewer> {
     super.dispose();
   }
 
+  Future<void> _saveCurrentImage(BuildContext ctx) async {
+    try {
+      final hasAccess = await Gal.hasAccess(toAlbum: false);
+      if (!hasAccess) {
+        final granted = await Gal.requestAccess(toAlbum: false);
+        if (!granted) return;
+      }
+      final bytes = widget.bytes;
+      if (bytes != null) {
+        // In-memory image (DM photo from bytes)
+        await Gal.putImageBytes(bytes);
+      } else {
+        final item = widget.media[_current];
+        final absUrl = item.url.startsWith('/') ? '$apiBaseUrl${item.url}' : item.url;
+        if (item.isVideo) {
+          // Download video to temp then save
+          final res = await http.get(Uri.parse(absUrl));
+          final tmp = await getTemporaryDirectory();
+          final file = File('${tmp.path}/neat_vid_${DateTime.now().millisecondsSinceEpoch}.mp4');
+          await file.writeAsBytes(res.bodyBytes);
+          await Gal.putVideo(file.path);
+          await file.delete();
+        } else {
+          // Download image to bytes then save
+          final res = await http.get(Uri.parse(absUrl));
+          await Gal.putImageBytes(res.bodyBytes);
+        }
+      }
+      if (ctx.mounted) {
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          const SnackBar(content: Text('Αποθηκεύτηκε'), duration: Duration(seconds: 2)),
+        );
+      }
+    } catch (_) {
+      if (ctx.mounted) {
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          const SnackBar(content: Text('Αποτυχία αποθήκευσης'), duration: Duration(seconds: 2)),
+        );
+      }
+    }
+  }
+
+  /// One page of the viewer: the zoomable, tap-to-dismiss photo every image
+  /// gets here, whether it came from a post's URL or a message's bytes.
   Widget _photoPage(Widget image) {
     return InteractiveViewer(
       minScale: 0.5,
@@ -936,6 +986,23 @@ class _FullscreenMediaViewerState extends State<_FullscreenMediaViewer> {
                 );
               },
             ),
+          // Save button — DM viewers only; post viewer save lives in the share sheet.
+          if (widget.showSave)
+          Positioned(
+            top: topPad + 12,
+            right: 64,
+            child: GestureDetector(
+              onTap: () => _saveCurrentImage(context),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                padding: const EdgeInsets.all(8),
+                child: const Icon(Icons.download_rounded, color: Colors.white, size: 22),
+              ),
+            ),
+          ),
           // Close button
           Positioned(
             top: topPad + 12,
