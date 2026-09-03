@@ -625,6 +625,12 @@ class _CityMapViewState extends State<CityMapView> {
       // the next close will schedule this again anyway.
       if (!mounted || _activeCity != null) return;
       setState(() => _mapGeneration++);
+      // The new NativeCityMapView starts all city annotations at heat = 0
+      // (green). Push cached heat so the fresh map gets the right tier colours
+      // as soon as its channel handler is installed.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _pushHeatToIos();
+      });
     });
   }
 
@@ -763,9 +769,6 @@ String _androidMapPage({
     ],
   });
   final bg = isDark ? '#0a0a0a' : '#f2f2f7';
-  // Label colours adapt to the host app's colour scheme.
-  final lblBg    = isDark ? 'rgba(30,30,46,.88)' : 'rgba(255,255,255,.88)';
-  final lblColor = isDark ? '#ebebf5' : '#1c1c1e';
 
   // StringBuffer so the ~800 KB of minified mapkit.js is appended verbatim,
   // never embedded inside a Dart string literal.
@@ -786,76 +789,69 @@ String _androidMapPage({
        document. */
     * { -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; }
 
-    /* ── Custom city pin ──────────────────────────────────────────────────
-       Each pin is a 44×76 px positioned element. The SVG balloon (32×46 px)
-       sits at the bottom; three flame layers grow upward from inside the
-       balloon top and are clipped behind it via z-index. The tip apex is the
-       anchor point placed at the city coordinate.
+    /* ── Flame-only overlay elements ─────────────────────────────────────
+       Each warm/hot city gets a separate 1×1 px annotation placed above the
+       native MarkerAnnotation. Five flame "fingers" hang off it via
+       overflow:visible, each with a different base lean angle (--a) so they
+       fan out across the pin top instead of forming a single spike.
+       The native pin keeps its shape entirely — we only add fire above it.
        ──────────────────────────────────────────────────────────────────── */
-    .np { position:relative; width:44px; height:76px; overflow:visible; cursor:pointer; }
-
-    /* SVG balloon — rendered above flames */
-    .np .psv { position:absolute; bottom:0; left:6px; width:32px; height:46px;
-      z-index:2; overflow:visible;
-      filter:drop-shadow(0 2px 6px rgba(0,0,0,.38)); }
-
-    /* City-name label below tip */
-    .np .lbl { position:absolute; top:100%; left:50%; transform:translateX(-50%);
-      margin-top:3px; white-space:nowrap; pointer-events:none; z-index:3;
-      font:600 11px -apple-system,sans-serif;
-      color:$lblColor; background:$lblBg;
-      padding:1px 5px; border-radius:4px; }
-
-    /* Flame layers — shared geometry, z-index behind balloon */
-    .np .fo, .np .fm, .np .fi {
-      position:absolute; bottom:40px;
-      border-radius:50% 50% 35% 35% / 60% 60% 40% 40%;
+    .fl { position:relative; width:1px; height:1px; overflow:visible; pointer-events:none; }
+    /* Common base shape for all flame fingers.
+       90% vertical border-radius at the top corners makes the tip sharp and
+       pointed — wide base, narrows quickly to an apex like a real flame. */
+    .fl .f1,.fl .f2,.fl .f3,.fl .f4 {
+      position:absolute; bottom:0;
+      border-radius:50% 50% 40% 40% / 90% 90% 50% 50%;
       transform-origin:50% 100%;
-      will-change:transform,opacity;
-      pointer-events:none; z-index:1;
-      opacity:0; animation:none; }
+      will-change:transform,opacity; pointer-events:none; }
 
-    /* ── Tier 1: warm — yellow gentle flames ─────────────────────────── */
-    .np.t1 .fo { width:22px; height:26px; left:calc(50% - 11px);
-      background:radial-gradient(ellipse at 50% 90%,#FFE500,rgba(255,200,0,.82) 55%,rgba(255,160,0,0));
-      animation:fw 1.35s ease-in-out infinite; opacity:1; }
-    .np.t1 .fm { width:14px; height:18px; left:calc(50% - 7px);
-      background:radial-gradient(ellipse at 50% 90%,#FFF9C4,rgba(255,240,80,.72) 55%,rgba(255,210,0,0));
-      animation:fw 1.00s ease-in-out infinite; animation-delay:-0.38s; opacity:1; }
-    .np.t1 .fi { width:8px; height:12px; left:calc(50% - 4px);
-      background:radial-gradient(ellipse at 50% 90%,#fff,rgba(255,255,210,.88) 50%,rgba(255,250,80,0));
-      animation:fw 0.78s ease-in-out infinite; animation-delay:-0.62s; opacity:1; }
+    /* ── Tier 1: warm — 3 yellow tongues, tight group, mostly upward ──── */
+    .fl.t1 .f1 { width:8px;  height:20px; left:-11px; --a:-5deg;
+      background:radial-gradient(ellipse at 50% 88%,rgba(255,235,0,.92),rgba(255,190,0,.80) 55%,transparent);
+      animation:fw 1.40s ease-in-out infinite; animation-delay:-0.10s; }
+    .fl.t1 .f2 { width:10px; height:26px; left:-5px;  --a:0deg;
+      background:radial-gradient(ellipse at 50% 88%,rgba(255,255,140,.95),rgba(255,220,0,.88) 50%,rgba(255,175,0,.55) 76%,transparent);
+      animation:fw 1.20s ease-in-out infinite; animation-delay:0s; }
+    .fl.t1 .f3 { width:8px;  height:18px; left:2px;   --a:6deg;
+      background:radial-gradient(ellipse at 50% 88%,rgba(255,225,0,.90),rgba(255,180,0,.78) 55%,transparent);
+      animation:fw 1.55s ease-in-out infinite; animation-delay:-0.50s; }
 
-    /* ── Tier 2: hot — orange intense flames ─────────────────────────── */
-    .np.t2 .fo { width:28px; height:32px; left:calc(50% - 14px);
-      background:radial-gradient(ellipse at 50% 90%,#FF8C00,rgba(255,60,0,.90) 55%,rgba(255,20,0,0));
-      animation:fh 0.68s ease-in-out infinite; opacity:1; }
-    .np.t2 .fm { width:18px; height:24px; left:calc(50% - 9px);
-      background:radial-gradient(ellipse at 50% 90%,#FFA500,rgba(255,90,0,.84) 55%,rgba(255,40,0,0));
-      animation:fh 0.50s ease-in-out infinite; animation-delay:-0.16s; opacity:1; }
-    .np.t2 .fi { width:10px; height:16px; left:calc(50% - 5px);
-      background:radial-gradient(ellipse at 50% 90%,#FFEE00,rgba(255,220,0,.92) 50%,rgba(255,140,0,0));
-      animation:fh 0.40s ease-in-out infinite; animation-delay:-0.28s; opacity:1; }
+    /* ── Tier 2: hot — 4 orange tongues, uneven heights (18/30/24/16 px) ─
+       Leaning at most 11° so they go UP, not out. One tall tongue breaks
+       the silhouette like fire does — never a symmetric crown shape.      */
+    .fl.t2 .f1 { width:9px;  height:18px; left:-14px; --a:-8deg;
+      background:radial-gradient(ellipse at 50% 85%,rgba(255,140,0,.90),rgba(255,52,0,.82) 50%,rgba(180,12,0,.28) 82%,transparent);
+      animation:fh 0.66s ease-in-out infinite; animation-delay:-0.09s; }
+    .fl.t2 .f2 { width:11px; height:30px; left:-8px;  --a:-2deg;
+      background:radial-gradient(ellipse at 50% 85%,rgba(255,222,0,.96),rgba(255,102,0,.88) 42%,rgba(210,22,0,.36) 78%,transparent);
+      animation:fh 0.52s ease-in-out infinite; animation-delay:-0.28s; }
+    .fl.t2 .f3 { width:10px; height:24px; left:-1px;  --a:5deg;
+      background:radial-gradient(ellipse at 50% 85%,rgba(255,200,0,.92),rgba(255,85,0,.85) 44%,rgba(200,15,0,.32) 80%,transparent);
+      animation:fh 0.70s ease-in-out infinite; animation-delay:0s; }
+    .fl.t2 .f4 { width:8px;  height:16px; left:6px;   --a:11deg;
+      background:radial-gradient(ellipse at 50% 85%,rgba(255,118,0,.88),rgba(255,44,0,.78) 50%,rgba(172,8,0,.26) 83%,transparent);
+      animation:fh 0.58s ease-in-out infinite; animation-delay:-0.17s; }
 
-    /* Warm flame keyframes — gentle sway, slow breathing */
+    /* Warm: gentle sway around --a, slow breathing */
     @keyframes fw {
-      0%   { transform:scaleX(1.00) scaleY(1.00) rotate(  0deg); opacity:.88 }
-      18%  { transform:scaleX(0.85) scaleY(1.10) rotate( 3.5deg); opacity:.95 }
-      36%  { transform:scaleX(1.06) scaleY(0.93) rotate(-2.0deg); opacity:.78 }
-      54%  { transform:scaleX(0.91) scaleY(1.07) rotate( 2.5deg); opacity:.92 }
-      72%  { transform:scaleX(1.03) scaleY(0.95) rotate(-1.5deg); opacity:.83 }
-      90%  { transform:scaleX(0.97) scaleY(1.03) rotate( 1.0deg); opacity:.89 }
-      100% { transform:scaleX(1.00) scaleY(1.00) rotate(  0deg); opacity:.88 }
+      0%   { transform:rotate(var(--a)) scaleY(1.00); opacity:.82 }
+      30%  { transform:rotate(calc(var(--a) + 6deg)) scaleY(1.10); opacity:.90 }
+      60%  { transform:rotate(calc(var(--a) - 5deg)) scaleY(0.92); opacity:.74 }
+      85%  { transform:rotate(calc(var(--a) + 3deg)) scaleY(1.05); opacity:.86 }
+      100% { transform:rotate(var(--a)) scaleY(1.00); opacity:.82 }
     }
-    /* Hot flame keyframes — fast, aggressive flicker */
+    /* Hot: tongue surges up (scaleY rises, scaleX narrows — fire pulls thin
+       when it stretches) then collapses (scaleX widens, scaleY drops).
+       Sway angles are ≤13° so the motion stays vertical. */
     @keyframes fh {
-      0%   { transform:scaleX(1.00) scaleY(1.00) rotate(  0deg); opacity:.92 }
-      14%  { transform:scaleX(0.78) scaleY(1.14) rotate( 5.5deg); opacity:1.0  }
-      30%  { transform:scaleX(1.11) scaleY(0.88) rotate(-3.5deg); opacity:.80 }
-      48%  { transform:scaleX(0.84) scaleY(1.12) rotate( 4.0deg); opacity:.96 }
-      64%  { transform:scaleX(1.07) scaleY(0.91) rotate(-2.5deg); opacity:.84 }
-      80%  { transform:scaleX(0.88) scaleY(1.06) rotate( 3.0deg); opacity:.92 }
-      100% { transform:scaleX(1.00) scaleY(1.00) rotate(  0deg); opacity:.92 }
+      0%   { transform:rotate(var(--a)) scaleX(1.00) scaleY(1.00); opacity:.88 }
+      18%  { transform:rotate(calc(var(--a) +  9deg)) scaleX(0.72) scaleY(1.28); opacity:1.0  }
+      36%  { transform:rotate(calc(var(--a) -  8deg)) scaleX(1.18) scaleY(0.74); opacity:.66 }
+      56%  { transform:rotate(calc(var(--a) +  6deg)) scaleX(0.80) scaleY(1.20); opacity:.92 }
+      76%  { transform:rotate(calc(var(--a) -  5deg)) scaleX(1.10) scaleY(0.82); opacity:.72 }
+      92%  { transform:rotate(calc(var(--a) +  2deg)) scaleX(0.90) scaleY(1.10); opacity:.88 }
+      100% { transform:rotate(var(--a)) scaleX(1.00) scaleY(1.00); opacity:.88 }
     }
   </style>
 </head>
@@ -875,25 +871,21 @@ String _androidMapPage({
          and replayed once the map and all pins exist. */
       var pendingHeat = null;
 
-      /* Pin colour per tier. */
+      /* Marker colours per tier. */
       var TIER_COLORS = ['#34C759', '#FFCC00', '#FF6A00'];
 
-      /* Build the DOM element for one city pin at the given heat tier (0-2).
-         The SVG uses a teardrop path (circle top, pointed bottom) that mirrors
-         the MKMarkerAnnotationView balloon shape on iOS. Flames live behind
-         the SVG via z-index and are invisible at tier 0. */
-      function makePinEl(name, tier) {
+      /* Coordinate lookup for flame overlay creation during updateHeat. */
+      var cityCoords = {};
+
+      /* Build a flame-only overlay element for tier 1 or 2.
+         Tier 1 (warm) gets 3 tongues — minimal, going upward.
+         Tier 2 (hot)  gets 4 tongues — more intensity, uneven heights. */
+      function makeFlameEl(tier) {
         var el = document.createElement('div');
-        el.className = 'np t' + tier;
-        el.style.setProperty('--c', TIER_COLORS[tier]);
-        el.innerHTML =
-          '<div class="fo"></div><div class="fm"></div><div class="fi"></div>' +
-          '<svg class="psv" viewBox="0 0 32 46" xmlns="http://www.w3.org/2000/svg">' +
-            '<path d="M16,0C7.16,0,0,7.16,0,16C0,24.84,16,46,16,46' +
-                 'C16,46,32,24.84,32,16C32,7.16,24.84,0,16,0Z" fill="var(--c)"/>' +
-            '<circle cx="16" cy="14" r="5" fill="rgba(255,255,255,.52)"/>' +
-          '</svg>' +
-          '<div class="lbl">' + name + '</div>';
+        el.className = 'fl t' + tier;
+        el.innerHTML = tier === 1
+          ? '<div class="f1"></div><div class="f2"></div><div class="f3"></div>'
+          : '<div class="f1"></div><div class="f2"></div><div class="f3"></div><div class="f4"></div>';
         return el;
       }
 
@@ -999,21 +991,19 @@ String _androidMapPage({
           });
 
           config.cities.forEach(function (c) {
-            var el = makePinEl(c.name, 0);
-            var ann = new mapkit.Annotation(
+            // Store coords for later flame-overlay creation in updateHeat.
+            cityCoords[c.name] = { lat: c.lat, lng: c.lng };
+
+            // Native MarkerAnnotation — unchanged appearance.
+            var pin = new mapkit.MarkerAnnotation(
               new mapkit.Coordinate(c.lat, c.lng),
-              function () { return el; },
-              {
-                title: c.name,
-                calloutEnabled: false,
-                // Anchor the tip (bottom of 76 px element) at the coordinate.
-                anchorOffset: new DOMPoint(0, -38)
-              }
+              { title: c.name, color: '#34C759', calloutEnabled: false }
             );
-            ann._neatPriority = c.priority || 400;
-            ann._neatName = c.name;
-            ann._neatEl = el;
-            ann.addEventListener('select', function () {
+            pin._neatPriority = c.priority || 400;
+            pin._neatName = c.name;
+            pin._neatTier = 0;
+            pin._neatFlame = null;  // flame overlay annotation, if any
+            pin.addEventListener('select', function () {
               // Mirror iOS: the pin stays selected (raised) while its card is
               // open; reset() deselects it when the card closes. While the
               // card is up the Flutter overlay swallows all map input, so no
@@ -1024,8 +1014,8 @@ String _androidMapPage({
               ));
               post({ event: 'pin', city: c.name });
             });
-            allPinsRef.push(ann);
-            map.addAnnotation(ann);
+            allPinsRef.push(pin);
+            map.addAnnotation(pin);
           });
 
           rankedPins = allPinsRef.slice().sort(function (a, b) {
@@ -1071,6 +1061,8 @@ String _androidMapPage({
                 }
                 if (show) placed.push(pt);
                 p.visible = show;
+                // Mirror visibility to the flame overlay (if any).
+                if (p._neatFlame) p._neatFlame.visible = show;
               });
             } catch (e) {}
           }
@@ -1153,22 +1145,64 @@ String _androidMapPage({
         // documented way is assigning null to the selectedAnnotation
         // property (deselectAnnotation/selectedAnnotations are iOS-only).
         try { map.selectedAnnotation = null; } catch (e) {}
+        // MapKit JS resets a MarkerAnnotation's colour to its creation-time
+        // value (#34C759 green) when the annotation is deselected. Re-apply
+        // the correct tier colour to every warm/hot pin so they stay yellow
+        // or orange rather than flashing back to green after card close.
+        allPinsRef.forEach(function (p) {
+          if (p._neatTier > 0) p.color = TIER_COLORS[p._neatTier];
+        });
         try { map.setRegionAnimated(overview()); }
         catch (e) { try { map.region = overview(); } catch (e2) {} }
       }
 
-      /* Apply server-supplied heat values to each pin. Called from Dart via
-         runJavaScript. If the map isn't ready yet the data is queued and
-         replayed at the end of start(). */
+      /* Apply server-supplied heat values to each pin.
+         Called from Dart via runJavaScript; queued if NeatMap.start() hasn't
+         finished yet (pendingHeat pattern).
+
+         For each city pin (always a native MarkerAnnotation):
+           • Change the pin's colour to match the tier.
+           • For warm/hot: add a flame-only overlay annotation positioned
+             ~42 px above the tip so flames appear above the balloon head.
+           • For cold (tier 0): remove the overlay if one was present. */
       function updateHeat(heatMap) {
         if (!map) { pendingHeat = heatMap; return; }
         allPinsRef.forEach(function (p) {
-          var el = p._neatEl;
-          if (!el) return;
-          var h = heatMap[p._neatName] || 0;
-          var tier = h >= 0.66 ? 2 : h >= 0.33 ? 1 : 0;
-          el.className = 'np t' + tier;
-          el.style.setProperty('--c', TIER_COLORS[tier]);
+          var name = p._neatName;
+          var h = heatMap[name] || 0;
+          var newTier = h >= 0.66 ? 2 : h >= 0.33 ? 1 : 0;
+          if (newTier === p._neatTier) return;
+          p._neatTier = newTier;
+
+          // Change the native marker's balloon colour.
+          p.color = TIER_COLORS[newTier];
+
+          // Remove previous flame overlay (if any).
+          if (p._neatFlame) {
+            map.removeAnnotation(p._neatFlame);
+            p._neatFlame = null;
+          }
+
+          // Add new flame overlay for warm/hot tiers.
+          if (newTier >= 1) {
+            var coords = cityCoords[name];
+            if (!coords) return;
+            var flEl = makeFlameEl(newTier);
+            var flAnn = new mapkit.Annotation(
+              new mapkit.Coordinate(coords.lat, coords.lng),
+              function () { return flEl; },
+              {
+                calloutEnabled: false,
+                // anchorOffset centres the 1×1 px overlay 42 px above the
+                // coordinate (pin tip), so flames emerge from the balloon top.
+                anchorOffset: new DOMPoint(0, -42)
+              }
+            );
+            map.addAnnotation(flAnn);
+            // Mirror the current pin visibility immediately.
+            flAnn.visible = (p.visible !== false);
+            p._neatFlame = flAnn;
+          }
         });
       }
 

@@ -81,7 +81,7 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     let v = mv.dequeueReusableAnnotationView(
       withIdentifier: CityPinView.reuseID, for: annotation
     ) as! CityPinView
-    v.apply(tier: Self.heatTier(city.heat), name: city.title ?? "")
+    v.apply(tier: Self.heatTier(city.heat))
     // Spacing is decided in `applyDeclutter()`, which knows the pin's exact
     // screen position; MapKit's own collision handling would only second-guess
     // it with a different footprint, so every pin it is handed is required.
@@ -411,162 +411,150 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
       guard let city = annotation as? CityAnnotation,
             let v = map.view(for: city) as? CityPinView
       else { continue }
-      v.apply(tier: Self.heatTier(city.heat), name: city.title ?? "")
+      v.apply(tier: Self.heatTier(city.heat))
     }
   }
 }
 
 // MARK: - City pin view
 
-/// A fully-custom map pin that supports three heat tiers:
-///   0 (cold,  heat < 0.33) — plain green balloon, no animation
-///   1 (warm, 0.33–0.65)   — yellow balloon + gentle animated yellow flames
-///   2 (hot,  heat ≥ 0.66) — orange balloon + intense animated orange flames
+/// Wraps the system MKMarkerAnnotationView with animated flame layers.
 ///
-/// Layout (all in points, @1×):
-///   Total view: 44 × 76 pt.  The tip (bottom) is placed at the coordinate.
-///   SVG-equivalent balloon: 32 × 46 pt, centred horizontally, bottom = 0.
-///   Flame base: y = 40 pt from top (hidden behind balloon via z-order).
-///   Label: UILabel below the tip, centred on the pin.
-private final class CityPinView: MKAnnotationView {
+/// The native balloon is drawn entirely by MKMarkerAnnotationView — this
+/// subclass adds nothing to the balloon itself. Five CAShapeLayer flames
+/// are inserted BELOW the marker's own sublayers so that they emerge from
+/// inside the balloon head and extend above it, which is exactly what you
+/// see with `clipsToBounds = false`.
+///
+/// The five layers are arranged in a fan (left-outer, left, centre, right,
+/// right-outer), each with a different horizontal offset and a different base
+/// lean angle baked into its animation keyframes. This creates a spread of
+/// individual tongues rather than a single centred spike.
+///
+/// Heat tiers:
+///   0 (cold, heat < 0.33)  — green marker, no flames
+///   1 (warm, 0.33–0.65)    — yellow marker, gentle fanned yellow flames
+///   2 (hot,  heat ≥ 0.66)  — orange marker, rapid intense fanned orange flames
+private final class CityPinView: MKMarkerAnnotationView {
 
   static let reuseID = "neat-city-pin"
 
-  // ── Layout constants ──────────────────────────────────────────────────
-  private static let W: CGFloat      = 44     // total view width
-  private static let H: CGFloat      = 76     // total view height
-  private static let ballW: CGFloat  = 32     // balloon width
-  private static let ballH: CGFloat  = 46     // balloon height (circle + tip)
-  private static let ballX: CGFloat  = (W - ballW) / 2   // = 6
-  private static let ballY: CGFloat  = H - ballH          // = 30
-  private static let cR: CGFloat     = ballW / 2          // circle radius = 16
-  private static let flameBase: CGFloat = ballY + 10      // = 40, inside balloon
+  // Approximate y-position of the balloon head top inside the view, in pts.
+  // MKMarkerAnnotationView's internal layout is private, but empirically
+  // the balloon circle top sits ~4 pt from the view's top edge.
+  private static let flameAnchorY: CGFloat = 4
 
-  // ── Layers ────────────────────────────────────────────────────────────
-  private let balloonLayer = CAShapeLayer()
-  private let outerFlame   = CAShapeLayer()
-  private let midFlame     = CAShapeLayer()
-  private let innerFlame   = CAShapeLayer()
+  // ── Flame layers ──────────────────────────────────────────────────────
+  // Warm uses fl1/fl2/fl3 (3 tongues). Hot uses fl1/fl2/fl3/fl4 (4 tongues).
+  // fl5 is never visible; it exists so the layer stack is uniform on reuse.
+  private let fl1 = CAShapeLayer()
+  private let fl2 = CAShapeLayer()
+  private let fl3 = CAShapeLayer()
+  private let fl4 = CAShapeLayer()
+  private let fl5 = CAShapeLayer()
 
-  // ── Label ─────────────────────────────────────────────────────────────
-  private let titleLbl = UILabel()
+  // Horizontal offsets from centre-X, kept in sync with the current tier so
+  // layoutSubviews can restore the right positions after a bounds change.
+  private var flXOffsets: [CGFloat] = [0, 0, 0, 0, 0]
 
   override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
     super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
-    bounds        = CGRect(x: 0, y: 0, width: Self.W, height: Self.H)
-    // Move the view up so the tip (bottom edge) sits at the coordinate.
-    centerOffset  = CGPoint(x: 0, y: -(Self.H / 2))
     canShowCallout = false
-    isOpaque       = false
-    backgroundColor = .clear
-
-    setupLayers()
-    setupLabel()
+    glyphImage     = UIImage(systemName: "mappin")
+    setupFlames()
   }
 
   required init?(coder: NSCoder) { nil }
 
   // MARK: Setup
 
-  private func setupLayers() {
-    // Flames — added first so the balloon covers their base.
-    for fl in [outerFlame, midFlame, innerFlame] {
+  private func setupFlames() {
+    for fl in [fl1, fl2, fl3, fl4, fl5] {
       fl.anchorPoint = CGPoint(x: 0.5, y: 1.0)
-      fl.position    = CGPoint(x: Self.W / 2, y: Self.flameBase)
-      fl.opacity     = 0       // hidden until apply() sets the tier
+      fl.opacity     = 0
       fl.isOpaque    = false
-      layer.addSublayer(fl)
+      layer.insertSublayer(fl, at: 0)
     }
-
-    // Balloon — on top of flames.
-    balloonLayer.frame       = CGRect(x: Self.ballX, y: Self.ballY,
-                                      width: Self.ballW, height: Self.ballH)
-    balloonLayer.path        = Self.balloonPath()
-    balloonLayer.shadowColor  = UIColor.black.cgColor
-    balloonLayer.shadowOffset = CGSize(width: 0, height: 2)
-    balloonLayer.shadowRadius = 5
-    balloonLayer.shadowOpacity = 0.32
-    // Rasterising the static balloon avoids per-frame path compositing.
-    balloonLayer.shouldRasterize    = true
-    balloonLayer.rasterizationScale = UIScreen.main.scale
-    layer.addSublayer(balloonLayer)
-
-    // Small white dot — inner glyph, in balloon's local coordinate space.
-    let dot = CALayer()
-    dot.frame           = CGRect(x: Self.cR - 5, y: Self.cR - 5, width: 10, height: 10)
-    dot.backgroundColor = UIColor.white.withAlphaComponent(0.52).cgColor
-    dot.cornerRadius    = 5
-    balloonLayer.addSublayer(dot)
   }
 
-  private func setupLabel() {
-    // Sits just below the pin tip; extends outside the view's own bounds.
-    titleLbl.frame         = CGRect(x: -20, y: Self.H - 3, width: Self.W + 40, height: 17)
-    titleLbl.textAlignment = .center
-    titleLbl.font          = .systemFont(ofSize: 11, weight: .semibold)
-    titleLbl.textColor     = .label
-    titleLbl.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
-    titleLbl.layer.cornerRadius    = 4
-    titleLbl.layer.masksToBounds   = true
-    addSubview(titleLbl)
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    let cx = bounds.midX
+    let y  = Self.flameAnchorY
+    for (fl, dx) in zip([fl1, fl2, fl3, fl4, fl5], flXOffsets) {
+      fl.position = CGPoint(x: cx + dx, y: y)
+    }
   }
 
   // MARK: Apply tier
 
-  /// Updates the balloon colour, flame appearance, and label.
-  /// Safe to call on any queue after the view has been created.
-  func apply(tier: Int, name: String) {
-    titleLbl.text = name
+  func apply(tier: Int) {
+    for fl in [fl1, fl2, fl3, fl4, fl5] { fl.removeAllAnimations() }
 
-    // Stop any running animations before changing geometry or opacity.
-    for fl in [outerFlame, midFlame, innerFlame] {
-      fl.removeAllAnimations()
+    // Store offsets first so layoutSubviews picks them up if it runs after.
+    switch tier {
+    case 1:  flXOffsets = [-6,  0, +5,  0,  0]   // 3 tongues, tight group
+    case 2:  flXOffsets = [-8, -2, +4, +10, 0]   // 4 tongues, slightly wider
+    default: flXOffsets = [ 0,  0,  0,  0,  0]
     }
 
     CATransaction.begin()
     CATransaction.setDisableActions(true)
 
+    // Position layers immediately (layoutSubviews also uses flXOffsets).
+    let cx = bounds.midX
+    let y  = Self.flameAnchorY
+    for (fl, dx) in zip([fl1, fl2, fl3, fl4, fl5], flXOffsets) {
+      fl.position = CGPoint(x: cx + dx, y: y)
+    }
+
     switch tier {
     case 1:
-      // Yellow balloon + warm gentle flames
-      balloonLayer.fillColor = UIColor(red: 1, green: 0.800, blue: 0, alpha: 1).cgColor
-      configFlame(outerFlame, w: 22, h: 26,
-                  color: UIColor(red: 1.00, green: 0.898, blue: 0.00, alpha: 0.92))
-      configFlame(midFlame,   w: 14, h: 18,
-                  color: UIColor(red: 1.00, green: 0.976, blue: 0.77, alpha: 0.88))
-      configFlame(innerFlame, w:  8, h: 12,
-                  color: UIColor(red: 1.00, green: 1.000, blue: 0.90, alpha: 0.82))
+      // Yellow marker — 3 flame tongues going mostly upward, gentle sway.
+      markerTintColor = UIColor(red: 1, green: 0.800, blue: 0, alpha: 1)
+      configFlame(fl1, w:  8, h: 20,
+                  color: UIColor(red: 1.00, green: 0.902, blue: 0.00, alpha: 0.82))
+      configFlame(fl2, w: 10, h: 26,
+                  color: UIColor(red: 1.00, green: 0.965, blue: 0.65, alpha: 0.90))
+      configFlame(fl3, w:  8, h: 18,
+                  color: UIColor(red: 1.00, green: 0.882, blue: 0.00, alpha: 0.80))
+      fl4.opacity = 0
+      fl5.opacity = 0
+
     case 2:
-      // Orange balloon + hot intense flames
-      balloonLayer.fillColor = UIColor(red: 1, green: 0.416, blue: 0, alpha: 1).cgColor
-      configFlame(outerFlame, w: 28, h: 32,
-                  color: UIColor(red: 1.00, green: 0.549, blue: 0.00, alpha: 0.95))
-      configFlame(midFlame,   w: 18, h: 24,
-                  color: UIColor(red: 1.00, green: 0.376, blue: 0.00, alpha: 0.88))
-      configFlame(innerFlame, w: 10, h: 16,
-                  color: UIColor(red: 1.00, green: 0.906, blue: 0.00, alpha: 0.92))
+      // Orange marker — 4 irregular tongues, fire heights (18/30/24/16 pt).
+      markerTintColor = UIColor(red: 1, green: 0.416, blue: 0, alpha: 1)
+      configFlame(fl1, w:  9, h: 18,
+                  color: UIColor(red: 1.00, green: 0.471, blue: 0.00, alpha: 0.82))
+      configFlame(fl2, w: 11, h: 30,
+                  color: UIColor(red: 1.00, green: 0.784, blue: 0.00, alpha: 0.92))
+      configFlame(fl3, w: 10, h: 24,
+                  color: UIColor(red: 1.00, green: 0.647, blue: 0.00, alpha: 0.88))
+      configFlame(fl4, w:  8, h: 16,
+                  color: UIColor(red: 1.00, green: 0.451, blue: 0.00, alpha: 0.80))
+      fl5.opacity = 0
+
     default:
-      // Green balloon, no flames
-      balloonLayer.fillColor = UIColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1).cgColor
-      for fl in [outerFlame, midFlame, innerFlame] { fl.opacity = 0 }
+      markerTintColor = UIColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1)
+      for fl in [fl1, fl2, fl3, fl4, fl5] { fl.opacity = 0 }
     }
 
     CATransaction.commit()
-
     guard tier >= 1 else { return }
-    let hot = (tier == 2)
 
-    // Durations and delays — warm is slow and meditative, hot is rapid.
-    let (durO, durM, durI): (CFTimeInterval, CFTimeInterval, CFTimeInterval)
-      = hot ? (0.68, 0.50, 0.40) : (1.35, 1.00, 0.78)
-    let (delO, delM, delI): (CFTimeInterval, CFTimeInterval, CFTimeInterval)
-      = hot ? (0.00, -0.16, -0.28) : (0.00, -0.38, -0.62)
-    let (bO, bM, bI): (Float, Float, Float)
-      = hot ? (0.95, 0.88, 0.92) : (0.92, 0.88, 0.82)
-
-    outerFlame.add(Self.flameAnim(dur: durO, delay: delO, baseOp: bO, hot: hot), forKey: "fl")
-    midFlame  .add(Self.flameAnim(dur: durM, delay: delM, baseOp: bM, hot: hot), forKey: "fl")
-    innerFlame.add(Self.flameAnim(dur: durI, delay: delI, baseOp: bI, hot: hot), forKey: "fl")
+    // Lean angles are small (≤11°) so all tongues go mostly upward.
+    // The sway in the keyframes adds extra degrees on top — the flame
+    // moves back and forth around its base angle, not away from vertical.
+    if tier == 2 {
+      fl1.add(Self.flameAnim(dur: 0.66, delay: -0.09, baseOp: 0.82, hot: true,  baseDeg:  -8), forKey: "fl")
+      fl2.add(Self.flameAnim(dur: 0.52, delay: -0.28, baseOp: 0.92, hot: true,  baseDeg:  -2), forKey: "fl")
+      fl3.add(Self.flameAnim(dur: 0.70, delay:  0.00, baseOp: 0.88, hot: true,  baseDeg:  +5), forKey: "fl")
+      fl4.add(Self.flameAnim(dur: 0.58, delay: -0.17, baseOp: 0.80, hot: true,  baseDeg: +11), forKey: "fl")
+    } else {
+      fl1.add(Self.flameAnim(dur: 1.40, delay: -0.10, baseOp: 0.82, hot: false, baseDeg:  -5), forKey: "fl")
+      fl2.add(Self.flameAnim(dur: 1.20, delay:  0.00, baseOp: 0.90, hot: false, baseDeg:   0), forKey: "fl")
+      fl3.add(Self.flameAnim(dur: 1.55, delay: -0.50, baseOp: 0.80, hot: false, baseDeg:  +6), forKey: "fl")
+    }
   }
 
   // MARK: Helpers
@@ -581,38 +569,27 @@ private final class CityPinView: MKAnnotationView {
 
   // MARK: Paths
 
-  /// Teardrop balloon: 32 × 46, circle radius 16, tip at (16, 46).
-  private static func balloonPath() -> CGPath {
-    let path = UIBezierPath()
-    // Clockwise arc: 9 o'clock → 3 o'clock (top half)
-    path.addArc(withCenter: CGPoint(x: cR, y: cR), radius: cR,
-                startAngle: .pi, endAngle: 0, clockwise: true)
-    // 3 o'clock → tip
-    path.addCurve(to: CGPoint(x: cR, y: ballH),
-                  controlPoint1: CGPoint(x: ballW, y: 28),
-                  controlPoint2: CGPoint(x: 22, y: 42))
-    // tip → 9 o'clock
-    path.addCurve(to: CGPoint(x: 0, y: cR),
-                  controlPoint1: CGPoint(x: 10, y: 42),
-                  controlPoint2: CGPoint(x: 0, y: 28))
-    path.close()
-    return path.cgPath
-  }
-
-  /// Organic upward-pointing flame: wide at the base, tapering to a tip.
+  /// Organic upward-pointing flame: wide at the base, tapering sharply to a
+  /// pointed tip. Control points are kept close to vertical near the apex so
+  /// the curve arrives almost straight up — creating the sharp point you see
+  /// in a real candle or fireplace flame rather than a rounded oval tip.
   private static func flamePath(w: CGFloat, h: CGFloat) -> CGPath {
     let cx = w / 2
     let path = UIBezierPath()
-    path.move(to: CGPoint(x: cx - w * 0.42, y: h))
+    // Start at left base edge.
+    path.move(to: CGPoint(x: cx - w * 0.44, y: h))
+    // Left side: curves up and inward, approaching the tip almost vertically.
     path.addCurve(to: CGPoint(x: cx, y: 0),
-                  controlPoint1: CGPoint(x: cx - w * 0.45, y: h * 0.55),
-                  controlPoint2: CGPoint(x: cx - w * 0.18, y: h * 0.15))
-    path.addCurve(to: CGPoint(x: cx + w * 0.42, y: h),
-                  controlPoint1: CGPoint(x: cx + w * 0.18, y: h * 0.15),
-                  controlPoint2: CGPoint(x: cx + w * 0.45, y: h * 0.55))
-    path.addCurve(to: CGPoint(x: cx - w * 0.42, y: h),
-                  controlPoint1: CGPoint(x: cx + w * 0.20, y: h * 1.12),
-                  controlPoint2: CGPoint(x: cx - w * 0.20, y: h * 1.12))
+                  controlPoint1: CGPoint(x: cx - w * 0.47, y: h * 0.58),
+                  controlPoint2: CGPoint(x: cx - w * 0.06, y: h * 0.08))
+    // Right side: mirror image.
+    path.addCurve(to: CGPoint(x: cx + w * 0.44, y: h),
+                  controlPoint1: CGPoint(x: cx + w * 0.06, y: h * 0.08),
+                  controlPoint2: CGPoint(x: cx + w * 0.47, y: h * 0.58))
+    // Base: slightly convex arc along the bottom.
+    path.addCurve(to: CGPoint(x: cx - w * 0.44, y: h),
+                  controlPoint1: CGPoint(x: cx + w * 0.22, y: h * 1.10),
+                  controlPoint2: CGPoint(x: cx - w * 0.22, y: h * 1.10))
     path.close()
     return path.cgPath
   }
@@ -620,12 +597,16 @@ private final class CityPinView: MKAnnotationView {
   // MARK: Animation
 
   /// Returns a CAAnimationGroup that simultaneously animates `transform`
-  /// (scale + rotate keyframes) and `opacity`. The `timeOffset` trick starts
-  /// each layer at a different phase so they never move in perfect unison.
+  /// (scale + rotate keyframes) and `opacity`. The base lean angle `baseDeg`
+  /// is added to every rotation keyframe so each finger sways around its own
+  /// characteristic tilt rather than always returning to vertical.
+  /// The `timeOffset` trick starts each layer at a different phase.
   private static func flameAnim(dur: CFTimeInterval, delay: CFTimeInterval,
-                                 baseOp: Float, hot: Bool) -> CAAnimationGroup {
-    // Helper: combine scale and rotation into a CATransform3D value.
-    func t(_ sx: CGFloat, _ sy: CGFloat, _ deg: CGFloat) -> NSValue {
+                                 baseOp: Float, hot: Bool,
+                                 baseDeg: CGFloat) -> CAAnimationGroup {
+    // Helper: scale + lean around baseDeg, then add extraDeg of sway on top.
+    func t(_ sx: CGFloat, _ sy: CGFloat, _ extraDeg: CGFloat) -> NSValue {
+      let deg = baseDeg + extraDeg
       let s = CATransform3DScale(CATransform3DIdentity, sx, sy, 1)
       return NSValue(caTransform3D:
         CATransform3DRotate(s, deg * .pi / 180, 0, 0, 1))
@@ -636,17 +617,21 @@ private final class CityPinView: MKAnnotationView {
     let b  = Double(baseOp)
 
     if hot {
-      ta.values   = [t(1.00,1.00,0.0), t(0.78,1.14,5.5), t(1.11,0.88,-3.5),
-                     t(0.84,1.12,4.0), t(1.07,0.91,-2.5), t(0.88,1.06,3.0),
-                     t(1.00,1.00,0.0)]
-      ta.keyTimes = [0, 0.14, 0.30, 0.48, 0.64, 0.80, 1.0]
-      oa.values   = [b, b*1.05, b*0.87, b*1.04, b*0.91, b*1.00, b]
+      // scaleX and scaleY move in opposite directions: the flame tongue
+      // surges upward (scaleY 1.30, scaleX 0.70 — tall and thin) then
+      // collapses and spreads (scaleY 0.72, scaleX 1.20 — short and wide),
+      // exactly as a real fire tongue does.
+      ta.values   = [t(1.00,1.00,  0.0), t(0.70,1.30, 13.0), t(1.20,0.72,-10.0),
+                     t(0.78,1.22,  8.0), t(1.12,0.80, -6.0), t(0.88,1.12,  3.0),
+                     t(1.00,1.00,  0.0)]
+      ta.keyTimes = [0, 0.16, 0.34, 0.54, 0.74, 0.90, 1.0]
+      oa.values   = [b, b*1.08, b*0.72, b*1.06, b*0.78, b*1.02, b]
     } else {
-      ta.values   = [t(1.00,1.00,0.0), t(0.85,1.10,3.5), t(1.06,0.93,-2.0),
-                     t(0.91,1.07,2.5), t(1.03,0.95,-1.5), t(0.97,1.03,1.0),
-                     t(1.00,1.00,0.0)]
-      ta.keyTimes = [0, 0.18, 0.36, 0.54, 0.72, 0.90, 1.0]
-      oa.values   = [b, b*1.04, b*0.89, b*1.03, b*0.94, b*1.01, b]
+      ta.values   = [t(1.00,1.00,  0.0), t(0.86,1.11,  8.0), t(1.05,0.92, -6.5),
+                     t(0.92,1.08,  5.5), t(1.03,0.95, -3.5), t(0.97,1.04,  2.0),
+                     t(1.00,1.00,  0.0)]
+      ta.keyTimes = [0, 0.20, 0.38, 0.57, 0.74, 0.90, 1.0]
+      oa.values   = [b, b*1.04, b*0.87, b*1.03, b*0.93, b*1.01, b]
     }
     ta.calculationMode = .cubic
     oa.keyTimes        = ta.keyTimes
