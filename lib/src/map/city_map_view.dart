@@ -7,10 +7,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/neat_loader.dart';
 import 'city_locator.dart';
@@ -399,6 +401,10 @@ class _CityMapViewState extends State<CityMapView> {
   Brightness _brightness = Brightness.dark;
   bool _androidInitDone = false;
 
+  // Current heat values per city name, 0.0–1.0. Empty until the first
+  // successful fetch. Cold (0) cities are absent from the server response.
+  Map<String, double> _cityHeat = {};
+
   // ─────────────────────────────────────────────────────────────────────────
   // Lifecycle
   // ─────────────────────────────────────────────────────────────────────────
@@ -409,6 +415,7 @@ class _CityMapViewState extends State<CityMapView> {
     _iosHandlerOwner = this;
     _iosChannel.setMethodCallHandler(_onNativeCall);
     if (widget.isSignUp) unawaited(_preselectCurrentCity());
+    if (!widget.isSignUp) unawaited(_fetchCityHeat());
   }
 
   /// How long the map is given to reach the detected city before the card
@@ -530,9 +537,50 @@ class _CityMapViewState extends State<CityMapView> {
     if (!mounted || epoch != _mapEpoch) return;
     map.onPinTap = _onCityPinTapped;
     setState(() => _androidMap = map);
+    // Push any heat data that arrived before the map was ready. The JS side
+    // queues the call itself if NeatMap.start() hasn't run yet.
+    _pushHeatToAndroid();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // City heat
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Fetches the current per-city heat from the backend and pushes it to both
+  /// map platforms. Cold cities (< 0.33) show a plain green pin; warm cities
+  /// (0.33–0.65) show a yellow pin with gentle animated flames; hot cities
+  /// (≥ 0.66) show an orange pin with intense animated flames.
+  Future<void> _fetchCityHeat() async {
+    try {
+      final resp = await http.get(
+        Uri.parse('$apiBaseUrl/api/posts/city-heat/'),
+      );
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        if (!mounted) return;
+        _cityHeat = data.map(
+          (k, v) => MapEntry(k, (v as num).toDouble()),
+        );
+        _pushHeatToAndroid();
+        _pushHeatToIos();
+      }
+    } catch (_) {}
+  }
+
+  void _pushHeatToAndroid() {
+    final map = _androidMap;
+    if (map == null || _cityHeat.isEmpty) return;
+    map.controller
+        .runJavaScript('NeatMap.updateHeat(${jsonEncode(_cityHeat)});')
+        .catchError((Object _) {});
+  }
+
+  void _pushHeatToIos() {
+    if (_cityHeat.isEmpty) return;
+    _iosChannel
+        .invokeMethod<void>('updateHeat', _cityHeat)
+        .catchError((Object _) {});
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Shared event handlers
@@ -715,6 +763,9 @@ String _androidMapPage({
     ],
   });
   final bg = isDark ? '#0a0a0a' : '#f2f2f7';
+  // Label colours adapt to the host app's colour scheme.
+  final lblBg    = isDark ? 'rgba(30,30,46,.88)' : 'rgba(255,255,255,.88)';
+  final lblColor = isDark ? '#ebebf5' : '#1c1c1e';
 
   // StringBuffer so the ~800 KB of minified mapkit.js is appended verbatim,
   // never embedded inside a Dart string literal.
@@ -734,6 +785,78 @@ String _androidMapPage({
     /* No tap-highlight flashes on pin taps — this page is a map, not a
        document. */
     * { -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; }
+
+    /* ── Custom city pin ──────────────────────────────────────────────────
+       Each pin is a 44×76 px positioned element. The SVG balloon (32×46 px)
+       sits at the bottom; three flame layers grow upward from inside the
+       balloon top and are clipped behind it via z-index. The tip apex is the
+       anchor point placed at the city coordinate.
+       ──────────────────────────────────────────────────────────────────── */
+    .np { position:relative; width:44px; height:76px; overflow:visible; cursor:pointer; }
+
+    /* SVG balloon — rendered above flames */
+    .np .psv { position:absolute; bottom:0; left:6px; width:32px; height:46px;
+      z-index:2; overflow:visible;
+      filter:drop-shadow(0 2px 6px rgba(0,0,0,.38)); }
+
+    /* City-name label below tip */
+    .np .lbl { position:absolute; top:100%; left:50%; transform:translateX(-50%);
+      margin-top:3px; white-space:nowrap; pointer-events:none; z-index:3;
+      font:600 11px -apple-system,sans-serif;
+      color:$lblColor; background:$lblBg;
+      padding:1px 5px; border-radius:4px; }
+
+    /* Flame layers — shared geometry, z-index behind balloon */
+    .np .fo, .np .fm, .np .fi {
+      position:absolute; bottom:40px;
+      border-radius:50% 50% 35% 35% / 60% 60% 40% 40%;
+      transform-origin:50% 100%;
+      will-change:transform,opacity;
+      pointer-events:none; z-index:1;
+      opacity:0; animation:none; }
+
+    /* ── Tier 1: warm — yellow gentle flames ─────────────────────────── */
+    .np.t1 .fo { width:22px; height:26px; left:calc(50% - 11px);
+      background:radial-gradient(ellipse at 50% 90%,#FFE500,rgba(255,200,0,.82) 55%,rgba(255,160,0,0));
+      animation:fw 1.35s ease-in-out infinite; opacity:1; }
+    .np.t1 .fm { width:14px; height:18px; left:calc(50% - 7px);
+      background:radial-gradient(ellipse at 50% 90%,#FFF9C4,rgba(255,240,80,.72) 55%,rgba(255,210,0,0));
+      animation:fw 1.00s ease-in-out infinite; animation-delay:-0.38s; opacity:1; }
+    .np.t1 .fi { width:8px; height:12px; left:calc(50% - 4px);
+      background:radial-gradient(ellipse at 50% 90%,#fff,rgba(255,255,210,.88) 50%,rgba(255,250,80,0));
+      animation:fw 0.78s ease-in-out infinite; animation-delay:-0.62s; opacity:1; }
+
+    /* ── Tier 2: hot — orange intense flames ─────────────────────────── */
+    .np.t2 .fo { width:28px; height:32px; left:calc(50% - 14px);
+      background:radial-gradient(ellipse at 50% 90%,#FF8C00,rgba(255,60,0,.90) 55%,rgba(255,20,0,0));
+      animation:fh 0.68s ease-in-out infinite; opacity:1; }
+    .np.t2 .fm { width:18px; height:24px; left:calc(50% - 9px);
+      background:radial-gradient(ellipse at 50% 90%,#FFA500,rgba(255,90,0,.84) 55%,rgba(255,40,0,0));
+      animation:fh 0.50s ease-in-out infinite; animation-delay:-0.16s; opacity:1; }
+    .np.t2 .fi { width:10px; height:16px; left:calc(50% - 5px);
+      background:radial-gradient(ellipse at 50% 90%,#FFEE00,rgba(255,220,0,.92) 50%,rgba(255,140,0,0));
+      animation:fh 0.40s ease-in-out infinite; animation-delay:-0.28s; opacity:1; }
+
+    /* Warm flame keyframes — gentle sway, slow breathing */
+    @keyframes fw {
+      0%   { transform:scaleX(1.00) scaleY(1.00) rotate(  0deg); opacity:.88 }
+      18%  { transform:scaleX(0.85) scaleY(1.10) rotate( 3.5deg); opacity:.95 }
+      36%  { transform:scaleX(1.06) scaleY(0.93) rotate(-2.0deg); opacity:.78 }
+      54%  { transform:scaleX(0.91) scaleY(1.07) rotate( 2.5deg); opacity:.92 }
+      72%  { transform:scaleX(1.03) scaleY(0.95) rotate(-1.5deg); opacity:.83 }
+      90%  { transform:scaleX(0.97) scaleY(1.03) rotate( 1.0deg); opacity:.89 }
+      100% { transform:scaleX(1.00) scaleY(1.00) rotate(  0deg); opacity:.88 }
+    }
+    /* Hot flame keyframes — fast, aggressive flicker */
+    @keyframes fh {
+      0%   { transform:scaleX(1.00) scaleY(1.00) rotate(  0deg); opacity:.92 }
+      14%  { transform:scaleX(0.78) scaleY(1.14) rotate( 5.5deg); opacity:1.0  }
+      30%  { transform:scaleX(1.11) scaleY(0.88) rotate(-3.5deg); opacity:.80 }
+      48%  { transform:scaleX(0.84) scaleY(1.12) rotate( 4.0deg); opacity:.96 }
+      64%  { transform:scaleX(1.07) scaleY(0.91) rotate(-2.5deg); opacity:.84 }
+      80%  { transform:scaleX(0.88) scaleY(1.06) rotate( 3.0deg); opacity:.92 }
+      100% { transform:scaleX(1.00) scaleY(1.00) rotate(  0deg); opacity:.92 }
+    }
   </style>
 </head>
 <body>
@@ -748,6 +871,31 @@ String _androidMapPage({
       var userTouched = false;
       var settleTimer = null;
 
+      /* Heat values received before NeatMap.start() finishes are queued here
+         and replayed once the map and all pins exist. */
+      var pendingHeat = null;
+
+      /* Pin colour per tier. */
+      var TIER_COLORS = ['#34C759', '#FFCC00', '#FF6A00'];
+
+      /* Build the DOM element for one city pin at the given heat tier (0-2).
+         The SVG uses a teardrop path (circle top, pointed bottom) that mirrors
+         the MKMarkerAnnotationView balloon shape on iOS. Flames live behind
+         the SVG via z-index and are invisible at tier 0. */
+      function makePinEl(name, tier) {
+        var el = document.createElement('div');
+        el.className = 'np t' + tier;
+        el.style.setProperty('--c', TIER_COLORS[tier]);
+        el.innerHTML =
+          '<div class="fo"></div><div class="fm"></div><div class="fi"></div>' +
+          '<svg class="psv" viewBox="0 0 32 46" xmlns="http://www.w3.org/2000/svg">' +
+            '<path d="M16,0C7.16,0,0,7.16,0,16C0,24.84,16,46,16,46' +
+                 'C16,46,32,24.84,32,16C32,7.16,24.84,0,16,0Z" fill="var(--c)"/>' +
+            '<circle cx="16" cy="14" r="5" fill="rgba(255,255,255,.52)"/>' +
+          '</svg>' +
+          '<div class="lbl">' + name + '</div>';
+        return el;
+      }
 
       /* Set once focusCity() has aimed the camera somewhere deliberate. From
          then on the home-framing retries below must only re-apply the fence,
@@ -851,13 +999,21 @@ String _androidMapPage({
           });
 
           config.cities.forEach(function (c) {
-            var pin = new mapkit.MarkerAnnotation(
+            var el = makePinEl(c.name, 0);
+            var ann = new mapkit.Annotation(
               new mapkit.Coordinate(c.lat, c.lng),
-              { title: c.name, color: '#34C759', calloutEnabled: false }
+              function () { return el; },
+              {
+                title: c.name,
+                calloutEnabled: false,
+                // Anchor the tip (bottom of 76 px element) at the coordinate.
+                anchorOffset: new DOMPoint(0, -38)
+              }
             );
-            pin._neatPriority = c.priority || 400;
-            pin._neatName = c.name;
-            pin.addEventListener('select', function () {
+            ann._neatPriority = c.priority || 400;
+            ann._neatName = c.name;
+            ann._neatEl = el;
+            ann.addEventListener('select', function () {
               // Mirror iOS: the pin stays selected (raised) while its card is
               // open; reset() deselects it when the card closes. While the
               // card is up the Flutter overlay swallows all map input, so no
@@ -868,8 +1024,8 @@ String _androidMapPage({
               ));
               post({ event: 'pin', city: c.name });
             });
-            allPinsRef.push(pin);
-            map.addAnnotation(pin);
+            allPinsRef.push(ann);
+            map.addAnnotation(ann);
           });
 
           rankedPins = allPinsRef.slice().sort(function (a, b) {
@@ -925,6 +1081,12 @@ String _androidMapPage({
           // the map settles into its first layout.
           [300, 800, 2000].forEach(function (ms) { setTimeout(updatePinVisibility, ms); });
           window.addEventListener('resize', updatePinVisibility);
+
+          // Apply any heat that arrived via updateHeat() before start() ran.
+          if (pendingHeat) {
+            var h = pendingHeat; pendingHeat = null;
+            updateHeat(h);
+          }
 
           post({ event: 'ready' });
         } catch (e) {
@@ -995,7 +1157,20 @@ String _androidMapPage({
         catch (e) { try { map.region = overview(); } catch (e2) {} }
       }
 
-      function updateHeat(heatMap) { /* pins are always green — no-op */ }
+      /* Apply server-supplied heat values to each pin. Called from Dart via
+         runJavaScript. If the map isn't ready yet the data is queued and
+         replayed at the end of start(). */
+      function updateHeat(heatMap) {
+        if (!map) { pendingHeat = heatMap; return; }
+        allPinsRef.forEach(function (p) {
+          var el = p._neatEl;
+          if (!el) return;
+          var h = heatMap[p._neatName] || 0;
+          var tier = h >= 0.66 ? 2 : h >= 0.33 ? 1 : 0;
+          el.className = 'np t' + tier;
+          el.style.setProperty('--c', TIER_COLORS[tier]);
+        });
+      }
 
       return { start: start, reset: reset, focusCity: focusCity, updateHeat: updateHeat };
     })();
