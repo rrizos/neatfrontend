@@ -5701,7 +5701,6 @@ class _CommentSheetState extends State<_CommentSheet> {
   int? _effectiveParentId;
   String _imageUrl = '';
   /// The picked JPEG itself, so a comment image uploads as a file part.
-  Uint8List? _imageBytes;
   String _gifUrl   = '';
   bool _sending = false;
   bool _picking = false;
@@ -5890,7 +5889,6 @@ class _CommentSheetState extends State<_CommentSheet> {
         _imageUrl = 'data:image/$mime;base64,${base64Encode(bytes)}';
         // Kept so the picture can go up as a file rather than as base64 in the
         // JSON body, which costs a third more bytes.
-        _imageBytes = bytes;
         _gifUrl = '';
       });
     } finally {
@@ -5922,7 +5920,7 @@ class _CommentSheetState extends State<_CommentSheet> {
     final url = await completer.future;
     GiphyDialog.instance.removeListener(listener);
     if (!mounted || url == null || url.isEmpty) return;
-    setState(() { _gifUrl = url; _imageUrl = ''; _imageBytes = null; });
+    setState(() { _gifUrl = url; _imageUrl = ''; });
   }
 
 
@@ -5938,27 +5936,17 @@ class _CommentSheetState extends State<_CommentSheet> {
           'parentId': '${_effectiveParentId ?? _replyingTo!.id}',
         if (_effectiveParentId != null) 'replyToUsername': _replyingTo!.author,
       };
-      final http.Response res;
-      if (_imageBytes != null) {
-        final request = http.MultipartRequest(
-          'POST', postCommentsEndpoint(widget.post.id),
-        )
-          ..headers.addAll(authGetHeaders(widget.session.token))
-          ..fields.addAll(fields)
-          ..files.add(http.MultipartFile.fromBytes(
-            'image', _imageBytes!, filename: 'comment.jpg',
-          ));
-        res = await http.Response.fromStream(await request.send());
-      } else {
-        res = await http.post(
-          postCommentsEndpoint(widget.post.id),
-          headers: authJsonHeaders(widget.session.token),
-          body: jsonEncode({
-            ...fields,
-            if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
-          }),
-        );
-      }
+      // Always use JSON — the backend's comment endpoint tries json.loads()
+      // before it checks the content-type, so a multipart body returns 400.
+      // The backend already handles data: URLs via store_comment_image_data.
+      final res = await http.post(
+        postCommentsEndpoint(widget.post.id),
+        headers: authJsonHeaders(widget.session.token),
+        body: jsonEncode({
+          ...fields,
+          if (_imageUrl.isNotEmpty) 'imageUrl': _imageUrl,
+        }),
+      );
       if (!mounted) return;
       if (res.statusCode == 200 || res.statusCode == 201) {
         final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -5966,7 +5954,7 @@ class _CommentSheetState extends State<_CommentSheet> {
         setState(() {
           _replyingTo = null;
           _effectiveParentId = null;
-          _imageUrl = ''; _imageBytes = null;
+          _imageUrl = '';
           _gifUrl   = '';
         });
         _controller.clear();
@@ -6477,7 +6465,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                             top: -8,
                             right: -8,
                             child: GestureDetector(
-                              onTap: () => setState(() { _imageUrl = ''; _imageBytes = null; }),
+                              onTap: () => setState(() { _imageUrl = ''; }),
                               child: Container(
                                 width: 22,
                                 height: 22,
