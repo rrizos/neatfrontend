@@ -81,7 +81,7 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     let v = mv.dequeueReusableAnnotationView(
       withIdentifier: "pin", for: annotation
     ) as! MKMarkerAnnotationView
-    v.markerTintColor = Self.heatColor(for: (annotation as? CityAnnotation)?.heat ?? 0)
+    v.markerTintColor = UIColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1) // always green
     v.glyphImage = UIImage(systemName: "mappin")
     v.canShowCallout = false
     // Spacing is decided in `applyDeclutter()`, which knows the pin's exact
@@ -395,30 +395,8 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
 
   // MARK: Heat
 
-  /// The same four bands the Android map uses, so a city reads identically on
-  /// both platforms.
-  static func heatColor(for heat: Double) -> UIColor {
-    if heat < 0.25 { return UIColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1) } // #34C759
-    if heat < 0.5  { return UIColor(red: 1.000, green: 0.800, blue: 0.000, alpha: 1) } // #FFCC00
-    if heat < 0.75 { return UIColor(red: 1.000, green: 0.584, blue: 0.000, alpha: 1) } // #FF9500
-    return UIColor(red: 1.000, green: 0.231, blue: 0.188, alpha: 1)                    // #FF3B30
-  }
-
-  /// Applies a city→heat map from Flutter and repaints the pins already drawn.
-  ///
-  /// Setting the annotation alone is not enough: MapKit hands out the view
-  /// once and does not revisit `viewFor` for an annotation it has already
-  /// placed, so a pin on screen would keep its old colour until it scrolled
-  /// out of range and back.
-  private func updateHeat(_ values: [String: Double]) {
-    for city in allCities {
-      guard let name = city.title else { continue }
-      city.heat = values[name] ?? 0
-      if let view = map.view(for: city) as? MKMarkerAnnotationView {
-        view.markerTintColor = Self.heatColor(for: city.heat)
-      }
-    }
-  }
+  /// Pins are always green — heat updates are ignored.
+  private func updateHeat(_ values: [String: Double]) {}
 }
 
 // MARK: - Still snapshot

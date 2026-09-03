@@ -6095,8 +6095,9 @@ class _CommentSheetState extends State<_CommentSheet> {
 
   Widget _tile(BuildContext context, FeedComment c, bool isReply, bool isLight, {int? parentCommentId}) {
     final avatar = avatarProvider(c.author, c.avatarUrl);
-    final isNetworkImg = c.imageUrl.startsWith('http');
-    final imgBytes = (!isNetworkImg && c.imageUrl.isNotEmpty) ? decodeAvatarUrl(c.imageUrl) : null;
+    final resolvedImgUrl = c.imageUrl.startsWith('/') ? '$apiBaseUrl${c.imageUrl}' : c.imageUrl;
+    final isNetworkImg = resolvedImgUrl.startsWith('http');
+    final imgBytes = (!isNetworkImg && resolvedImgUrl.isNotEmpty) ? decodeAvatarUrl(resolvedImgUrl) : null;
     final isLiked = _liked[c.id] ?? c.liked;
     final likeCount = _likes[c.id] ?? c.likes;
     final highlighted = c.id == _highlightedCommentId;
@@ -6264,7 +6265,7 @@ class _CommentSheetState extends State<_CommentSheet> {
                   _CommentPhoto(bytes: imgBytes),
                 ] else if (isNetworkImg) ...[
                   const SizedBox(height: 8),
-                  _CommentPhoto(url: c.imageUrl),
+                  _CommentPhoto(url: resolvedImgUrl),
                 ],
                 const SizedBox(height: 6),
                 Row(
@@ -6695,7 +6696,10 @@ String _timeAgo(DateTime created, AppLocalizations l10n) {
   if (diff.inMinutes < 1) return l10n.justNow;
   if (diff.inMinutes < 60) return l10n.timeMinutesAgo(diff.inMinutes);
   if (diff.inHours < 24) return l10n.timeHoursAgo(diff.inHours);
-  return l10n.timeDaysAgo(diff.inDays);
+  if (diff.inDays < 7) return l10n.timeDaysAgo(diff.inDays);
+  if (diff.inDays < 30) return l10n.timeWeeks(diff.inDays ~/ 7);
+  if (diff.inDays < 365) return l10n.timeMonths(diff.inDays ~/ 30);
+  return l10n.timeYears(diff.inDays ~/ 365);
 }
 
 // ── GIF picker listener ───────────────────────────────────────────────────────

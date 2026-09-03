@@ -7,12 +7,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../core/api.dart';
 import '../core/media_cache.dart';
 import '../core/neat_loader.dart';
 import 'city_locator.dart';
@@ -382,7 +380,6 @@ class _CityMapViewState extends State<CityMapView> {
   // ── UI state ──────────────────────────────────────────────────────────────
   GreeceCity? _activeCity;
   String? _joiningCityName;
-  Map<String, double> _cityHeat = {};
 
   // Bumped whenever the card is dismissed, to build a fresh platform view.
   //
@@ -412,7 +409,6 @@ class _CityMapViewState extends State<CityMapView> {
     _iosHandlerOwner = this;
     _iosChannel.setMethodCallHandler(_onNativeCall);
     if (widget.isSignUp) unawaited(_preselectCurrentCity());
-    if (!widget.isSignUp) unawaited(_fetchCityHeat());
   }
 
   /// How long the map is given to reach the detected city before the card
@@ -534,36 +530,9 @@ class _CityMapViewState extends State<CityMapView> {
     if (!mounted || epoch != _mapEpoch) return;
     map.onPinTap = _onCityPinTapped;
     setState(() => _androidMap = map);
-    _pushHeatToAndroid();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // City heat
-  // ─────────────────────────────────────────────────────────────────────────
-
-  Future<void> _fetchCityHeat() async {
-    try {
-      final res = await http.get(cityHeatEndpoint, headers: authGetHeaders(widget.token));
-      if (!mounted || res.statusCode != 200) return;
-      final raw = jsonDecode(res.body) as Map<String, dynamic>;
-      _cityHeat = raw.map((k, v) => MapEntry(k, (v as num).toDouble()));
-      _pushHeatToAndroid();
-      _pushHeatToIos();
-    } catch (_) {}
-  }
-
-  void _pushHeatToAndroid() {
-    final map = _androidMap;
-    if (map == null || !map.ready.value) return;
-    map.controller
-        .runJavaScript('NeatMap.updateHeat(${jsonEncode(_cityHeat)})')
-        .catchError((_) {});
-  }
-
-  void _pushHeatToIos() {
-    if (kIsWeb || !Platform.isIOS) return;
-    _iosChannel.invokeMethod<void>('updateHeat', _cityHeat).catchError((_) {});
-  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Shared event handlers
@@ -779,12 +748,6 @@ String _androidMapPage({
       var userTouched = false;
       var settleTimer = null;
 
-      function heatToColor(h) {
-        if (!h || h < 0.25) return '#34C759';
-        if (h < 0.5)  return '#FFCC00';
-        if (h < 0.75) return '#FF9500';
-        return '#FF3B30';
-      }
 
       /* Set once focusCity() has aimed the camera somewhere deliberate. From
          then on the home-framing retries below must only re-apply the fence,
@@ -890,7 +853,7 @@ String _androidMapPage({
           config.cities.forEach(function (c) {
             var pin = new mapkit.MarkerAnnotation(
               new mapkit.Coordinate(c.lat, c.lng),
-              { title: c.name, color: heatToColor(c.heat), calloutEnabled: false }
+              { title: c.name, color: '#34C759', calloutEnabled: false }
             );
             pin._neatPriority = c.priority || 400;
             pin._neatName = c.name;
@@ -1032,14 +995,7 @@ String _androidMapPage({
         catch (e) { try { map.region = overview(); } catch (e2) {} }
       }
 
-      function updateHeat(heatMap) {
-        allPinsRef.forEach(function (p) {
-          var h = heatMap[p._neatName];
-          if (h !== undefined) {
-            try { p.color = heatToColor(h); } catch (e) {}
-          }
-        });
-      }
+      function updateHeat(heatMap) { /* pins are always green — no-op */ }
 
       return { start: start, reset: reset, focusCity: focusCity, updateHeat: updateHeat };
     })();
