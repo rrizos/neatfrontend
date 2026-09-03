@@ -1170,7 +1170,7 @@ String _androidMapPage({
         allPinsRef.forEach(function (p) {
           var name = p._neatName;
           var h = heatMap[name] || 0;
-          var newTier = h >= 0.66 ? 2 : h >= 0.33 ? 1 : 0;
+          var newTier = h >= 2.5 ? 2 : h >= 1.75 ? 1 : 0;
           if (newTier === p._neatTier) return;
           p._neatTier = newTier;
 

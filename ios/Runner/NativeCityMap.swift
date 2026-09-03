@@ -90,8 +90,8 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
   }
 
   private static func heatTier(_ heat: Double) -> Int {
-    if heat >= 0.66 { return 2 }
-    if heat >= 0.33 { return 1 }
+    if heat >= 2.5  { return 2 }
+    if heat >= 1.75 { return 1 }
     return 0
   }
 
