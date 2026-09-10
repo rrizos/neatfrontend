@@ -71,7 +71,7 @@ const List<GreeceCity> greeceCities = [
     name: 'Πάτρα',
     latitude: 38.2466,
     longitude: 21.7346,
-    imageUrl: 'https://i-lovegreece.com/media/k2/items/cache/df635c58c6c7c16f9e0cf7d5b1fc53b0_XL.jpg',
+    imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Sunset_over_Patras_%28Unsplash%29.jpg/1280px-Sunset_over_Patras_%28Unsplash%29.jpg',
   ),
   GreeceCity(
     name: 'Ηράκλειο',

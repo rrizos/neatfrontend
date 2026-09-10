@@ -139,6 +139,7 @@ Uri adminDeleteUserEndpoint(String username) =>
 Uri commentLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/like/');
 Uri commentReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/report/');
 Uri commentPinEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/pin/');
+Uri userPostsEndpoint(String username) => Uri.parse('$apiBaseUrl/api/posts/user/$username/');
 Uri get savedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/saved/');
 Uri get likedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/liked/');
 Uri get forgotPasswordEndpoint => Uri.parse('$apiBaseUrl/api/auth/forgot-password/');

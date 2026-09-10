@@ -236,16 +236,22 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       if (isOtherCity && !_forceOtherCity) {
         setState(() => _forceOtherCity = true);
       }
-      if (!widget.followEnabled || isOtherCity) _loadOtherCityPosts();
+      // Always fetch all posts for any profile that isn't the viewer's own —
+      // widget.posts only holds whatever happened to be in the feed at the
+      // time the profile was opened, so it misses older posts.
+      final isOwnProfile = widget.username == widget.currentUser.username;
+      // Set _autoNavigating BEFORE awaiting posts so that cacheExtent: 30000
+      // is active from the first render — all items get pre-built, giving
+      // valid RenderBoxes for the height-based scroll calculation below.
+      final bool wantsComments = widget.autoOpenCommentActor != null ||
+          widget.autoOpenCommentId != null ||
+          widget.autoOpenCommentPost != null;
+      if (widget.initialPostId != null && (widget.bouncePost || wantsComments)) {
+        setState(() => _autoNavigating = true);
+        widget.onHideNavBar?.call();
+      }
+      if (!isOwnProfile) await _loadOtherCityPosts();
       if (widget.initialPostId != null) {
-        final bool wantsComments = widget.autoOpenCommentActor != null ||
-            widget.autoOpenCommentId != null ||
-            widget.autoOpenCommentPost != null;
-        final bool doAuto = widget.bouncePost || wantsComments;
-        if (doAuto) {
-          setState(() => _autoNavigating = true);
-          widget.onHideNavBar?.call();
-        }
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted) return;
           // With cacheExtent: 30000, all post widgets are pre-built with valid
@@ -253,7 +259,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           final innerCtrl = _nestedScrollKey.currentState?.innerController;
           if (innerCtrl != null && innerCtrl.hasClients) {
             final profileUsername = _profile?.username ?? '';
-            final userPosts = widget.posts
+            // Use the fetched full post list when available; fall back to the
+            // feed slice for own-profile or while loading.
+            final postsSource = (_otherCityPosts != null && _otherCityPosts!.isNotEmpty)
+                ? _otherCityPosts!
+                : widget.posts.where((p) => p.author == profileUsername).toList();
+            final userPosts = postsSource
                 .where((p) => p.author == profileUsername)
                 .toList();
             final postIdx =
@@ -798,18 +809,25 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     if (mounted) setState(() => _otherCityPostsLoading = true);
     try {
       final res = await http.get(
-        postsEndpoint(city: profile.city),
+        userPostsEndpoint(profile.username),
         headers: authGetHeaders(widget.token),
       );
       if (!mounted) return;
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-        final all = (decoded['posts'] as List<dynamic>? ?? const [])
+        // The lean payload ships avatars once per author, keyed by username.
+        // Re-attach them to each post the same way the feed parser does.
+        final avatars = (decoded['avatars'] as Map<String, dynamic>? ?? const {});
+        final posts = (decoded['posts'] as List<dynamic>? ?? const [])
             .whereType<Map<String, dynamic>>()
-            .map(FeedPost.fromJson)
+            .map((json) {
+              final avatar = avatars[json['author']?.toString() ?? '']?.toString() ?? '';
+              if (avatar.isNotEmpty) json['avatarUrl'] = avatar;
+              return FeedPost.fromJson(json);
+            })
             .toList();
         setState(() {
-          _otherCityPosts = all.where((p) => p.author == profile.username).toList();
+          _otherCityPosts = posts;
           _otherCityPostsLoading = false;
         });
       } else {
@@ -926,9 +944,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final effectiveFollowEnabled = widget.followEnabled && !_forceOtherCity;
     final feedPosts = widget.posts.where((p) => p.author == profile.username && !_deletedPostIds.contains(p.id)).toList();
     final fetched = _otherCityPosts?.where((p) => !_deletedPostIds.contains(p.id)).toList();
-    final userPosts = effectiveFollowEnabled
-        ? feedPosts
-        : ((fetched != null && fetched.isNotEmpty) ? fetched : feedPosts);
+    // Prefer the fetched list (from userPostsEndpoint) over whatever
+    // happened to be in the feed — the feed only holds a partial window.
+    // Fall back to feedPosts while loading or for own profile.
+    final userPosts = (fetched != null && fetched.isNotEmpty)
+        ? fetched
+        : feedPosts;
     return AbsorbPointer(
       absorbing: _autoNavigating,
       child: Scaffold(
@@ -1046,7 +1067,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                _Metric(label: AppLocalizations.of(context).metricPosts, value: '${userPosts.length}', onTap: null),
+                                _Metric(label: AppLocalizations.of(context).metricPosts, value: '${profile.postCount > 0 ? profile.postCount : userPosts.length}', onTap: null),
                                 _Metric(
                                   label: AppLocalizations.of(context).metricFollowers,
                                   value: '${profile.followers}',

@@ -120,6 +120,7 @@ class UserProfile {
     this.hasPassword = true,
     this.canChangeCity = true,
     this.cityChangeAllowedAt,
+    this.postCount = 0,
   });
   final int id;
   final String username;
@@ -173,6 +174,7 @@ class UserProfile {
   final bool canCreateOfficialEvents;
   final bool isBlocked;
   final bool hasBlockedYou;
+  final int postCount;
 
   UserProfile copyWith({
     bool? isFollowing,
@@ -211,6 +213,7 @@ class UserProfile {
     hasPassword: hasPassword ?? this.hasPassword,
     canChangeCity: canChangeCity ?? this.canChangeCity,
     cityChangeAllowedAt: cityChangeAllowedAt,
+    postCount: postCount,
   );
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -248,6 +251,7 @@ class UserProfile {
       canCreateOfficialEvents: json['canCreateOfficialEvents'] == true,
       isBlocked: json['isBlocked'] == true,
       hasBlockedYou: json['hasBlockedYou'] == true,
+      postCount: parseInt(json['postCount']),
     );
   }
 
@@ -278,6 +282,7 @@ class UserProfile {
     'canCreateOfficialEvents': canCreateOfficialEvents,
     'isBlocked': isBlocked,
     'hasBlockedYou': hasBlockedYou,
+    'postCount': postCount,
   };
 }
 
