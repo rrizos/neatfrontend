@@ -386,8 +386,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await prefs.setBool(_kGreeceAnnouncementKey, true);
     if (!mounted) return;
 
-    // Popup disabled for OTA patch — will be enabled in next full release.
-    // (Shorebird cannot patch font assets, causing icon rendering issues.)
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      barrierDismissible: true,
+      builder: (_) => _GreecePopup(
+        onTryNow: () {
+          if (!mounted) return;
+          setState(() {
+            _feedScope = 'greece';
+            _nav = 0;
+            _showInlineProfile = false;
+          });
+          unawaited(_load());
+        },
+      ),
+    );
   }
 
   Future<void> _load() async {
@@ -7222,8 +7236,8 @@ class _PopupCard extends StatelessWidget {
                       ),
                       child: const Center(
                         child: Text(
-                          '✕',
-                          style: TextStyle(color: Colors.white, fontSize: 14, height: 1),
+                          'X',
+                          style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700, height: 1),
                         ),
                       ),
                     ),
