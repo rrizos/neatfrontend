@@ -175,6 +175,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   bool _likedLoading = false;
   List<FeedPost>? _savedPosts;
   bool _savedLoading = false;
+  String _savedScope = 'city';
   List<FeedPost>? _greecePosts;
   bool _greecePostsLoading = false;
   // 'city' shows city-scope posts; 'greece' shows Ελλάδα posts. Lives in tab 0.
@@ -748,7 +749,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       onFollowUser: interactive ? _followUser : null,
       onUnfollowUser: interactive ? _unfollowUser : null,
       likingEnabled: postInteractive,
-      savingEnabled: !showCity,
+      savingEnabled: postInteractive,
       onLike: postInteractive ? () => _likePost(post) : () async => false,
       onSave: postInteractive ? () => _savePost(post) : () async => false,
       onShare: () async {
@@ -1451,16 +1452,74 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       return const Center(child: Icon(Icons.lock_outline, size: 48, color: Color(0xffb3b3b3)));
     }
     if (_savedLoading) return const NeatLoader();
-    final saved = _savedPosts;
-    if (saved == null) return const SizedBox.shrink();
+    final all = _savedPosts;
+    if (all == null) return const SizedBox.shrink();
+
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final textColor = isLight ? Colors.black : Colors.white;
+    final dimColor = isLight ? const Color(0xff9e9e9e) : const Color(0xff666666);
+
+    // Filter by scope.
+    final saved = all.where((p) => p.scope == _savedScope).toList();
+    final isGreece = _savedScope == 'greece';
+
+    Widget scopeSwitcher = GestureDetector(
+      onTapUp: (details) async {
+        final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+        final tapPos = details.globalPosition;
+        final selected = await showMenu<String>(
+          context: context,
+          position: RelativeRect.fromLTRB(
+            tapPos.dx, tapPos.dy, overlay.size.width - tapPos.dx, 0,
+          ),
+          items: [
+            PopupMenuItem(value: 'city', child: Text('Αποθηκευμένα πόλης', style: TextStyle(color: textColor))),
+            PopupMenuItem(value: 'greece', child: Text('Αποθηκευμένα Ελλάδας', style: TextStyle(color: textColor))),
+          ],
+          color: isLight ? Colors.white : const Color(0xff1c1c1e),
+          elevation: 4,
+        );
+        if (selected != null && selected != _savedScope && mounted) {
+          setState(() => _savedScope = selected);
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              isGreece ? 'Ελλάδα' : 'Πόλη',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
+            ),
+            const SizedBox(width: 2),
+            Icon(Icons.arrow_drop_down_rounded, size: 18, color: dimColor),
+          ],
+        ),
+      ),
+    );
+
+    Widget content;
     if (saved.isEmpty) {
-      return Center(child: Text(AppLocalizations.of(context).noSavedPosts, style: const TextStyle(color: Color(0xffb3b3b3))));
+      content = Expanded(child: Center(child: Text(AppLocalizations.of(context).noSavedPosts, style: TextStyle(color: dimColor))));
+    } else {
+      content = Expanded(
+        child: ListView.builder(
+          key: PageStorageKey('saved_$_savedScope'),
+          padding: const EdgeInsets.only(bottom: 120),
+          itemCount: saved.length,
+          itemBuilder: (_, i) => _buildPostCard(
+            saved[i],
+            key: ValueKey(saved[i].id),
+            showCity: isGreece,
+          ),
+        ),
+      );
     }
-    return ListView.builder(
-      key: const PageStorageKey('saved'),
-      padding: const EdgeInsets.only(bottom: 120),
-      itemCount: saved.length,
-      itemBuilder: (_, i) => _buildPostCard(saved[i], key: ValueKey(saved[i].id)),
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [scopeSwitcher, content],
     );
   }
 

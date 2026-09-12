@@ -2555,7 +2555,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   onFollowUser: canFollowPost ? _follow : null,
                   onUnfollowUser: canFollowPost ? _unfollow : null,
                   likingEnabled: _activeCity == null,
-                  savingEnabled: !showCity,
+                  savingEnabled: true,
                   onLike: () => _likePost(post),
                   onSave: () => _savePost(post),
                   onShare: () async {
