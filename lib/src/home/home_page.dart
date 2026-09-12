@@ -386,22 +386,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await prefs.setBool(_kGreeceAnnouncementKey, true);
     if (!mounted) return;
 
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.55),
-      barrierDismissible: true,
-      builder: (_) => _GreecePopup(
-        onTryNow: () {
-          if (!mounted) return;
-          setState(() {
-            _feedScope = 'greece';
-            _nav = 0;
-            _showInlineProfile = false;
-          });
-          unawaited(_load());
-        },
-      ),
-    );
+    // Popup disabled for OTA patch — will be enabled in next full release.
+    // (Shorebird cannot patch font assets, causing icon rendering issues.)
   }
 
   Future<void> _load() async {
