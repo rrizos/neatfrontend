@@ -7234,18 +7234,17 @@ class _PopupCard extends StatelessWidget {
                         color: Colors.white.withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.close, color: Colors.white, size: 16),
+                      child: const Center(
+                        child: Text(
+                          '✕',
+                          style: TextStyle(color: Colors.white, fontSize: 14, height: 1),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-                // Centred icon
-                const Center(
-                  child: Icon(
-                    Icons.public_rounded,
-                    size: 56,
-                    color: Colors.white,
-                  ),
-                ),
+                // Centred globe — drawn, no icon font needed
+                Center(child: CustomPaint(size: const Size(60, 60), painter: _GlobePainter())),
               ],
             ),
           ),
@@ -7324,6 +7323,35 @@ class _PopupCard extends StatelessWidget {
       ),
     );
   }
+}
+
+// Simple globe drawn with Canvas — no icon font dependency.
+class _GlobePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final r = size.width / 2;
+    final paint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+
+    // Outer circle
+    canvas.drawCircle(Offset(cx, cy), r, paint);
+    // Horizontal equator
+    canvas.drawLine(Offset(0, cy), Offset(size.width, cy), paint);
+    // Vertical meridian
+    canvas.drawLine(Offset(cx, 0), Offset(cx, size.height), paint);
+    // Inner ellipses (latitude lines)
+    canvas.drawArc(
+      Rect.fromCenter(center: Offset(cx, cy), width: size.width * 0.7, height: size.height),
+      0, 3.14159 * 2, false, paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_GlobePainter old) => false;
 }
 
 // Subtle diagonal white stripes on the header background.
