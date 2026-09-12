@@ -2541,7 +2541,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               showFollowing: _activeCity == null,
               feedScope: _feedScope,
               scrollController: scroll,
-              onTabChanged: (value) => setState(() => _selectedTab = value),
+              onTabChanged: (value) {
+                setState(() {
+                  _selectedTab = value;
+                  // Switching to Following tab while in Greece scope → revert to city.
+                  if (value == 1 && _feedScope == 'greece') {
+                    _feedScope = 'city';
+                    unawaited(_load());
+                  }
+                });
+              },
               onFeedScopeChanged: (scope) {
                 if (scope == _feedScope) return;
                 setState(() {
