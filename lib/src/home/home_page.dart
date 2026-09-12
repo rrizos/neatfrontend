@@ -219,6 +219,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // initState has returned, and the navigator isn't mounted yet either.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) PushService.instance.replayPending();
+      if (mounted) unawaited(_maybeShowGreeceAnnouncement());
     });
     _realtime.start();
     // Instant nav-badge updates on native, on top of the existing on-demand
@@ -373,6 +374,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// Whether the server said there are posts older than the ones we hold.
   bool _hasOlderPosts = false;
   bool _loadingOlderPosts = false;
+
+  // ── Greece feed one-time announcement ────────────────────────────────────
+
+  static const _kGreeceAnnouncementKey = 'greece_announcement_v3';
+
+  Future<void> _maybeShowGreeceAnnouncement() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kGreeceAnnouncementKey) == true) return;
+    if (!mounted) return;
+    await prefs.setBool(_kGreeceAnnouncementKey, true);
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      barrierDismissible: true,
+      builder: (_) => _GreecePopup(
+        onTryNow: () {
+          if (!mounted) return;
+          setState(() {
+            _feedScope = 'greece';
+            _nav = 0;
+            _showInlineProfile = false;
+          });
+          unawaited(_load());
+        },
+      ),
+    );
+  }
 
   Future<void> _load() async {
     try {
@@ -7086,3 +7116,230 @@ class _CommentPhoto extends StatelessWidget {
     ));
   }
 }
+
+// ── Greece feed announcement popup ────────────────────────────────────────────
+
+class _GreecePopup extends StatefulWidget {
+  const _GreecePopup({required this.onTryNow});
+  final VoidCallback onTryNow;
+
+  @override
+  State<_GreecePopup> createState() => _GreecePopupState();
+}
+
+class _GreecePopupState extends State<_GreecePopup>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+  late final Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _scale = Tween<double>(begin: 0.88, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
+    );
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _close() async {
+    await _ctrl.reverse();
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _scale,
+      child: FadeTransition(
+        opacity: _fade,
+        child: Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: _PopupCard(
+              onTryNow: () async {
+                await _ctrl.reverse();
+                if (!mounted) return;
+                Navigator.of(context).pop();
+                widget.onTryNow();
+              },
+              onClose: _close,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PopupCard extends StatelessWidget {
+  const _PopupCard({required this.onTryNow, required this.onClose});
+  final VoidCallback onTryNow;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xff1a1a1a) : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black;
+    final subColor = isDark ? const Color(0xff999999) : const Color(0xff666666);
+
+    return ColoredBox(
+      color: bg,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Header visual ──────────────────────────────────────────────
+          SizedBox(
+            height: 160,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // Blue gradient background
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xff003D99), Color(0xff0060CC)],
+                    ),
+                  ),
+                ),
+                // Subtle white diagonal stripe — clean, geometric
+                CustomPaint(painter: _StripePainter()),
+                // Close button top-right
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: GestureDetector(
+                    onTap: onClose,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.close, color: Colors.white, size: 16),
+                    ),
+                  ),
+                ),
+                // Centred icon
+                const Center(
+                  child: Icon(
+                    Icons.public_rounded,
+                    size: 56,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Text ───────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Feed Ελλάδας',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Posts από χρήστες σε όλη την Ελλάδα, σε ένα feed.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: subColor,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Buttons ────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 48,
+                  child: FilledButton(
+                    onPressed: onTryNow,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xff0060CC),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text(
+                      'Δοκίμασέ το',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: onClose,
+                  child: Center(
+                    child: Text(
+                      'Αργότερα',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: subColor,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Subtle diagonal white stripes on the header background.
+class _StripePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.06)
+      ..strokeWidth = 28
+      ..style = PaintingStyle.stroke;
+    for (double x = -size.height; x < size.width + size.height; x += 56) {
+      canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_StripePainter old) => false;
+}
+
