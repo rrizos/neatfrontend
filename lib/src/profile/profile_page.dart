@@ -1358,7 +1358,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
             ),
             const SizedBox(width: 2),
-            Text('▾', style: TextStyle(fontSize: 15, color: dimColor, height: 1)),
+            const SizedBox(width: 2),
+            CustomPaint(size: const Size(9, 5), painter: _ChevronPainter(dimColor)),
           ],
         ),
       ),
@@ -1475,7 +1476,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
             ),
             const SizedBox(width: 2),
-            Text('▾', style: TextStyle(fontSize: 15, color: dimColor, height: 1)),
+            const SizedBox(width: 2),
+            CustomPaint(size: const Size(9, 5), painter: _ChevronPainter(dimColor)),
           ],
         ),
       ),
@@ -1551,7 +1553,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
             ),
             const SizedBox(width: 2),
-            Text('▾', style: TextStyle(fontSize: 15, color: dimColor, height: 1)),
+            const SizedBox(width: 2),
+            CustomPaint(size: const Size(9, 5), painter: _ChevronPainter(dimColor)),
           ],
         ),
       ),
@@ -3343,3 +3346,23 @@ class _CropOverlayPainter extends CustomPainter {
   @override
   bool shouldRepaint(_CropOverlayPainter old) => old.cropSize != cropSize;
 }
+
+// Font-independent downward chevron — safe for Shorebird OTA patches.
+class _ChevronPainter extends CustomPainter {
+  const _ChevronPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(path, Paint()..color = color..isAntiAlias = true);
+  }
+
+  @override
+  bool shouldRepaint(_ChevronPainter old) => old.color != color;
+}
+

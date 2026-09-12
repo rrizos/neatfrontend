@@ -3553,9 +3553,9 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
 
   Widget _scopeDropdownLabel(String label, Color textColor, FontWeight weight) {
     // The left SizedBox mirrors the icon width so the Row is symmetric and the
-    // text center stays at the tab center — keeping the indicator underline
-    // positioned exactly as it was before the arrow was added.
-    const double arrowW = 22.0; // icon 20 + gap 2
+    // The ▾ arrow is drawn via CustomPaint so its size is exact and we can
+    // balance it with an equal-width left spacer, keeping the label centred.
+    const double arrowW = 14.0; // painted arrow width + gap
     return Builder(
       builder: (ctx) {
         return GestureDetector(
@@ -3568,10 +3568,13 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(width: arrowW), // balance the arrow so text stays centered
+              const SizedBox(width: arrowW), // balance arrow on left
               Text(label, style: TextStyle(color: textColor, fontSize: 17, fontWeight: weight)),
-              const SizedBox(width: 2),
-              Text('▾', style: TextStyle(fontSize: 16, color: textColor, height: 1)),
+              const SizedBox(width: 4),
+              CustomPaint(
+                size: const Size(10, 6),
+                painter: _ChevronPainter(textColor),
+              ),
             ],
           ),
         );
@@ -7115,6 +7118,30 @@ class _CommentPhoto extends StatelessWidget {
       },
     ));
   }
+}
+
+// ── Shared painted chevron (font-independent ▾) ───────────────────────────────
+
+class _ChevronPainter extends CustomPainter {
+  const _ChevronPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_ChevronPainter old) => old.color != color;
 }
 
 // ── Greece feed announcement popup ────────────────────────────────────────────
