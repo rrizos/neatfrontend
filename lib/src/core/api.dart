@@ -148,7 +148,11 @@ Uri adminDeleteUserEndpoint(String username) =>
 Uri commentLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/like/');
 Uri commentReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/report/');
 Uri commentPinEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/pin/');
-Uri userPostsEndpoint(String username) => Uri.parse('$apiBaseUrl/api/posts/user/$username/');
+Uri userPostsEndpoint(String username, {String scope = 'city'}) {
+  final uri = Uri.parse('$apiBaseUrl/api/posts/user/$username/');
+  if (scope == 'city') return uri; // default — no param needed
+  return uri.replace(queryParameters: {'scope': scope});
+}
 Uri get savedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/saved/');
 Uri get likedPostsEndpoint => Uri.parse('$apiBaseUrl/api/posts/liked/');
 Uri get forgotPasswordEndpoint => Uri.parse('$apiBaseUrl/api/auth/forgot-password/');

@@ -339,6 +339,7 @@ class FeedPost {
     required this.likedByFollowing,
     this.authorVerified = false,
     this.shares = 0,
+    this.scope = 'city',
   });
 
   final int id;
@@ -355,6 +356,8 @@ class FeedPost {
   final List<String> likedByFollowing;
   final bool authorVerified;
   int shares;
+  // 'city' or 'greece' — matches the backend scope field.
+  final String scope;
   bool liked = false;
   bool saved = false;
   Poll? poll;
@@ -424,6 +427,7 @@ class FeedPost {
       likedByFollowing: likedByFollowing,
       authorVerified: json['authorVerified'] == true,
       shares: parseInt(json['shares'] ?? json['share_count']),
+      scope: json['scope']?.toString() ?? 'city',
     );
     post.liked = json['liked'] == true;
     post.saved = json['saved'] == true;

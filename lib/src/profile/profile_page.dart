@@ -1,3 +1,4 @@
+import 'dart:async' show unawaited;
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
@@ -116,6 +117,7 @@ class ProfilePage extends StatefulWidget {
     this.onOpenCommentsExact,
     this.onOpenComments,
     this.realtime,
+    this.initialTab = 0,
   });
   final String username;
   final UserProfile currentUser;
@@ -152,6 +154,8 @@ class ProfilePage extends StatefulWidget {
   final int activeNavIndex;
   // Native only — see realtime_service.dart. Null on web.
   final RealtimeService? realtime;
+  /// Which profile tab to open initially. 0=Posts, 1=Liked, 2=Saved, 3=Ελλάδα.
+  final int initialTab;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -171,6 +175,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   bool _likedLoading = false;
   List<FeedPost>? _savedPosts;
   bool _savedLoading = false;
+  List<FeedPost>? _greecePosts;
+  bool _greecePostsLoading = false;
+  // 'city' shows city-scope posts; 'greece' shows Ελλάδα posts. Lives in tab 0.
+  String _postScope = 'city';
   final Set<String> _followingAuthors = {};
   List<FeedPost>? _otherCityPosts;
   bool _otherCityPostsLoading = false;
@@ -183,7 +191,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    // initialTab == 3 is the "open Posts tab in Ελλάδα scope" signal from home_page.
+    // Map it to tab 0 (Posts); the scope switcher is driven by _postScope.
+    if (widget.initialTab == 3) _postScope = 'greece';
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialTab == 3 ? 0 : widget.initialTab.clamp(0, 2),
+    );
     _tabController.addListener(_onTabChanged);
     _load();
     _loadFollowingAuthors();
@@ -250,7 +265,22 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         setState(() => _autoNavigating = true);
         widget.onHideNavBar?.call();
       }
-      if (!isOwnProfile) await _loadOtherCityPosts();
+      // Always fetch city posts from the API so the Posts tab shows the correct
+      // city-scope posts regardless of which feed (city/greece) is active.
+      await _loadOtherCityPosts();
+      // If the profile opened in Ελλάδα scope (initialTab == 3), pre-load those too.
+      if (widget.initialTab == 3) unawaited(_loadGreecePosts());
+      // In-app share: if the target post is not in the city list, it must be
+      // a Greece post — switch scope and load Greece posts so the scroll/bounce
+      // works in the right list. We don't use widget.posts because the feed
+      // may be in city mode and won't contain Greece posts.
+      if (widget.initialPostId != null && _postScope == 'city') {
+        final targetInCity = _otherCityPosts?.any((p) => p.id == widget.initialPostId) ?? false;
+        if (!targetInCity) {
+          if (mounted) setState(() => _postScope = 'greece');
+          await _loadGreecePosts();
+        }
+      }
       if (widget.initialPostId != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted) return;
@@ -259,14 +289,22 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           final innerCtrl = _nestedScrollKey.currentState?.innerController;
           if (innerCtrl != null && innerCtrl.hasClients) {
             final profileUsername = _profile?.username ?? '';
-            // Use the fetched full post list when available; fall back to the
-            // feed slice for own-profile or while loading.
-            final postsSource = (_otherCityPosts != null && _otherCityPosts!.isNotEmpty)
-                ? _otherCityPosts!
-                : widget.posts.where((p) => p.author == profileUsername).toList();
-            final userPosts = postsSource
-                .where((p) => p.author == profileUsername)
-                .toList();
+            // Choose the right list depending on which scope is active.
+            final List<FeedPost> userPosts;
+            if (_postScope == 'greece') {
+              userPosts = (_greecePosts ?? [])
+                  .where((p) => p.author == profileUsername)
+                  .toList();
+            } else {
+              // Use the fetched full post list when available; fall back to the
+              // feed slice for own-profile or while loading.
+              final postsSource = (_otherCityPosts != null && _otherCityPosts!.isNotEmpty)
+                  ? _otherCityPosts!
+                  : widget.posts.where((p) => p.author == profileUsername).toList();
+              userPosts = postsSource
+                  .where((p) => p.author == profileUsername)
+                  .toList();
+            }
             final postIdx =
                 userPosts.indexWhere((p) => p.id == widget.initialPostId);
             if (postIdx > 0) {
@@ -693,19 +731,26 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     ).whenComplete(() => widget.onShowNavBar?.call());
   }
 
-  Widget _buildPostCard(FeedPost post, {Key? key}) {
+  Widget _buildPostCard(FeedPost post, {Key? key, bool showCity = false}) {
     final interactive = widget.followEnabled && !_forceOtherCity;
+    // Greece posts are always fully interactive regardless of city — you can
+    // like/comment/vote on any post in the Ελλάδα feed. Only follow stays
+    // city-restricted (you can't follow someone from another city).
+    final greecePosts = showCity;
+    final postInteractive = greecePosts ? true : interactive;
     return FeedPostCard(
       key: key,
       post: post,
       token: widget.token,
       currentUser: widget.currentUser,
       followingAuthors: _followingAuthors,
+      showCity: showCity,
       onFollowUser: interactive ? _followUser : null,
       onUnfollowUser: interactive ? _unfollowUser : null,
-      likingEnabled: interactive,
-      onLike: interactive ? () => _likePost(post) : () async => false,
-      onSave: interactive ? () => _savePost(post) : () async => false,
+      likingEnabled: postInteractive,
+      savingEnabled: !showCity,
+      onLike: postInteractive ? () => _likePost(post) : () async => false,
+      onSave: postInteractive ? () => _savePost(post) : () async => false,
       onShare: () async {
         bool shared = false;
         widget.onHideNavBar?.call();
@@ -720,13 +765,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         widget.onShowNavBar?.call();
         return shared;
       },
-      onVote: interactive ? (optionId) => _voteOnPoll(post, optionId) : null,
+      onVote: postInteractive ? (optionId) => _voteOnPoll(post, optionId) : null,
       onMore: () => _openMoreSheet(post),
       onComment: () {
-        // When we know commenting should be disabled (other-city profile),
-        // pass that flag; otherwise fall back to the plain onPostTap.
+        // Greece posts are always commentable; other-city city posts are not.
         if (widget.onOpenComments != null) {
-          widget.onOpenComments!(post, commentingEnabled: interactive);
+          widget.onOpenComments!(post, commentingEnabled: postInteractive);
         } else {
           widget.onPostTap(post);
         }
@@ -835,6 +879,39 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       }
     } catch (_) {
       if (mounted) setState(() { _otherCityPosts ??= []; _otherCityPostsLoading = false; });
+    }
+  }
+
+  Future<void> _loadGreecePosts({bool silent = false}) async {
+    final profile = _profile;
+    if (profile == null || _greecePostsLoading) return;
+    if (!silent && mounted) setState(() => _greecePostsLoading = true);
+    try {
+      final res = await http.get(
+        userPostsEndpoint(profile.username, scope: 'greece'),
+        headers: authGetHeaders(widget.token),
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        final avatars = (decoded['avatars'] as Map<String, dynamic>? ?? const {});
+        final posts = (decoded['posts'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map((json) {
+              final avatar = avatars[json['author']?.toString() ?? '']?.toString() ?? '';
+              if (avatar.isNotEmpty) json['avatarUrl'] = avatar;
+              return FeedPost.fromJson(json);
+            })
+            .toList();
+        setState(() {
+          _greecePosts = posts;
+          _greecePostsLoading = false;
+        });
+      } else {
+        setState(() { _greecePosts = []; _greecePostsLoading = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _greecePosts ??= []; _greecePostsLoading = false; });
     }
   }
 
@@ -1220,27 +1297,13 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         body: TabBarView(
           controller: _tabController,
           children: [
-            // Tab 0: Posts
-            (!effectiveFollowEnabled && _otherCityPostsLoading && feedPosts.isEmpty)
-                ? const Center(child: CircularProgressIndicator())
-                : userPosts.isEmpty
-                ? CustomScrollView(slivers: [SliverFillRemaining(hasScrollBody: false, child: Center(child: Text(AppLocalizations.of(context).noPostsYet, style: const TextStyle(color: Color(0xffb3b3b3)))))])
-                : ListView.builder(
-                    key: const PageStorageKey('posts'),
-                    // ignore: deprecated_member_use
-                    cacheExtent: _autoNavigating ? 30000.0 : null,
-                    padding: const EdgeInsets.only(bottom: 120),
-                    itemCount: userPosts.length,
-                    itemBuilder: (_, i) {
-                      final post = userPosts[i];
-                      final key = _postKeys.putIfAbsent(post.id, () => GlobalKey());
-                      Widget card = _buildPostCard(post, key: key);
-                      if (post.id == _bouncePostId) {
-                        card = _BounceHighlight(child: card);
-                      }
-                      return card;
-                    },
-                  ),
+            // Tab 0: Posts — with city/Ελλάδα scope switcher
+            _buildPostsTab(
+              isOwn: isOwn,
+              effectiveFollowEnabled: effectiveFollowEnabled,
+              userPosts: userPosts,
+              feedPostsEmpty: feedPosts.isEmpty,
+            ),
             // Tab 1: Liked
             _buildLikedTab(isOwn),
             // Tab 2: Saved
@@ -1249,6 +1312,120 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         ),
       ),
     )); // Scaffold + AbsorbPointer
+  }
+
+  Widget _buildPostsTab({
+    required bool isOwn,
+    required bool effectiveFollowEnabled,
+    required List<FeedPost> userPosts,
+    required bool feedPostsEmpty,
+  }) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final textColor = isLight ? Colors.black : Colors.white;
+    final dimColor = isLight ? const Color(0xff9e9e9e) : const Color(0xff666666);
+
+    // Scope switcher row — tapping opens a small popup menu.
+    Widget scopeSwitcher = GestureDetector(
+      onTapUp: (details) async {
+        final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+        final tapPos = details.globalPosition;
+        final selected = await showMenu<String>(
+          context: context,
+          position: RelativeRect.fromLTRB(
+            tapPos.dx, tapPos.dy, overlay.size.width - tapPos.dx, 0,
+          ),
+          items: [
+            PopupMenuItem(value: 'city', child: Text('Δημοσιεύσεις πόλης', style: TextStyle(color: textColor))),
+            PopupMenuItem(value: 'greece', child: Text('Δημοσιεύσεις Ελλάδας', style: TextStyle(color: textColor))),
+          ],
+          color: isLight ? Colors.white : const Color(0xff1c1c1e),
+          elevation: 4,
+        );
+        if (selected != null && selected != _postScope && mounted) {
+          setState(() => _postScope = selected);
+          if (selected == 'greece') _loadGreecePosts(silent: _greecePosts != null);
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _postScope == 'greece' ? 'Ελλάδα' : 'Πόλη',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
+            ),
+            const SizedBox(width: 2),
+            Icon(Icons.arrow_drop_down_rounded, size: 18, color: dimColor),
+          ],
+        ),
+      ),
+    );
+
+    if (_postScope == 'greece') {
+      // Greece posts list.
+      Widget greeceContent;
+      if (_greecePostsLoading && (_greecePosts == null || _greecePosts!.isEmpty)) {
+        greeceContent = const Expanded(child: NeatLoader());
+      } else {
+        final posts = _greecePosts ?? [];
+        greeceContent = posts.isEmpty
+            ? Expanded(child: Center(child: Text('Δεν υπάρχουν δημοσιεύσεις στην Ελλάδα', style: TextStyle(color: dimColor))))
+            : Expanded(
+                child: ListView.builder(
+                  key: const PageStorageKey('greece'),
+                  // ignore: deprecated_member_use
+                  cacheExtent: _autoNavigating ? 30000.0 : null,
+                  padding: const EdgeInsets.only(bottom: 120),
+                  itemCount: posts.length,
+                  itemBuilder: (_, i) {
+                    final post = posts[i];
+                    final key = _postKeys.putIfAbsent(post.id, () => GlobalKey());
+                    Widget card = _buildPostCard(post, key: key, showCity: true);
+                    if (post.id == _bouncePostId) {
+                      card = _BounceHighlight(child: card);
+                    }
+                    return card;
+                  },
+                ),
+              );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [scopeSwitcher, greeceContent],
+      );
+    }
+
+    // City posts list.
+    Widget cityContent;
+    if (!effectiveFollowEnabled && _otherCityPostsLoading && feedPostsEmpty) {
+      cityContent = const Expanded(child: Center(child: CircularProgressIndicator()));
+    } else if (userPosts.isEmpty) {
+      cityContent = Expanded(child: CustomScrollView(slivers: [SliverFillRemaining(hasScrollBody: false, child: Center(child: Text(AppLocalizations.of(context).noPostsYet, style: const TextStyle(color: Color(0xffb3b3b3)))))]));
+    } else {
+      cityContent = Expanded(
+        child: ListView.builder(
+          key: const PageStorageKey('posts'),
+          // ignore: deprecated_member_use
+          cacheExtent: _autoNavigating ? 30000.0 : null,
+          padding: const EdgeInsets.only(bottom: 120),
+          itemCount: userPosts.length,
+          itemBuilder: (_, i) {
+            final post = userPosts[i];
+            final key = _postKeys.putIfAbsent(post.id, () => GlobalKey());
+            Widget card = _buildPostCard(post, key: key);
+            if (post.id == _bouncePostId) {
+              card = _BounceHighlight(child: card);
+            }
+            return card;
+          },
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [scopeSwitcher, cityContent],
+    );
   }
 
   Widget _buildLikedTab(bool isOwn) {
@@ -1286,6 +1463,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       itemBuilder: (_, i) => _buildPostCard(saved[i], key: ValueKey(saved[i].id)),
     );
   }
+
 }
 
 

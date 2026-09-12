@@ -187,6 +187,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _showInlineProfile = false;
   String _inlineProfileUsername = '';
   int? _inlinePostId;
+  int _inlineProfileInitialTab = 0;
   bool _isIOS26 = false;
   int _navBarHideCount = 0; // reference count; bar only shows when this reaches 0
   // One WebSocket connection for the whole logged-in session (native only —
@@ -819,31 +820,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           Future<void>.delayed(const Duration(seconds: 2), () {
             if (mounted) _postingLabel.value = null;
           });
-          if (_feedScope == 'greece') {
-            // Greece post: close the compose sheet and stay on the Greece feed.
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            }
-            setState(() {
-              _nav = 0;
-              _showInlineProfile = false;
-            });
-            if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 0);
-          } else {
-            // City post: take the user straight to their profile to see the post.
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            }
-            setState(() {
-              _nav = 4;
-              _visitedTabs.add(4);
-              _inlineProfileUsername = widget.session.user.username;
-              _inlinePostId = null;
-              _showInlineProfile = true;
-              _profileRefreshKey++;
-            });
-            if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 4);
+          // Both city and greece posts: go to the profile to see the new post.
+          // Greece posts land on the Ελλάδα tab (index 3); city posts on Posts (index 0).
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).popUntil((route) => route.isFirst);
           }
+          setState(() {
+            _nav = 4;
+            _visitedTabs.add(4);
+            _inlineProfileUsername = widget.session.user.username;
+            _inlinePostId = null;
+            _inlineProfileInitialTab = _feedScope == 'greece' ? 3 : 0;
+            _showInlineProfile = true;
+            _profileRefreshKey++;
+          });
+          if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 4);
         }
       } else if (res.statusCode == 413) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2909,6 +2900,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         onSessionUpdated: widget.onSessionChanged,
                         onPostTap: _openComments,
                         initialPostId: _inlinePostId,
+                        initialTab: _inlineProfileInitialTab,
                         themeMode: widget.themeMode,
                         onThemeModeChanged: widget.onThemeModeChanged,
                         onHideNavBar: _hideNativeBar,
