@@ -3571,7 +3571,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
               const SizedBox(width: arrowW), // balance the arrow so text stays centered
               Text(label, style: TextStyle(color: textColor, fontSize: 17, fontWeight: weight)),
               const SizedBox(width: 2),
-              Icon(Icons.arrow_drop_down_rounded, size: 20, color: textColor),
+              Text('▾', style: TextStyle(fontSize: 16, color: textColor, height: 1)),
             ],
           ),
         );
@@ -4060,7 +4060,7 @@ class _ViralViewState extends State<_ViralView> {
                                     const SizedBox(width: 4),
                                     Text(_scopeLabel(context), style: TextStyle(color: isLight ? Colors.black : Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
                                     const SizedBox(width: 3),
-                                    Icon(Icons.expand_more_rounded, size: 15, color: muted),
+                                    Text('▾', style: TextStyle(fontSize: 13, color: muted, height: 1)),
                                   ],
                                 ),
                               ),
@@ -4095,7 +4095,7 @@ class _ViralViewState extends State<_ViralView> {
                                   children: [
                                     Text(_periodLabel(_period), style: TextStyle(color: muted, fontSize: 13, fontWeight: FontWeight.w600)),
                                     const SizedBox(width: 3),
-                                    Icon(Icons.expand_more_rounded, size: 15, color: muted),
+                                    Text('▾', style: TextStyle(fontSize: 13, color: muted, height: 1)),
                                   ],
                                 ),
                               ),
