@@ -1318,6 +1318,8 @@ class FeedPostCard extends StatefulWidget {
     this.onHideNavBar,
     this.onShowNavBar,
     this.likingEnabled = true,
+    this.savingEnabled = true,
+    this.sharingEnabled = true,
     this.onVote,
     this.showCity = false,
   });
@@ -1342,6 +1344,8 @@ class FeedPostCard extends StatefulWidget {
   final VoidCallback? onHideNavBar;
   final VoidCallback? onShowNavBar;
   final bool likingEnabled;
+  final bool savingEnabled;
+  final bool sharingEnabled;
   final Future<bool> Function(int optionId)? onVote;
   /// When true, append the post's city to the age line ("3h · Thessaloniki").
   /// Used in the Virals "Other cities" tab so readers know where each post is from.
@@ -1786,36 +1790,38 @@ class _FeedPostCardState extends State<FeedPostCard> with TickerProviderStateMix
                     ),
                   ],
                   // ── Share ─────────────────────────────────────────────
-                  const SizedBox(width: 14),
-                  GestureDetector(
-                    onTap: () async {
-                      final shared = await widget.onShare();
-                      if (shared && mounted) {
-                        setState(() {
-                          _shares++;
-                          widget.post.shares = _shares;
-                        });
-                      }
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: PostShareIcon(color: isLight ? Colors.black : Colors.white, size: 26),
-                    ),
-                  ),
-                  if (_shares > 0) ...[
-                    const SizedBox(width: 5),
-                    Text(
-                      _formatCount(_shares),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: isLight ? Colors.black : Colors.white,
+                  if (widget.sharingEnabled) ...[
+                    const SizedBox(width: 14),
+                    GestureDetector(
+                      onTap: () async {
+                        final shared = await widget.onShare();
+                        if (shared && mounted) {
+                          setState(() {
+                            _shares++;
+                            widget.post.shares = _shares;
+                          });
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: PostShareIcon(color: isLight ? Colors.black : Colors.white, size: 26),
                       ),
                     ),
+                    if (_shares > 0) ...[
+                      const SizedBox(width: 5),
+                      Text(
+                        _formatCount(_shares),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: isLight ? Colors.black : Colors.white,
+                        ),
+                      ),
+                    ],
                   ],
                   const Spacer(),
                   // ── Save ──────────────────────────────────────────────
-                  if (widget.likingEnabled)
+                  if (widget.likingEnabled && widget.savingEnabled)
                     GestureDetector(
                       onTap: _handleSave,
                       child: Padding(

@@ -1485,6 +1485,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _activeCity = city.trim();
       _selectedTab = 0;
+      _feedScope = 'city'; // Spectating always shows the city feed, no Greece option
       _nav = 0;
       _loading = true;
     });
@@ -2480,7 +2481,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             delegate: _TabsHeader(
               selectedTab: _selectedTab,
               city: _activeCity ?? widget.session.user.city,
-              showFollowing: _activeCity == null && _feedScope == 'city',
+              showFollowing: _activeCity == null,
               feedScope: _feedScope,
               scrollController: scroll,
               onTabChanged: (value) => setState(() => _selectedTab = value),
@@ -2527,6 +2528,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   onFollowUser: canFollowPost ? _follow : null,
                   onUnfollowUser: canFollowPost ? _unfollow : null,
                   likingEnabled: _activeCity == null,
+                  savingEnabled: !showCity,
+                  sharingEnabled: !showCity,
                   onLike: () => _likePost(post),
                   onSave: () => _savePost(post),
                   onShare: () async {
@@ -3521,8 +3524,8 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
     final inactiveClr = isLight ? const Color(0xff888888) : Colors.white38;
     final bg = isLight ? const Color(0xfff3f4f6) : const Color(0xff000000);
 
-    // Spectating another city (not Greece feed): single centered city label, no switcher
-    if (!widget.showFollowing && widget.feedScope != 'greece') {
+    // Spectating another city: single centered city label, no feed switcher
+    if (!widget.showFollowing) {
       return Container(
         color: bg.withValues(alpha: _bgOpacity),
         height: 52,
@@ -3534,17 +3537,10 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
       );
     }
 
-    // Greece feed active: single centered "Ελλάδα ▼" with scope switcher
-    if (widget.feedScope == 'greece') {
-      return Container(
-        color: bg.withValues(alpha: _bgOpacity),
-        height: 52,
-        alignment: Alignment.center,
-        child: _scopeDropdownLabel('Ελλάδα', activeClr, FontWeight.w800),
-      );
-    }
+    // Home — two tabs: [city/Ελλάδα ▼] | [Ακολουθείτε]
+    // Dropdown only opens when already on tab 0; tapping from tab 1 just switches tabs.
+    final tab0Label = widget.feedScope == 'greece' ? 'Ελλάδα' : widget.city;
 
-    // Normal home: city tab with dropdown ▼ + following tab
     return LayoutBuilder(
       builder: (context, constraints) {
         final tabW  = constraints.maxWidth / 2;
@@ -3559,6 +3555,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
 
             final forYouClr    = Color.lerp(activeClr,   inactiveClr, t)!;
             final followingClr = Color.lerp(inactiveClr, activeClr,   t)!;
+            final onTab0 = widget.selectedTab == 0;
 
             return Container(
               color: bg.withValues(alpha: _bgOpacity),
@@ -3568,15 +3565,27 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
                     children: [
                       Expanded(
                         child: InkWell(
-                          onTap: () => widget.onTabChanged(0),
+                          // If not on tab 0, just switch tabs. Dropdown is handled
+                          // inside _scopeDropdownLabel when already on tab 0.
+                          onTap: onTab0 ? null : () => widget.onTabChanged(0),
                           child: SizedBox(
                             height: 52,
                             child: Center(
-                              child: _scopeDropdownLabel(
-                                widget.city,
-                                forYouClr,
-                                t < 0.5 ? FontWeight.w800 : FontWeight.w500,
-                              ),
+                              // Show dropdown trigger only when on tab 0
+                              child: onTab0
+                                  ? _scopeDropdownLabel(
+                                      tab0Label,
+                                      forYouClr,
+                                      FontWeight.w800,
+                                    )
+                                  : Text(
+                                      tab0Label,
+                                      style: TextStyle(
+                                        color: forYouClr,
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
                             ),
                           ),
                         ),
