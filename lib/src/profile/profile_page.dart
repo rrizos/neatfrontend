@@ -173,6 +173,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   final _nestedScrollKey = GlobalKey<NestedScrollViewState>();
   List<FeedPost>? _likedPosts;
   bool _likedLoading = false;
+  String _likedScope = 'city';
   List<FeedPost>? _savedPosts;
   bool _savedLoading = false;
   String _savedScope = 'city';
@@ -1434,16 +1435,73 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       return const Center(child: Icon(Icons.lock_outline, size: 48, color: Color(0xffb3b3b3)));
     }
     if (_likedLoading) return const NeatLoader();
-    final liked = _likedPosts;
-    if (liked == null) return const SizedBox.shrink();
+    final all = _likedPosts;
+    if (all == null) return const SizedBox.shrink();
+
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final textColor = isLight ? Colors.black : Colors.white;
+    final dimColor = isLight ? const Color(0xff9e9e9e) : const Color(0xff666666);
+
+    final isGreece = _likedScope == 'greece';
+    final liked = all.where((p) => p.scope == _likedScope).toList();
+
+    Widget scopeSwitcher = GestureDetector(
+      onTapUp: (details) async {
+        final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+        final tapPos = details.globalPosition;
+        final selected = await showMenu<String>(
+          context: context,
+          position: RelativeRect.fromLTRB(
+            tapPos.dx, tapPos.dy, overlay.size.width - tapPos.dx, 0,
+          ),
+          items: [
+            PopupMenuItem(value: 'city', child: Text('Likes πόλης', style: TextStyle(color: textColor))),
+            PopupMenuItem(value: 'greece', child: Text('Likes Ελλάδας', style: TextStyle(color: textColor))),
+          ],
+          color: isLight ? Colors.white : const Color(0xff1c1c1e),
+          elevation: 4,
+        );
+        if (selected != null && selected != _likedScope && mounted) {
+          setState(() => _likedScope = selected);
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              isGreece ? 'Ελλάδα' : 'Πόλη',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
+            ),
+            const SizedBox(width: 2),
+            Icon(Icons.arrow_drop_down_rounded, size: 18, color: dimColor),
+          ],
+        ),
+      ),
+    );
+
+    Widget content;
     if (liked.isEmpty) {
-      return Center(child: Text(AppLocalizations.of(context).noLikedPosts, style: const TextStyle(color: Color(0xffb3b3b3))));
+      content = Expanded(child: Center(child: Text(AppLocalizations.of(context).noLikedPosts, style: TextStyle(color: dimColor))));
+    } else {
+      content = Expanded(
+        child: ListView.builder(
+          key: PageStorageKey('liked_$_likedScope'),
+          padding: const EdgeInsets.only(bottom: 120),
+          itemCount: liked.length,
+          itemBuilder: (_, i) => _buildPostCard(
+            liked[i],
+            key: ValueKey(liked[i].id),
+            showCity: isGreece,
+          ),
+        ),
+      );
     }
-    return ListView.builder(
-      key: const PageStorageKey('liked'),
-      padding: const EdgeInsets.only(bottom: 120),
-      itemCount: liked.length,
-      itemBuilder: (_, i) => _buildPostCard(liked[i], key: ValueKey(liked[i].id)),
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [scopeSwitcher, content],
     );
   }
 
