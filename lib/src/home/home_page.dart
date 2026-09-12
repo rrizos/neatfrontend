@@ -819,19 +819,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           Future<void>.delayed(const Duration(seconds: 2), () {
             if (mounted) _postingLabel.value = null;
           });
-          // Take the user straight to their profile so they can see the post.
-          if (Navigator.of(context).canPop()) {
-            Navigator.of(context).popUntil((route) => route.isFirst);
+          if (_feedScope == 'greece') {
+            // Greece post: close the compose sheet and stay on the Greece feed.
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            }
+            setState(() {
+              _nav = 0;
+              _showInlineProfile = false;
+            });
+            if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 0);
+          } else {
+            // City post: take the user straight to their profile to see the post.
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            }
+            setState(() {
+              _nav = 4;
+              _visitedTabs.add(4);
+              _inlineProfileUsername = widget.session.user.username;
+              _inlinePostId = null;
+              _showInlineProfile = true;
+              _profileRefreshKey++;
+            });
+            if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 4);
           }
-          setState(() {
-            _nav = 4;
-            _visitedTabs.add(4);
-            _inlineProfileUsername = widget.session.user.username;
-            _inlinePostId = null;
-            _showInlineProfile = true;
-            _profileRefreshKey++;
-          });
-          if (_isIOS26) _kTabChannel.invokeMethod('syncTab', 4);
         }
       } else if (res.statusCode == 413) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2116,6 +2128,30 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         color: isLight
                             ? const Color(0xffd9dee6)
                             : const Color(0xff242424),
+                      ),
+                      // ── posting destination label ────────────────────────
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _feedScope == 'greece' ? Icons.public_rounded : Icons.location_city_rounded,
+                              size: 13,
+                              color: isLight ? const Color(0xff666666) : const Color(0xff8a8a8a),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _feedScope == 'greece'
+                                  ? 'Δημοσιεύετε στην Ελλάδα'
+                                  : 'Δημοσιεύετε στην ${widget.session.user.city}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: isLight ? const Color(0xff666666) : const Color(0xff8a8a8a),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                       // ── scrollable compose area ──────────────────────────
                       Expanded(
@@ -3495,6 +3531,10 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
   }
 
   Widget _scopeDropdownLabel(String label, Color textColor, FontWeight weight) {
+    // The left SizedBox mirrors the icon width so the Row is symmetric and the
+    // text center stays at the tab center — keeping the indicator underline
+    // positioned exactly as it was before the arrow was added.
+    const double arrowW = 22.0; // icon 20 + gap 2
     return Builder(
       builder: (ctx) {
         return GestureDetector(
@@ -3507,6 +3547,7 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              const SizedBox(width: arrowW), // balance the arrow so text stays centered
               Text(label, style: TextStyle(color: textColor, fontSize: 17, fontWeight: weight)),
               const SizedBox(width: 2),
               Icon(Icons.arrow_drop_down_rounded, size: 20, color: textColor),
