@@ -118,6 +118,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final Set<String> _followerAuthors = {};
   final _cityScroll = ScrollController();
   final _followingScroll = ScrollController();
+  final _greeceScroll = ScrollController();
+  // 'city' = home city feed (default); 'greece' = national Ελλάδα feed.
+  String _feedScope = 'city';
   int _nav = 0;
   // Null until SharedPreferences has been read; the map tab simply behaves as
   // "already seen" during that window rather than risking a late intro.
@@ -329,6 +332,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     for (final c in _composePollControllers) { c.dispose(); }
     _cityScroll.dispose();
     _followingScroll.dispose();
+    _greeceScroll.dispose();
     _realtimeBadgeSub?.cancel();
     _realtime.dispose();
     NeatApp.pendingDeepLinkPost.removeListener(_onDeepLinkPost);
@@ -336,8 +340,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
 
-  String get _postsCacheKey =>
-      _activeCity == null ? 'cached_posts_home' : 'cached_posts_city_$_activeCity';
+  String get _postsCacheKey {
+    if (_feedScope == 'greece') return 'cached_posts_greece';
+    return _activeCity == null ? 'cached_posts_home' : 'cached_posts_city_$_activeCity';
+  }
 
   Future<void> _saveCachedPosts(String rawBody) async {
     try {
@@ -369,8 +375,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _load() async {
     try {
+      final endpoint = _feedScope == 'greece'
+          ? greeceFeedEndpoint(fresh: true)
+          : postsEndpoint(fresh: true, city: _activeCity);
       final res = await http.get(
-        postsEndpoint(fresh: true, city: _activeCity),
+        endpoint,
         headers: authGetHeaders(widget.session.token),
       );
       if (res.statusCode == 401) return widget.onLogout();
@@ -740,6 +749,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         },
       )..headers['Authorization'] = 'Token ${widget.session.token}';
       request.fields['text'] = text;
+      request.fields['scope'] = _feedScope;
 
       // Written down before the wait, in case the app does not survive it.
       // The system finishes the transfer either way; this is what remembers
@@ -2456,8 +2466,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget _buildFeedScrollView(
     List<FeedPost> posts,
     ScrollController scroll,
-    bool isLight,
-  ) {
+    bool isLight, {
+    bool showCity = false,
+  }) {
     return RefreshIndicator(
       onRefresh: _load,
       child: CustomScrollView(
@@ -2469,9 +2480,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             delegate: _TabsHeader(
               selectedTab: _selectedTab,
               city: _activeCity ?? widget.session.user.city,
-              showFollowing: _activeCity == null,
+              showFollowing: _activeCity == null && _feedScope == 'city',
+              feedScope: _feedScope,
               scrollController: scroll,
               onTabChanged: (value) => setState(() => _selectedTab = value),
+              onFeedScopeChanged: (scope) {
+                if (scope == _feedScope) return;
+                setState(() {
+                  _feedScope = scope;
+                  _selectedTab = 0;
+                });
+                unawaited(_load());
+              },
             ),
           ),
           if (posts.isEmpty)
@@ -2493,14 +2513,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               itemCount: posts.length,
               itemBuilder: (context, index) {
                 final post = posts[index];
+                // In the Greece feed only show follow for same-city posters.
+                final canFollowPost = _activeCity == null &&
+                    (_feedScope != 'greece' ||
+                        post.city == widget.session.user.city);
                 return FeedPostCard(
                   key: ValueKey(post.id),
                   post: post,
                   token: widget.session.token,
                   currentUser: widget.session.user,
                   followingAuthors: _followingAuthors,
-                  onFollowUser: _activeCity == null ? _follow : null,
-                  onUnfollowUser: _activeCity == null ? _unfollow : null,
+                  showCity: showCity,
+                  onFollowUser: canFollowPost ? _follow : null,
+                  onUnfollowUser: canFollowPost ? _unfollow : null,
                   likingEnabled: _activeCity == null,
                   onLike: () => _likePost(post),
                   onSave: () => _savePost(post),
@@ -2556,10 +2581,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   onComment: () => _openComments(post),
                   onProfileTap: () => _pushProfileRoute(post.author),
                   onOpenUserProfile: _pushProfileRoute,
-                  onFollow: (post.author != widget.session.user.username && _activeCity == null)
+                  onFollow: (post.author != widget.session.user.username && canFollowPost)
                       ? () => _follow(post.author)
                       : null,
-                  onUnfollow: (post.author != widget.session.user.username && _activeCity == null)
+                  onUnfollow: (post.author != widget.session.user.username && canFollowPost)
                       ? () => _unfollow(post.author)
                       : null,
                   isFollowing: _followingAuthors.contains(post.author),
@@ -2587,8 +2612,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_loadingOlderPosts || !_hasOlderPosts || _posts.isEmpty) return;
     _loadingOlderPosts = true;
     try {
+      final olderEndpoint = _feedScope == 'greece'
+          ? greeceFeedEndpoint(before: _posts.last.id)
+          : postsEndpoint(city: _activeCity, before: _posts.last.id);
       final res = await http.get(
-        postsEndpoint(city: _activeCity, before: _posts.last.id),
+        olderEndpoint,
         headers: authGetHeaders(widget.session.token),
       );
       if (res.statusCode != 200 || !mounted) return;
@@ -2779,14 +2807,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     child: IndexedStack(
                       index: _nav,
                       children: [
-                        // 0: Feed — two independent scroll views keep their own positions
-                        IndexedStack(
-                          index: _selectedTab,
-                          children: [
-                            _buildFeedScrollView(cityPosts, _cityScroll, isLight),
-                            _buildFeedScrollView(followingPosts, _followingScroll, isLight),
-                          ],
-                        ),
+                        // 0: Feed — city/following tabs, or the single Greece feed
+                        _feedScope == 'greece'
+                            ? _buildFeedScrollView(
+                                cityPosts,
+                                _greeceScroll,
+                                isLight,
+                                showCity: true,
+                              )
+                            : IndexedStack(
+                                index: _selectedTab,
+                                children: [
+                                  _buildFeedScrollView(cityPosts, _cityScroll, isLight),
+                                  _buildFeedScrollView(followingPosts, _followingScroll, isLight),
+                                ],
+                              ),
                         // 1: Viral — mounted lazily on first visit
                         _visitedTabs.contains(1)
                             ? _ViralView(
@@ -3299,31 +3334,63 @@ class _TopBar extends StatelessWidget {
 }
 
 class _TabsHeader extends SliverPersistentHeaderDelegate {
-  const _TabsHeader({required this.selectedTab, required this.city, required this.onTabChanged, required this.showFollowing, required this.scrollController});
+  const _TabsHeader({
+    required this.selectedTab,
+    required this.city,
+    required this.onTabChanged,
+    required this.showFollowing,
+    required this.scrollController,
+    required this.feedScope,
+    required this.onFeedScopeChanged,
+  });
   final int selectedTab;
   final String city;
   final bool showFollowing;
   final ValueChanged<int> onTabChanged;
   final ScrollController scrollController;
+  final String feedScope;
+  final ValueChanged<String> onFeedScopeChanged;
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return _TabsHeaderContent(selectedTab: selectedTab, city: city, onTabChanged: onTabChanged, showFollowing: showFollowing, scrollController: scrollController);
+    return _TabsHeaderContent(
+      selectedTab: selectedTab,
+      city: city,
+      onTabChanged: onTabChanged,
+      showFollowing: showFollowing,
+      scrollController: scrollController,
+      feedScope: feedScope,
+      onFeedScopeChanged: onFeedScopeChanged,
+    );
   }
   @override
   double get maxExtent => 52;
   @override
   double get minExtent => 52;
   @override
-  bool shouldRebuild(covariant _TabsHeader old) => old.selectedTab != selectedTab || old.city != city || old.showFollowing != showFollowing;
+  bool shouldRebuild(covariant _TabsHeader old) =>
+      old.selectedTab != selectedTab ||
+      old.city != city ||
+      old.showFollowing != showFollowing ||
+      old.feedScope != feedScope;
 }
 
 class _TabsHeaderContent extends StatefulWidget {
-  const _TabsHeaderContent({required this.selectedTab, required this.city, required this.onTabChanged, required this.showFollowing, required this.scrollController});
+  const _TabsHeaderContent({
+    required this.selectedTab,
+    required this.city,
+    required this.onTabChanged,
+    required this.showFollowing,
+    required this.scrollController,
+    required this.feedScope,
+    required this.onFeedScopeChanged,
+  });
   final int selectedTab;
   final String city;
   final bool showFollowing;
   final ValueChanged<int> onTabChanged;
   final ScrollController scrollController;
+  final String feedScope;
+  final ValueChanged<String> onFeedScopeChanged;
 
   @override
   State<_TabsHeaderContent> createState() => _TabsHeaderContentState();
@@ -3379,6 +3446,74 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
     super.dispose();
   }
 
+  void _showScopeMenu(BuildContext context, Offset topLeft) async {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final result = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(topLeft.dx, topLeft.dy + 52, topLeft.dx + 200, 0),
+      color: isLight ? Colors.white : const Color(0xff1c1c1e),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: [
+        PopupMenuItem<String>(
+          value: 'city',
+          child: Row(
+            children: [
+              if (widget.feedScope == 'city')
+                Icon(Icons.check, size: 18, color: isLight ? Colors.black : Colors.white),
+              if (widget.feedScope != 'city') const SizedBox(width: 18),
+              const SizedBox(width: 8),
+              Text(widget.city,
+                  style: TextStyle(
+                    color: isLight ? Colors.black : Colors.white,
+                    fontWeight: widget.feedScope == 'city' ? FontWeight.w700 : FontWeight.w400,
+                  )),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'greece',
+          child: Row(
+            children: [
+              if (widget.feedScope == 'greece')
+                Icon(Icons.check, size: 18, color: isLight ? Colors.black : Colors.white),
+              if (widget.feedScope != 'greece') const SizedBox(width: 18),
+              const SizedBox(width: 8),
+              Text('Ελλάδα',
+                  style: TextStyle(
+                    color: isLight ? Colors.black : Colors.white,
+                    fontWeight: widget.feedScope == 'greece' ? FontWeight.w700 : FontWeight.w400,
+                  )),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (result != null) widget.onFeedScopeChanged(result);
+  }
+
+  Widget _scopeDropdownLabel(String label, Color textColor, FontWeight weight) {
+    return Builder(
+      builder: (ctx) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            final box = ctx.findRenderObject() as RenderBox?;
+            final topLeft = box?.localToGlobal(Offset.zero) ?? Offset.zero;
+            _showScopeMenu(ctx, topLeft);
+          },
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label, style: TextStyle(color: textColor, fontSize: 17, fontWeight: weight)),
+              const SizedBox(width: 2),
+              Icon(Icons.arrow_drop_down_rounded, size: 20, color: textColor),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
@@ -3386,8 +3521,8 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
     final inactiveClr = isLight ? const Color(0xff888888) : Colors.white38;
     final bg = isLight ? const Color(0xfff3f4f6) : const Color(0xff000000);
 
-    // Spectating: single centered city tab, no indicator
-    if (!widget.showFollowing) {
+    // Spectating another city (not Greece feed): single centered city label, no switcher
+    if (!widget.showFollowing && widget.feedScope != 'greece') {
       return Container(
         color: bg.withValues(alpha: _bgOpacity),
         height: 52,
@@ -3399,6 +3534,17 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
       );
     }
 
+    // Greece feed active: single centered "Ελλάδα ▼" with scope switcher
+    if (widget.feedScope == 'greece') {
+      return Container(
+        color: bg.withValues(alpha: _bgOpacity),
+        height: 52,
+        alignment: Alignment.center,
+        child: _scopeDropdownLabel('Ελλάδα', activeClr, FontWeight.w800),
+      );
+    }
+
+    // Normal home: city tab with dropdown ▼ + following tab
     return LayoutBuilder(
       builder: (context, constraints) {
         final tabW  = constraints.maxWidth / 2;
@@ -3426,13 +3572,10 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
                           child: SizedBox(
                             height: 52,
                             child: Center(
-                              child: Text(
+                              child: _scopeDropdownLabel(
                                 widget.city,
-                                style: TextStyle(
-                                  color: forYouClr,
-                                  fontSize: 17,
-                                  fontWeight: t < 0.5 ? FontWeight.w800 : FontWeight.w500,
-                                ),
+                                forYouClr,
+                                t < 0.5 ? FontWeight.w800 : FontWeight.w500,
                               ),
                             ),
                           ),

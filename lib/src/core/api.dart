@@ -71,6 +71,15 @@ Uri postsEndpoint({bool fresh = false, String? city, int? before}) {
   return uri.replace(queryParameters: params);
 }
 
+Uri greeceFeedEndpoint({bool fresh = false, int? before}) {
+  final uri = Uri.parse('$apiBaseUrl/api/posts/greece/');
+  final params = <String, String>{};
+  if (before != null) params['before'] = '$before';
+  if (fresh) params['_'] = DateTime.now().millisecondsSinceEpoch.toString();
+  if (params.isEmpty) return uri;
+  return uri.replace(queryParameters: params);
+}
+
 Uri viralPostsEndpoint({
   String city = '',
   String excludeCity = '',
