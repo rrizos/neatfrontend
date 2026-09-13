@@ -2155,12 +2155,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                         child: Row(
                           children: [
-                            Icon(
-                              _feedScope == 'greece' ? Icons.public_rounded : Icons.location_city_rounded,
-                              size: 13,
-                              color: isLight ? const Color(0xff666666) : const Color(0xff8a8a8a),
-                            ),
-                            const SizedBox(width: 5),
                             Text(
                               _feedScope == 'greece'
                                   ? 'Δημοσιεύετε στην Ελλάδα'
@@ -3525,32 +3519,36 @@ class _TabsHeaderContentState extends State<_TabsHeaderContent>
       items: [
         PopupMenuItem<String>(
           value: 'city',
+          height: 38,
           child: Row(
             children: [
               if (widget.feedScope == 'city')
-                Icon(Icons.check, size: 18, color: isLight ? Colors.black : Colors.white),
-              if (widget.feedScope != 'city') const SizedBox(width: 18),
-              const SizedBox(width: 8),
+                Icon(Icons.check_rounded, size: 13, color: const Color(0xff34C759)),
+              if (widget.feedScope != 'city') const SizedBox(width: 13),
+              const SizedBox(width: 7),
               Text(widget.city,
                   style: TextStyle(
                     color: isLight ? Colors.black : Colors.white,
-                    fontWeight: widget.feedScope == 'city' ? FontWeight.w700 : FontWeight.w400,
+                    fontSize: 13,
+                    fontWeight: widget.feedScope == 'city' ? FontWeight.w600 : FontWeight.w400,
                   )),
             ],
           ),
         ),
         PopupMenuItem<String>(
           value: 'greece',
+          height: 38,
           child: Row(
             children: [
               if (widget.feedScope == 'greece')
-                Icon(Icons.check, size: 18, color: isLight ? Colors.black : Colors.white),
-              if (widget.feedScope != 'greece') const SizedBox(width: 18),
-              const SizedBox(width: 8),
+                Icon(Icons.check_rounded, size: 13, color: const Color(0xff34C759)),
+              if (widget.feedScope != 'greece') const SizedBox(width: 13),
+              const SizedBox(width: 7),
               Text('Ελλάδα',
                   style: TextStyle(
                     color: isLight ? Colors.black : Colors.white,
-                    fontWeight: widget.feedScope == 'greece' ? FontWeight.w700 : FontWeight.w400,
+                    fontSize: 13,
+                    fontWeight: widget.feedScope == 'greece' ? FontWeight.w600 : FontWeight.w400,
                   )),
             ],
           ),

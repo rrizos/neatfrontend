@@ -270,6 +270,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       // Always fetch city posts from the API so the Posts tab shows the correct
       // city-scope posts regardless of which feed (city/greece) is active.
       await _loadOtherCityPosts();
+      // Pre-load Greece posts so the post count includes both feeds.
+      // For own profile this is always needed; for others it also gives the count.
+      unawaited(_loadGreecePosts(silent: _greecePosts != null));
       // If the profile opened in Ελλάδα scope (initialTab == 3), pre-load those too.
       if (widget.initialTab == 3) unawaited(_loadGreecePosts());
       // In-app share: if the target post is not in the city list, it must be
@@ -1146,7 +1149,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                _Metric(label: AppLocalizations.of(context).metricPosts, value: '${profile.postCount > 0 ? profile.postCount : userPosts.length}', onTap: null),
+                                _Metric(label: AppLocalizations.of(context).metricPosts, value: '${(profile.postCount > 0 ? profile.postCount : userPosts.length) + (_greecePosts?.length ?? 0)}', onTap: null),
                                 _Metric(
                                   label: AppLocalizations.of(context).metricFollowers,
                                   value: '${profile.followers}',
@@ -1337,11 +1340,34 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             tapPos.dx, tapPos.dy, overlay.size.width - tapPos.dx, 0,
           ),
           items: [
-            PopupMenuItem(value: 'city', child: Text('Δημοσιεύσεις πόλης', style: TextStyle(color: textColor))),
-            PopupMenuItem(value: 'greece', child: Text('Δημοσιεύσεις Ελλάδας', style: TextStyle(color: textColor))),
+            PopupMenuItem(
+              value: 'city',
+              height: 38,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (_postScope == 'city')
+                  const Icon(Icons.check_rounded, size: 13, color: Color(0xff34C759))
+                else
+                  const SizedBox(width: 13),
+                const SizedBox(width: 7),
+                Text('Δημοσιεύσεις πόλης', style: TextStyle(fontSize: 13, fontWeight: _postScope == 'city' ? FontWeight.w600 : FontWeight.w400, color: textColor)),
+              ]),
+            ),
+            PopupMenuItem(
+              value: 'greece',
+              height: 38,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (_postScope == 'greece')
+                  const Icon(Icons.check_rounded, size: 13, color: Color(0xff34C759))
+                else
+                  const SizedBox(width: 13),
+                const SizedBox(width: 7),
+                Text('Δημοσιεύσεις Ελλάδας', style: TextStyle(fontSize: 13, fontWeight: _postScope == 'greece' ? FontWeight.w600 : FontWeight.w400, color: textColor)),
+              ]),
+            ),
           ],
           color: isLight ? Colors.white : const Color(0xff1c1c1e),
-          elevation: 4,
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         );
         if (selected != null && selected != _postScope && mounted) {
           setState(() => _postScope = selected);
@@ -1349,17 +1375,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         }
       },
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              _postScope == 'greece' ? 'Ελλάδα' : 'Πόλη',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
-            ),
-            const SizedBox(width: 2),
-            const SizedBox(width: 2),
-            CustomPaint(size: const Size(9, 5), painter: _ChevronPainter(dimColor)),
+              Text(
+                _postScope == 'greece' ? 'Ελλάδα' : 'Πόλη',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: textColor),
+              ),
+              const SizedBox(width: 4),
+              CustomPaint(size: const Size(7, 4), painter: _ChevronPainter(dimColor)),
           ],
         ),
       ),
@@ -1456,28 +1481,50 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             tapPos.dx, tapPos.dy, overlay.size.width - tapPos.dx, 0,
           ),
           items: [
-            PopupMenuItem(value: 'city', child: Text('Likes πόλης', style: TextStyle(color: textColor))),
-            PopupMenuItem(value: 'greece', child: Text('Likes Ελλάδας', style: TextStyle(color: textColor))),
+            PopupMenuItem(
+              value: 'city',
+              height: 38,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (_likedScope == 'city')
+                  const Icon(Icons.check_rounded, size: 13, color: Color(0xff34C759))
+                else
+                  const SizedBox(width: 13),
+                const SizedBox(width: 7),
+                Text('Likes πόλης', style: TextStyle(fontSize: 13, fontWeight: _likedScope == 'city' ? FontWeight.w600 : FontWeight.w400, color: textColor)),
+              ]),
+            ),
+            PopupMenuItem(
+              value: 'greece',
+              height: 38,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (_likedScope == 'greece')
+                  const Icon(Icons.check_rounded, size: 13, color: Color(0xff34C759))
+                else
+                  const SizedBox(width: 13),
+                const SizedBox(width: 7),
+                Text('Likes Ελλάδας', style: TextStyle(fontSize: 13, fontWeight: _likedScope == 'greece' ? FontWeight.w600 : FontWeight.w400, color: textColor)),
+              ]),
+            ),
           ],
           color: isLight ? Colors.white : const Color(0xff1c1c1e),
-          elevation: 4,
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         );
         if (selected != null && selected != _likedScope && mounted) {
           setState(() => _likedScope = selected);
         }
       },
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              isGreece ? 'Ελλάδα' : 'Πόλη',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
-            ),
-            const SizedBox(width: 2),
-            const SizedBox(width: 2),
-            CustomPaint(size: const Size(9, 5), painter: _ChevronPainter(dimColor)),
+              Text(
+                isGreece ? 'Ελλάδα' : 'Πόλη',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: textColor),
+              ),
+              const SizedBox(width: 4),
+              CustomPaint(size: const Size(7, 4), painter: _ChevronPainter(dimColor)),
           ],
         ),
       ),
@@ -1533,28 +1580,50 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             tapPos.dx, tapPos.dy, overlay.size.width - tapPos.dx, 0,
           ),
           items: [
-            PopupMenuItem(value: 'city', child: Text('Αποθηκευμένα πόλης', style: TextStyle(color: textColor))),
-            PopupMenuItem(value: 'greece', child: Text('Αποθηκευμένα Ελλάδας', style: TextStyle(color: textColor))),
+            PopupMenuItem(
+              value: 'city',
+              height: 38,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (_savedScope == 'city')
+                  const Icon(Icons.check_rounded, size: 13, color: Color(0xff34C759))
+                else
+                  const SizedBox(width: 13),
+                const SizedBox(width: 7),
+                Text('Αποθηκευμένα πόλης', style: TextStyle(fontSize: 13, fontWeight: _savedScope == 'city' ? FontWeight.w600 : FontWeight.w400, color: textColor)),
+              ]),
+            ),
+            PopupMenuItem(
+              value: 'greece',
+              height: 38,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (_savedScope == 'greece')
+                  const Icon(Icons.check_rounded, size: 13, color: Color(0xff34C759))
+                else
+                  const SizedBox(width: 13),
+                const SizedBox(width: 7),
+                Text('Αποθηκευμένα Ελλάδας', style: TextStyle(fontSize: 13, fontWeight: _savedScope == 'greece' ? FontWeight.w600 : FontWeight.w400, color: textColor)),
+              ]),
+            ),
           ],
           color: isLight ? Colors.white : const Color(0xff1c1c1e),
-          elevation: 4,
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         );
         if (selected != null && selected != _savedScope && mounted) {
           setState(() => _savedScope = selected);
         }
       },
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              isGreece ? 'Ελλάδα' : 'Πόλη',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
-            ),
-            const SizedBox(width: 2),
-            const SizedBox(width: 2),
-            CustomPaint(size: const Size(9, 5), painter: _ChevronPainter(dimColor)),
+              Text(
+                isGreece ? 'Ελλάδα' : 'Πόλη',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: textColor),
+              ),
+              const SizedBox(width: 4),
+              CustomPaint(size: const Size(7, 4), painter: _ChevronPainter(dimColor)),
           ],
         ),
       ),
