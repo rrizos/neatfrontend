@@ -343,6 +343,8 @@ class CityMapView extends StatefulWidget {
     required this.onOpenUserProfile,
     required this.onCitySelected,
     this.isSignUp = false,
+  this.onCardOpened,
+  this.onCardClosed,
   });
 
   final String token;
@@ -350,6 +352,8 @@ class CityMapView extends StatefulWidget {
   final ValueChanged<String> onOpenUserProfile;
   final ValueChanged<String> onCitySelected;
   final bool isSignUp;
+  final VoidCallback? onCardOpened;
+  final VoidCallback? onCardClosed;
 
   @override
   State<CityMapView> createState() => _CityMapViewState();
@@ -595,12 +599,16 @@ class _CityMapViewState extends State<CityMapView> {
       orElse: () => greeceCities.first,
     );
     if (_activeCity?.name == city.name) return;
-    if (mounted) setState(() => _activeCity = city);
+    if (mounted) {
+      setState(() => _activeCity = city);
+      widget.onCardOpened?.call();
+    }
   }
 
   void _closeCard() {
     if (_activeCity == null) return;
     setState(() => _activeCity = null);
+    widget.onCardClosed?.call();
     // Always animate out first. The rebuild that follows on iOS is only there
     // to restore gestures; letting it replace the animation would drop the
     // user at the country view with no sense of having travelled back.
@@ -637,6 +645,7 @@ class _CityMapViewState extends State<CityMapView> {
   void _joinCity() {
     final city = _activeCity;
     if (city == null) return;
+    widget.onCardClosed?.call();
     setState(() {
       _activeCity = null;
       _joiningCityName = city.name;

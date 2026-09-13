@@ -279,7 +279,7 @@ class _HomePin extends StatelessWidget {
 ///
 /// Public because changing your city later is the same act as choosing it at
 /// sign-up, and a second map would be a second set of bugs.
-class CityPickPage extends StatelessWidget {
+class CityPickPage extends StatefulWidget {
   const CityPickPage({
     super.key,
     required this.token,
@@ -293,7 +293,14 @@ class CityPickPage extends StatelessWidget {
   final String token;
   final String homeCity;
 
-  bool get _isSignUp => homeCity.isEmpty;
+  @override
+  State<CityPickPage> createState() => _CityPickPageState();
+}
+
+class _CityPickPageState extends State<CityPickPage> {
+  bool _cardOpen = false;
+
+  bool get _isSignUp => widget.homeCity.isEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -304,13 +311,15 @@ class CityPickPage extends StatelessWidget {
         child: Stack(
           children: [
             CityMapView(
-              token: token,
-              homeCity: homeCity,
+              token: widget.token,
+              homeCity: widget.homeCity,
               isSignUp: _isSignUp,
               onOpenUserProfile: (_) {},
               onCitySelected: (city) {
                 Navigator.of(context).pop(city);
               },
+              onCardOpened: () => setState(() => _cardOpen = true),
+              onCardClosed: () => setState(() => _cardOpen = false),
             ),
             // Back button — lets the user exit without picking a city.
             Positioned(
@@ -342,6 +351,7 @@ class CityPickPage extends StatelessWidget {
                 ),
               ),
             ),
+            if (!_cardOpen)
             Positioned(
               bottom: 56,
               left: 20,
