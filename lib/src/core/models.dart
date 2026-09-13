@@ -462,6 +462,7 @@ class FeedComment {
     required this.likes,
     required this.liked,
     required this.replies,
+    this.city = '',
     this.pinned = false,
     this.likedByOwner = false,
     this.replyToUsername,
@@ -474,6 +475,7 @@ class FeedComment {
   final String imageUrl;
   final int? parentId;
   final String createdAt;
+  final String city;
   final List<FeedComment> replies;
   int likes;
   bool liked;
@@ -496,6 +498,7 @@ class FeedComment {
       imageUrl: json['imageUrl']?.toString() ?? '',
       parentId: json['parentId'] != null ? parseInt(json['parentId']) : null,
       createdAt: json['created']?.toString() ?? '',
+      city: json['city']?.toString() ?? '',
       likes: parseInt(json['likes']),
       liked: json['liked'] == true,
       replies: replies,

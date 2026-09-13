@@ -6502,6 +6502,19 @@ class _CommentSheetState extends State<_CommentSheet> {
                           color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
                         ),
                       ),
+                    if (widget.post.scope == 'greece' && c.city.isNotEmpty) ...[
+                      Text(
+                        ' • ',
+                        style: TextStyle(fontSize: 12, color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a)),
+                      ),
+                      Text(
+                        c.city,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isLight ? const Color(0xff8b95a3) : const Color(0xff7a7a7a),
+                        ),
+                      ),
+                    ],
                     const SizedBox(width: 14),
                     if (widget.likingEnabled)
                       GestureDetector(
