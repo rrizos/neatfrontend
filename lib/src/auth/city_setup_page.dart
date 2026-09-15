@@ -314,6 +314,7 @@ class _CityPickPageState extends State<CityPickPage> {
               token: widget.token,
               homeCity: widget.homeCity,
               isSignUp: _isSignUp,
+              isEditProfile: !_isSignUp,
               onOpenUserProfile: (_) {},
               onCitySelected: (city) {
                 Navigator.of(context).pop(city);

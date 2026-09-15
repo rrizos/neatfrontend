@@ -129,6 +129,12 @@
   .btn-ghost { border-color: var(--line-strong); color: var(--ink); background: transparent; }
   .btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
   .cta-row { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  .tiktok-hint {
+    display: none; margin-top: 12px; text-align: center;
+    font-size: 13px; color: var(--muted);
+    line-height: 1.45;
+  }
+  .tiktok-hint.visible { display: block; }
 
   .store-badge {
     display: inline-flex; align-items: center; gap: 10px;
@@ -355,6 +361,7 @@
           <span class="store-text"><em>GET IT ON</em><b>Google Play</b></span>
         </a>
       </div>
+      <p class="tiktok-hint" id="tiktokHint"></p>
     </div>
   </section>
 
@@ -501,6 +508,23 @@
   apply(document.documentElement.getAttribute('data-lang') === 'en' ? 'en' : 'el');
   document.documentElement.className =
     document.documentElement.className.replace(/\bi18n-wait\b/, '');
+})();
+</script>
+
+<script>
+(function () {
+  var ua = navigator.userAgent || '';
+  var isTikTok = /musical_ly|TikTok|BytedanceWebview/i.test(ua);
+  if (!isTikTok) return;
+  var hint = document.getElementById('tiktokHint');
+  if (!hint) return;
+  var isAndroid = /Android/i.test(ua);
+  if (isAndroid) {
+    hint.textContent = '📱 Το βλέπεις από TikTok; Πάτα τις τρεις τελείες ··· πάνω δεξιά → «Άνοιγμα σε πρόγραμμα περιήγησης» για να κατεβάσεις την εφαρμογή.';
+  } else {
+    hint.textContent = '📱 Το βλέπεις από TikTok; Κράτα πατημένο το κουμπί κατεβάσματος και πάτα «Άνοιγμα συνδέσμου» για να μεταβείς στο App Store.';
+  }
+  hint.classList.add('visible');
 })();
 </script>
 

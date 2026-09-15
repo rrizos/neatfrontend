@@ -27,13 +27,15 @@ final class NativeCityMapFactory: NSObject, FlutterPlatformViewFactory {
 
 // MARK: - Annotation
 
-/// A city pin, carrying the two things that decide how it is drawn: who it
-/// beats when two pins want the same patch of screen, and how busy the city
-/// currently is.
+/// A city pin, carrying the things that decide how it is drawn.
 final class CityAnnotation: MKPointAnnotation {
   /// 0-1000, sent from `GreeceCity.displayPriority`.
   var priority: Int = 400
   var heat: Double = 0
+  /// True when the city is in locked-cities mode.
+  var isLocked: Bool = false
+  /// Progress 0.0–1.0 for the ring when locked.
+  var lockProgress: Double = 0.0
 }
 
 // MARK: - Platform View
@@ -58,6 +60,11 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
   /// dismissed map does not keep itself alive as the target.
   private static weak var current: NativeCityMapView?
 
+  /// True when this map is embedded in the sign-up flow.
+  /// Locked-city taps are interactive there (show the join card); elsewhere
+  /// they are completely silent — no zoom, no channel event.
+  private var isSignUp: Bool = false
+
   private let overview = MKCoordinateRegion(
     center: CLLocationCoordinate2D(latitude: 39.0, longitude: 22.9),
     span: MKCoordinateSpan(latitudeDelta: 7.5, longitudeDelta: 7.5)
@@ -65,7 +72,9 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
 
   init(frame: CGRect, args: Any?, messenger: FlutterBinaryMessenger) {
     super.init()
-    let isDark = (args as? [String: Any])?["isDark"] as? Bool ?? true
+    let dict   = args as? [String: Any]
+    let isDark = dict?["isDark"] as? Bool ?? true
+    isSignUp   = dict?["isSignUp"] as? Bool ?? false
     configureMap(frame: frame, isDark: isDark)
     wireChannel(messenger: messenger)
     loadCities(from: args)
@@ -81,7 +90,11 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     let v = mv.dequeueReusableAnnotationView(
       withIdentifier: CityPinView.reuseID, for: annotation
     ) as! CityPinView
-    v.apply(tier: Self.heatTier(city.heat))
+    if city.isLocked {
+      v.applyLocked(progress: city.lockProgress)
+    } else {
+      v.apply(tier: Self.heatTier(city.heat))
+    }
     // Spacing is decided in `applyDeclutter()`, which knows the pin's exact
     // screen position; MapKit's own collision handling would only second-guess
     // it with a different footprint, so every pin it is handed is required.
@@ -124,6 +137,15 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
     // The user has chosen; any journey still running was a guess and must not
     // keep moving the map out from under them.
     cancelFlight()
+
+    // Locked pins are non-interactive outside the sign-up flow: no zoom,
+    // no card.  Check the annotation's own isLocked flag so this works even
+    // before the server lock data arrives.
+    if let city = annotation as? CityAnnotation, city.isLocked, !isSignUp {
+      mv.deselectAnnotation(annotation, animated: false)
+      return
+    }
+
     focus(on: annotation.coordinate)
     channel?.invokeMethod("citySelected", arguments: name)
   }
@@ -303,6 +325,11 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
         let raw = (call.arguments as? [String: Any]) ?? [:]
         target?.updateHeat(raw.compactMapValues { ($0 as? NSNumber)?.doubleValue })
       }
+      if call.method == "updateLock" {
+        // Payload: {"Ρόδος": {"locked": true, "progress": 0.24}, ...}
+        let raw = (call.arguments as? [String: Any]) ?? [:]
+        target?.updateLock(raw)
+      }
       result(nil)
     }
   }
@@ -324,6 +351,13 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
       a.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
       // An unlabelled city ranks below every labelled one rather than above.
       a.priority = (c["priority"] as? Int) ?? 0
+      // Default-locked: every city that is not in the always-open whitelist
+      // starts gray so pins are correct from the very first render, before
+      // updateLock() arrives with server data.
+      let alwaysOpen: Set<String> = ["Αθήνα", "Θεσσαλονίκη"]
+      if !alwaysOpen.contains(name) {
+        a.isLocked = true
+      }
       return a
     }
     // Best known first: decluttering walks this order and the first pin to
@@ -411,7 +445,32 @@ final class NativeCityMapView: NSObject, FlutterPlatformView, MKMapViewDelegate 
       guard let city = annotation as? CityAnnotation,
             let v = map.view(for: city) as? CityPinView
       else { continue }
-      v.apply(tier: Self.heatTier(city.heat))
+      if !city.isLocked { v.apply(tier: Self.heatTier(city.heat)) }
+    }
+  }
+
+  private func updateLock(_ payload: [String: Any]) {
+    // Persist lock state on every CityAnnotation.
+    for annotation in allCities {
+      guard let name = annotation.title else { continue }
+      if let entry = payload[name] as? [String: Any], let locked = entry["locked"] as? Bool, locked {
+        annotation.isLocked = true
+        annotation.lockProgress = (entry["progress"] as? NSNumber)?.doubleValue ?? 0.0
+      } else {
+        annotation.isLocked = false
+        annotation.lockProgress = 0.0
+      }
+    }
+    // Refresh views for pins on the map.
+    for annotation in map.annotations {
+      guard let city = annotation as? CityAnnotation,
+            let v = map.view(for: city) as? CityPinView
+      else { continue }
+      if city.isLocked {
+        v.applyLocked(progress: city.lockProgress)
+      } else {
+        v.apply(tier: Self.heatTier(city.heat))
+      }
     }
   }
 }
@@ -457,16 +516,46 @@ private final class CityPinView: MKMarkerAnnotationView {
   // layoutSubviews can restore the right positions after a bounds change.
   private var flXOffsets: [CGFloat] = [0, 0, 0, 0, 0]
 
+  // ── Progress ring (locked cities) ─────────────────────────────────────
+  // Hosted in a UIView subview rather than self.layer so it always renders
+  // above MapKit's own balloon/teardrop drawing (UIView subviews paint over
+  // their parent's layer content; CALayer sublayers may be interleaved with
+  // MapKit's private internal layers).
+  private let ringView  = UIView()
+  private let ringTrack = CAShapeLayer()   // gray background circle
+  private let ringFill  = CAShapeLayer()   // white arc showing progress
+
   override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
     super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
     canShowCallout = false
     glyphImage     = UIImage(systemName: "mappin")
+    setupRing()
     setupFlames()
   }
 
   required init?(coder: NSCoder) { nil }
 
   // MARK: Setup
+
+  private func setupRing() {
+    // The ring lives in a transparent UIView subview. UIView subviews are
+    // always composited after their parent's own layer (including MapKit's
+    // private balloon/teardrop sublayers), so the ring is guaranteed to
+    // appear on top of the entire balloon regardless of MapKit's internals.
+    ringView.backgroundColor          = .clear
+    ringView.isUserInteractionEnabled = false
+    addSubview(ringView)
+
+    for layer in [ringTrack, ringFill] {
+      layer.fillColor = UIColor.clear.cgColor
+      layer.lineWidth = 3.0
+      layer.opacity   = 0
+      ringView.layer.addSublayer(layer)
+    }
+    ringTrack.strokeColor = UIColor(white: 0.0, alpha: 0.45).cgColor
+    ringFill.strokeColor  = UIColor.white.cgColor
+    ringFill.lineCap      = .round
+  }
 
   private func setupFlames() {
     for fl in [fl1, fl2, fl3, fl4, fl5] {
@@ -484,6 +573,42 @@ private final class CityPinView: MKMarkerAnnotationView {
     for (fl, dx) in zip([fl1, fl2, fl3, fl4, fl5], flXOffsets) {
       fl.position = CGPoint(x: cx + dx, y: y)
     }
+    // Keep the ring overlay view covering the full annotation view bounds,
+    // and always in front of MapKit's private balloon subview.
+    ringView.frame = bounds
+    bringSubviewToFront(ringView)
+    // Re-layout the progress ring to match current bounds.
+    _layoutRingLayers()
+  }
+
+  // MKMarkerAnnotationView default frame ≈ 38×49pt.
+  // Circular balloon head ≈ 26pt diameter, centre at (midX, ~13pt from top).
+  // ringRadius = 14 sits 1pt outside the head edge → tight perimeter ring.
+  private static let ringRadius: CGFloat = 14
+  private static let balloonCY: CGFloat  = 15
+
+  private func _layoutRingLayers() {
+    let cx   = bounds.midX
+    let cy   = Self.balloonCY
+    let r    = Self.ringRadius
+    let rect = CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)
+    let centre = CGPoint(x: cx, y: cy)
+
+    // Track: full circle (start angle doesn't matter, strokeEnd = 1).
+    ringTrack.path  = UIBezierPath(ovalIn: rect).cgPath
+    ringTrack.frame = ringView.bounds
+
+    // Fill: arc that starts at exactly 12 o'clock (-π/2) and goes clockwise.
+    // With this path, strokeStart=0 / strokeEnd=progress draws the right amount
+    // of arc without any offset maths or wrap-around logic.
+    ringFill.path  = UIBezierPath(
+      arcCenter: centre,
+      radius: r,
+      startAngle: -.pi / 2,
+      endAngle:   -.pi / 2 + 2 * .pi,
+      clockwise: true
+    ).cgPath
+    ringFill.frame = ringView.bounds
   }
 
   // MARK: Apply tier
@@ -500,6 +625,10 @@ private final class CityPinView: MKMarkerAnnotationView {
 
     CATransaction.begin()
     CATransaction.setDisableActions(true)
+
+    // Always hide the progress ring — it is only for locked cities.
+    ringTrack.opacity = 0
+    ringFill.opacity  = 0
 
     // Position layers immediately (layoutSubviews also uses flXOffsets).
     let cx = bounds.midX
@@ -555,6 +684,35 @@ private final class CityPinView: MKMarkerAnnotationView {
       fl2.add(Self.flameAnim(dur: 1.20, delay:  0.00, baseOp: 0.90, hot: false, baseDeg:   0), forKey: "fl")
       fl3.add(Self.flameAnim(dur: 1.55, delay: -0.50, baseOp: 0.80, hot: false, baseDeg:  +6), forKey: "fl")
     }
+  }
+
+  /// Apply the locked-city appearance: gray balloon + white progress ring.
+  func applyLocked(progress: Double) {
+    // Clear all flame animations and hide them.
+    for fl in [fl1, fl2, fl3, fl4, fl5] { fl.removeAllAnimations() }
+    flXOffsets = [0, 0, 0, 0, 0]
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+
+    markerTintColor = UIColor(white: 0.56, alpha: 1)   // medium gray
+    for fl in [fl1, fl2, fl3, fl4, fl5] { fl.opacity = 0 }
+
+    // MapKit re-inserts its private balloon subview when markerTintColor
+    // changes, pushing it above ringView.  Bring ringView back to front so
+    // the ring always renders over the balloon (including the teardrop).
+    bringSubviewToFront(ringView)
+
+    // Show the ring.  The fill path starts at 12 o'clock (-π/2), so
+    // strokeStart=0 / strokeEnd=progress directly gives the right arc length.
+    _layoutRingLayers()
+    let clampedProgress = max(0, min(1, CGFloat(progress)))
+    ringTrack.opacity    = 1
+    ringFill.opacity     = 1
+    ringFill.strokeStart = 0
+    ringFill.strokeEnd   = clampedProgress
+
+    CATransaction.commit()
   }
 
   // MARK: Helpers

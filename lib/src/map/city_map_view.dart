@@ -13,6 +13,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
+import '../core/locked_cities.dart';
 import '../core/media_cache.dart';
 import '../core/neat_loader.dart';
 import 'city_locator.dart';
@@ -343,6 +344,7 @@ class CityMapView extends StatefulWidget {
     required this.onOpenUserProfile,
     required this.onCitySelected,
     this.isSignUp = false,
+    this.isEditProfile = false,
   this.onCardOpened,
   this.onCardClosed,
   });
@@ -352,6 +354,9 @@ class CityMapView extends StatefulWidget {
   final ValueChanged<String> onOpenUserProfile;
   final ValueChanged<String> onCitySelected;
   final bool isSignUp;
+  /// True when opened from the edit-profile city picker.
+  /// Changes the card button text to "Μετακόμισε στην/στον/… {city}".
+  final bool isEditProfile;
   final VoidCallback? onCardOpened;
   final VoidCallback? onCardClosed;
 
@@ -409,6 +414,10 @@ class _CityMapViewState extends State<CityMapView> {
   // successful fetch. Cold (0) cities are absent from the server response.
   Map<String, double> _cityHeat = {};
 
+  // Lock state per city name. Empty until the first successful fetch.
+  // Only contains cities that have a CityConfig row on the server.
+  Map<String, CityLockInfo> _cityLocks = {};
+
   // ─────────────────────────────────────────────────────────────────────────
   // Lifecycle
   // ─────────────────────────────────────────────────────────────────────────
@@ -420,6 +429,7 @@ class _CityMapViewState extends State<CityMapView> {
     _iosChannel.setMethodCallHandler(_onNativeCall);
     if (widget.isSignUp) unawaited(_preselectCurrentCity());
     if (!widget.isSignUp) unawaited(_fetchCityHeat());
+    if (kLockedCitiesEnabled) unawaited(_fetchCityLocks());
   }
 
   /// How long the map is given to reach the detected city before the card
@@ -541,9 +551,9 @@ class _CityMapViewState extends State<CityMapView> {
     if (!mounted || epoch != _mapEpoch) return;
     map.onPinTap = _onCityPinTapped;
     setState(() => _androidMap = map);
-    // Push any heat data that arrived before the map was ready. The JS side
-    // queues the call itself if NeatMap.start() hasn't run yet.
+    // Push any heat/lock data that arrived before the map was ready.
     _pushHeatToAndroid();
+    _pushLocksToAndroid();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -587,6 +597,60 @@ class _CityMapViewState extends State<CityMapView> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // City locks
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Future<void> _fetchCityLocks() async {
+    try {
+      final resp = await http.get(cityLocksEndpoint);
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final raw = data['locks'] as Map<String, dynamic>? ?? {};
+        if (!mounted) return;
+        _cityLocks = raw.map((k, v) =>
+            MapEntry(k, CityLockInfo.fromJson(v as Map<String, dynamic>)));
+        _pushLocksToAndroid();
+        _pushLocksToIos();
+        // Rebuild so the locked card logic applies to any pre-selected city.
+        if (mounted) setState(() {});
+      }
+    } catch (_) {}
+  }
+
+  /// Compact lock payload: {"Ρόδος": {"locked": true, "progress": 0.24}, ...}
+  Map<String, dynamic> _lockPayload() {
+    final result = <String, dynamic>{};
+    for (final city in greeceCities) {
+      final isLocked = isCityLocked(city.name, _cityLocks);
+      if (!isLocked) continue;
+      final info = _cityLocks[city.name];
+      result[city.name] = {
+        'locked': true,
+        'progress': info?.progress ?? 0.0,
+      };
+    }
+    return result;
+  }
+
+  void _pushLocksToAndroid() {
+    final map = _androidMap;
+    if (map == null) return;
+    final payload = _lockPayload();
+    map.controller
+        .runJavaScript('NeatMap.updateLock(${jsonEncode(payload)});')
+        .catchError((Object _) {});
+  }
+
+  void _pushLocksToIos() {
+    final payload = _lockPayload();
+    // Always send — even an empty payload tells iOS to clear rings on
+    // any city that was previously locked but has since unlocked.
+    _iosChannel
+        .invokeMethod<void>('updateLock', payload)
+        .catchError((Object _) {});
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Shared event handlers
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -599,6 +663,13 @@ class _CityMapViewState extends State<CityMapView> {
       orElse: () => greeceCities.first,
     );
     if (_activeCity?.name == city.name) return;
+
+    // Locked cities are only tappable in sign-up mode (to show the join card).
+    // In edit-profile and regular spectator maps they are silently non-interactive.
+    if (kLockedCitiesEnabled && !widget.isSignUp && isCityLocked(name, _cityLocks)) {
+      return;
+    }
+
     if (mounted) {
       setState(() => _activeCity = city);
       widget.onCardOpened?.call();
@@ -638,6 +709,7 @@ class _CityMapViewState extends State<CityMapView> {
       // as soon as its channel handler is installed.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _pushHeatToIos();
+        if (mounted) _pushLocksToIos();
       });
     });
   }
@@ -645,6 +717,29 @@ class _CityMapViewState extends State<CityMapView> {
   void _joinCity() {
     final city = _activeCity;
     if (city == null) return;
+
+    // Optimistically increment the member count for this city the moment the
+    // button is pressed — before the profile-save round trip. Both native maps
+    // are updated immediately so the pin ring and any visible card reflect the
+    // new X+1 / Y numbers straight away.
+    if (kLockedCitiesEnabled) {
+      final info = _cityLocks[city.name];
+      if (info != null) {
+        final newCount  = info.memberCount + 1;
+        final nowOpen   = !info.isLocked ? false : newCount >= info.threshold;
+        _cityLocks = {
+          ..._cityLocks,
+          city.name: CityLockInfo(
+            isLocked: nowOpen ? false : info.isLocked,
+            threshold: info.threshold,
+            memberCount: newCount,
+          ),
+        };
+        _pushLocksToAndroid();
+        _pushLocksToIos();
+      }
+    }
+
     widget.onCardClosed?.call();
     setState(() {
       _activeCity = null;
@@ -685,6 +780,7 @@ class _CityMapViewState extends State<CityMapView> {
             androidMap: _androidMap,
             homeCity: widget.homeCity,
             isDark: isDark,
+            isSignUp: widget.isSignUp,
           ),
         ),
 
@@ -698,13 +794,22 @@ class _CityMapViewState extends State<CityMapView> {
                 child: Center(
                   child: GestureDetector(
                     onTap: () {},
-                    child: _CityCard(
-                      city: city,
-                      imageUrl: city.imageUrl,
-                      onClose: _closeCard,
-                      onJoin: _joinCity,
-                      isSignUp: widget.isSignUp,
-                    ),
+                    child: kLockedCitiesEnabled && isCityLocked(city.name, _cityLocks)
+                        ? _LockedCityCard(
+                            city: city,
+                            imageUrl: city.imageUrl,
+                            lockInfo: _cityLocks[city.name],
+                            onClose: _closeCard,
+                            onJoin: _joinCity,
+                          )
+                        : _CityCard(
+                            city: city,
+                            imageUrl: city.imageUrl,
+                            onClose: _closeCard,
+                            onJoin: _joinCity,
+                            isSignUp: widget.isSignUp,
+                            isEditProfile: widget.isEditProfile,
+                          ),
                   ),
                 ),
               ),
@@ -882,6 +987,11 @@ String _androidMapPage({
 
       /* Marker colours per tier. */
       var TIER_COLORS = ['#34C759', '#FFCC00', '#FF6A00'];
+
+      /* Lock state: city name → {locked: bool, progress: 0-1}. */
+      var lockData = {};
+      /* SVG ring overlays per city name. */
+      var lockRings = {};
 
       /* Coordinate lookup for flame overlay creation during updateHeat. */
       var cityCoords = {};
@@ -1072,6 +1182,8 @@ String _androidMapPage({
                 p.visible = show;
                 // Mirror visibility to the flame overlay (if any).
                 if (p._neatFlame) p._neatFlame.visible = show;
+                // Mirror visibility to the lock ring (if any).
+                if (lockRings[p._neatName]) lockRings[p._neatName].visible = show;
               });
             } catch (e) {}
           }
@@ -1087,6 +1199,21 @@ String _androidMapPage({
           if (pendingHeat) {
             var h = pendingHeat; pendingHeat = null;
             updateHeat(h);
+          }
+
+          // Apply default lock state immediately so pins are gray from the
+          // first render, without waiting for updateLock() from the server.
+          // All cities except the always-open whitelist start locked at 0%.
+          // updateLock() from _fetchCityLocks() will overwrite with real data.
+          if (Object.keys(lockData).length === 0) {
+            var ALWAYS_OPEN = { 'Αθήνα': true, 'Θεσσαλονίκη': true };
+            var defaultLock = {};
+            allPinsRef.forEach(function (p) {
+              if (!ALWAYS_OPEN[p._neatName]) {
+                defaultLock[p._neatName] = { locked: true, progress: 0 };
+              }
+            });
+            updateLock(defaultLock);
           }
 
           post({ event: 'ready' });
@@ -1215,7 +1342,89 @@ String _androidMapPage({
         });
       }
 
-      return { start: start, reset: reset, focusCity: focusCity, updateHeat: updateHeat };
+      /* Apply lock state to each city pin.
+         Locked cities get a gray marker and an SVG progress-ring overlay.
+         Unlocked cities revert to their heat-based colour.
+
+         lockMap: { "Ρόδος": { "locked": true, "progress": 0.24 }, ... }
+      */
+      function updateLock(newLockData) {
+        if (!map) { return; }   // will be called again after start() via _pushLocksToAndroid
+        lockData = newLockData || {};
+
+        allPinsRef.forEach(function (p) {
+          var name = p._neatName;
+          var lock = lockData[name];
+          var isLocked = lock && lock.locked;
+
+          if (isLocked) {
+            // Override heat colour with gray.
+            p.color = '#8E8E93';
+
+            // Remove any flame overlay (locked cities don't show heat).
+            if (p._neatFlame) {
+              map.removeAnnotation(p._neatFlame);
+              p._neatFlame = null;
+            }
+
+            // Add or update the progress ring overlay.
+            var progress = (lock && lock.progress) || 0;
+            var coords = cityCoords[name];
+            if (!coords) return;
+
+            // Remove previous ring if any.
+            if (lockRings[name]) {
+              map.removeAnnotation(lockRings[name]);
+              lockRings[name] = null;
+            }
+
+            // Build an SVG ring.
+            // MapKit JS MarkerAnnotation ≈ 26×36px CSS. Head radius ≈ 9px,
+            // centre ≈ 9px from top = 27px above the pin tip.
+            var R = 10;            // ring radius px (1px outside head edge)
+            var S = 3.5;           // stroke width
+            var W = (R + S + 2) * 2;
+            var cx = W / 2;
+            var circumference = 2 * Math.PI * R;
+            var dash = circumference * progress;
+            var gap  = circumference * (1 - progress);
+            var svgEl = document.createElement('div');
+            svgEl.style.cssText = 'position:relative;width:' + W + 'px;height:' + W + 'px;overflow:visible;pointer-events:none;';
+            svgEl.innerHTML = '<svg width="' + W + '" height="' + W + '" viewBox="0 0 ' + W + ' ' + W + '">' +
+              '<circle cx="' + cx + '" cy="' + cx + '" r="' + R + '" fill="none" stroke="rgba(0,0,0,0.45)" stroke-width="' + S + '"/>' +
+              '<circle cx="' + cx + '" cy="' + cx + '" r="' + R + '" fill="none" stroke="#ffffff" stroke-width="' + S + '"' +
+              ' stroke-dasharray="' + dash + ' ' + gap + '"' +
+              ' stroke-dashoffset="' + (circumference / 4) + '"' +
+              ' stroke-linecap="round"/>' +
+              '</svg>';
+
+            var ringAnn = new mapkit.Annotation(
+              new mapkit.Coordinate(coords.lat, coords.lng),
+              function () { return svgEl; },
+              {
+                calloutEnabled: false,
+                // Centre the SVG on the pin balloon head (≈ 27px above pin tip).
+                anchorOffset: new DOMPoint(0, -(27 + W / 2))
+              }
+            );
+            map.addAnnotation(ringAnn);
+            ringAnn.visible = (p.visible !== false);
+            lockRings[name] = ringAnn;
+
+          } else {
+            // City unlocked — restore heat-based colour.
+            p.color = TIER_COLORS[p._neatTier || 0];
+
+            // Remove ring if present.
+            if (lockRings[name]) {
+              map.removeAnnotation(lockRings[name]);
+              lockRings[name] = null;
+            }
+          }
+        });
+      }
+
+      return { start: start, reset: reset, focusCity: focusCity, updateHeat: updateHeat, updateLock: updateLock };
     })();
   </script>
 ''');
@@ -1254,10 +1463,12 @@ class _MapLayer extends StatelessWidget {
     this.androidMap,
     required this.homeCity,
     required this.isDark,
+    this.isSignUp = false,
   });
   final _AndroidMap? androidMap;
   final String homeCity;
   final bool isDark;
+  final bool isSignUp;
 
   @override
   Widget build(BuildContext context) {
@@ -1301,6 +1512,7 @@ class _MapLayer extends StatelessWidget {
                   })
               .toList(),
           'isDark': isDark,
+          'isSignUp': isSignUp,
         },
         creationParamsCodec: const StandardMessageCodec(),
       );
@@ -1337,6 +1549,218 @@ class _MapLayer extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Locked city card  (sign-up only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LockedCityCard extends StatelessWidget {
+  const _LockedCityCard({
+    required this.city,
+    required this.onClose,
+    required this.onJoin,
+    this.imageUrl,
+    this.lockInfo,
+  });
+
+  final GreeceCity city;
+  final VoidCallback onClose;
+  final VoidCallback onJoin;
+  final String? imageUrl;
+  final CityLockInfo? lockInfo;
+
+  @override
+  Widget build(BuildContext context) {
+    final demonym = demonymForCity(city.name);
+    final memberCount = lockInfo?.memberCount ?? 0;
+    final threshold = lockInfo?.threshold ?? 50;
+    final progress = lockInfo?.progress ?? 0.0;
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 340),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xff0d0e12),
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: const [
+              BoxShadow(color: Colors.black54, blurRadius: 32, offset: Offset(0, 16)),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── Image + close button ──────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 22, 22, 0),
+                child: Stack(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white38, width: 2),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: SizedBox(
+                          height: 160,
+                          width: double.infinity,
+                          child: imageUrl != null
+                              ? ColorFiltered(
+                                  colorFilter: const ColorFilter.matrix([
+                                    0.2126, 0.7152, 0.0722, 0, 0,
+                                    0.2126, 0.7152, 0.0722, 0, 0,
+                                    0.2126, 0.7152, 0.0722, 0, 0,
+                                    0,      0,      0,      1, 0,
+                                  ]),
+                                  child: CachedNetworkImage(
+                                    imageUrl: imageUrl!,
+                                    cacheManager: imageCacheManager,
+                                    fit: BoxFit.cover,
+                                    fadeInDuration: Duration.zero,
+                                    placeholder: (ctx, _) => const ColoredBox(color: Color(0xff1e1f21)),
+                                    errorWidget: (ctx, _, __) => const ColoredBox(color: Color(0xff1e1f21)),
+                                  ),
+                                )
+                              : const ColoredBox(color: Color(0xff1e1f21)),
+                        ),
+                      ),
+                    ),
+                    // Lock icon over image
+                    Positioned.fill(
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.55),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.lock_rounded, color: Colors.white, size: 28),
+                        ),
+                      ),
+                    ),
+                    // X button
+                    Positioned(
+                      top: 8, right: 8,
+                      child: GestureDetector(
+                        onTap: onClose,
+                        behavior: HitTestBehavior.opaque,
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(Icons.close_rounded, color: Colors.white, size: 22),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ── Counter + progress ────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 18, 22, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '$memberCount/$threshold',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'άτομα',
+                          style: TextStyle(color: Color(0xff999999), fontSize: 14),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // Progress bar
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 6,
+                        backgroundColor: const Color(0xff2a2a2e),
+                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xff2F80ED)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Η πόλη ξεκλειδώνει μόλις φτάσουμε τους $threshold χρήστες. '
+                      'Στο μεταξύ μπορείς να δεις το feed ολόκληρης της Ελλάδας ή να καλέσεις φίλους από την πόλη σου!',
+                      style: const TextStyle(
+                        color: Color(0xff999999),
+                        fontSize: 13,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ── Buttons ───────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Primary: join with this city (redirects to Greece feed)
+                    SizedBox(
+                      height: 48,
+                      child: FilledButton(
+                        onPressed: onJoin,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xff2F80ED),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                        ),
+                        child: Text(
+                          'Συνδέσου ως $demonym',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // Secondary: invite (no-op for now)
+                    SizedBox(
+                      height: 44,
+                      child: OutlinedButton(
+                        onPressed: () {}, // TODO: invitation flow
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white70,
+                          side: const BorderSide(color: Color(0xff3a3a3e)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                        ),
+                        child: const Text(
+                          'Πρόσκλεσε φίλους',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // City card
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1347,6 +1771,7 @@ class _CityCard extends StatelessWidget {
     required this.onJoin,
     this.imageUrl,
     this.isSignUp = false,
+    this.isEditProfile = false,
   });
 
   final GreeceCity city;
@@ -1354,6 +1779,7 @@ class _CityCard extends StatelessWidget {
   final VoidCallback onJoin;
   final String? imageUrl;
   final bool isSignUp;
+  final bool isEditProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -1454,7 +1880,11 @@ class _CityCard extends StatelessWidget {
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        isSignUp ? 'Συνδέσου ${city.name}' : 'Παρακολούθησε ${city.name}',
+                        isEditProfile
+                            ? 'Μετακόμισε ${cityLocative(city.name)}'
+                            : isSignUp
+                                ? 'Συνδέσου ${city.name}'
+                                : 'Παρακολούθησε ${city.name}',
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         style: const TextStyle(

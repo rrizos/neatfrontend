@@ -1149,7 +1149,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                _Metric(label: AppLocalizations.of(context).metricPosts, value: '${(profile.postCount > 0 ? profile.postCount : userPosts.length) + (_greecePosts?.length ?? 0)}', onTap: null),
+                                _Metric(label: AppLocalizations.of(context).metricPosts, value: '${profile.postCount + (_greecePosts?.length ?? 0)}', onTap: null),
                                 _Metric(
                                   label: AppLocalizations.of(context).metricFollowers,
                                   value: '${profile.followers}',
@@ -2253,11 +2253,16 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
       // the whole point. The bytes are already on this device, so showing them
       // needs no server; waiting for one is what made a bad connection look
       // like a broken app. See ProfileSaveQueue.
+      final _newCity = _cityController.text.trim();
+      final _cityChanged = _newCity.isNotEmpty && _newCity != widget.profile.city;
       final optimistic = widget.profile.copyWith(
         avatarUrl: _avatarChanged ? _avatarUrl : null,
         bio: _bioController.text.trim(),
         fullName: _nameController.text.trim(),
-        city: _cityController.text.trim(),
+        city: _newCity,
+        // Lock city change immediately so opening edit profile again right away
+        // shows the picker disabled — no waiting for the server round-trip.
+        canChangeCity: _cityChanged ? false : null,
       );
       if (_avatarChanged) {
         AvatarStore.update(

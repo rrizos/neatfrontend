@@ -233,6 +233,7 @@ Uri searchHistoryEndpoint({int limit = 20}) =>
 Uri searchHistoryItemEndpoint(String query) =>
     Uri.parse('$apiBaseUrl/api/auth/search-history/${Uri.encodeComponent(query)}/');
 Uri get citiesEndpoint => Uri.parse('$apiBaseUrl/api/posts/cities/');
+Uri get cityLocksEndpoint => Uri.parse('$apiBaseUrl/api/posts/city-locks/');
 Uri eventsEndpoint({String? city, String? type}) {
   final uri = Uri.parse('$apiBaseUrl/api/events/');
   final params = <String, String>{};

@@ -121,6 +121,9 @@ class UserProfile {
     this.canChangeCity = true,
     this.cityChangeAllowedAt,
     this.postCount = 0,
+    this.cityLocked = false,
+    this.cityThreshold = 0,
+    this.cityMemberCount = 0,
   });
   final int id;
   final String username;
@@ -151,6 +154,11 @@ class UserProfile {
   final bool canChangeCity;
   final DateTime? cityChangeAllowedAt;
 
+  /// True when the user's home city is currently locked (no-posts, gray pin).
+  /// Populated from the server only for the logged-in user's own profile.
+  final bool cityLocked;
+  final int cityThreshold;
+  final int cityMemberCount;
 
   final String avatarUrl;
 
@@ -214,6 +222,9 @@ class UserProfile {
     canChangeCity: canChangeCity ?? this.canChangeCity,
     cityChangeAllowedAt: cityChangeAllowedAt,
     postCount: postCount,
+    cityLocked: cityLocked,
+    cityThreshold: cityThreshold,
+    cityMemberCount: cityMemberCount,
   );
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -252,6 +263,9 @@ class UserProfile {
       isBlocked: json['isBlocked'] == true,
       hasBlockedYou: json['hasBlockedYou'] == true,
       postCount: parseInt(json['postCount']),
+      cityLocked: json['cityLocked'] == true,
+      cityThreshold: parseInt(json['cityThreshold']),
+      cityMemberCount: parseInt(json['cityMemberCount']),
     );
   }
 
@@ -283,6 +297,9 @@ class UserProfile {
     'isBlocked': isBlocked,
     'hasBlockedYou': hasBlockedYou,
     'postCount': postCount,
+    'cityLocked': cityLocked,
+    'cityThreshold': cityThreshold,
+    'cityMemberCount': cityMemberCount,
   };
 }
 

@@ -29,6 +29,7 @@ import '../core/background_upload.dart';
 import '../core/link_preview.dart';
 import '../core/media_cache.dart';
 import '../core/mentions.dart';
+import '../core/locked_cities.dart';
 import '../core/models.dart';
 import '../core/neat_loader.dart';
 import '../core/pending_post.dart';
@@ -199,6 +200,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // Default to Greece feed when the user's home city is locked so they
+    // always land somewhere with content rather than an empty city feed.
+    if (kLockedCitiesEnabled && widget.session.user.cityLocked) {
+      _feedScope = 'greece';
+    }
     AvatarStore.revision.addListener(_onAvatarRevisionChanged);
     _postingLabel.addListener(_syncPostingBanner);
     _setupNativeTabChannel();
@@ -219,7 +225,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // initState has returned, and the navigator isn't mounted yet either.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) PushService.instance.replayPending();
-      if (mounted) unawaited(_maybeShowGreeceAnnouncement());
     });
     _realtime.start();
     // Instant nav-badge updates on native, on top of the existing on-demand
@@ -341,6 +346,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(HomePage old) {
+    super.didUpdateWidget(old);
+    // If the session was just updated and the city flipped from locked → unlocked,
+    // switch the feed scope to city so the user immediately sees their city feed.
+    if (kLockedCitiesEnabled &&
+        old.session.user.cityLocked &&
+        !widget.session.user.cityLocked &&
+        _feedScope == 'greece') {
+      setState(() { _feedScope = 'city'; });
+    }
+  }
+
 
   String get _postsCacheKey {
     if (_feedScope == 'greece') return 'cached_posts_greece';
@@ -375,35 +393,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _hasOlderPosts = false;
   bool _loadingOlderPosts = false;
 
-  // ── Greece feed one-time announcement ────────────────────────────────────
-
-  static const _kGreeceAnnouncementKey = 'greece_announcement_v3';
-
-  Future<void> _maybeShowGreeceAnnouncement() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_kGreeceAnnouncementKey) == true) return;
-    if (!mounted) return;
-    await prefs.setBool(_kGreeceAnnouncementKey, true);
-    if (!mounted) return;
-
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.55),
-      barrierDismissible: true,
-      builder: (_) => _GreecePopup(
-        onTryNow: () {
-          if (!mounted) return;
-          setState(() {
-            _feedScope = 'greece';
-            _nav = 0;
-            _showInlineProfile = false;
-          });
-          unawaited(_load());
-        },
-      ),
-    );
-  }
-
   Future<void> _load() async {
     try {
       final endpoint = _feedScope == 'greece'
@@ -427,10 +416,40 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       });
       _scheduleProcessingRefresh();
       await Future.wait([_loadFollowingAuthors(), _loadFollowerAuthors(), _loadUnreadMessages(), _loadOfficialEventsBadge()]);
+      unawaited(_checkCityUnlock());
     } catch (_) {
       await _loadCachedPosts();
       if (mounted) setState(() { _loading = false; _isOffline = true; });
     }
+  }
+
+  /// If the user's city was locked and has since unlocked on the server,
+  /// refresh the session and switch the default feed to city.
+  Future<void> _checkCityUnlock() async {
+    if (!kLockedCitiesEnabled) return;
+    if (!widget.session.user.cityLocked) return;
+    final userCity = widget.session.user.city;
+    if (userCity.isEmpty) return;
+    try {
+      final res = await http.get(cityLocksEndpoint);
+      if (res.statusCode != 200 || !mounted) return;
+      final raw = jsonDecode(res.body) as Map<String, dynamic>;
+      final cityData = raw[userCity] as Map<String, dynamic>?;
+      // Still locked: either no entry (default-locked) or explicit locked=true.
+      final nowLocked = cityData == null || cityData['locked'] == true;
+      if (nowLocked) return;
+      // City has unlocked — re-fetch session so cityLocked becomes false.
+      final meRes = await http.get(
+        meEndpoint,
+        headers: authGetHeaders(widget.session.token),
+      );
+      if (meRes.statusCode != 200 || !mounted) return;
+      final decoded = jsonDecode(meRes.body) as Map<String, dynamic>;
+      final user = UserProfile.fromJson(decoded['user'] as Map<String, dynamic>);
+      final newSession = AuthSession(token: widget.session.token, user: user);
+      widget.onSessionChanged(newSession);
+      setState(() { _feedScope = 'city'; });
+    } catch (_) {}
   }
 
   /// Re-fetches the feed while any video in it is still being encoded.
@@ -780,7 +799,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         },
       )..headers['Authorization'] = 'Token ${widget.session.token}';
       request.fields['text'] = text;
-      request.fields['scope'] = _feedScope;
+      request.fields['scope'] =
+          (kLockedCitiesEnabled && widget.session.user.cityLocked) ? 'greece' : _feedScope;
 
       // Written down before the wait, in case the app does not survive it.
       // The system finishes the transfer either way; this is what remembers
@@ -2156,7 +2176,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         child: Row(
                           children: [
                             Text(
-                              _feedScope == 'greece'
+                              (_feedScope == 'greece' || (kLockedCitiesEnabled && widget.session.user.cityLocked))
                                   ? 'Δημοσιεύετε στην Ελλάδα'
                                   : 'Δημοσιεύετε στην ${widget.session.user.city}',
                               style: TextStyle(
@@ -2555,7 +2575,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               },
             ),
           ),
-          if (posts.isEmpty)
+          if (kLockedCitiesEnabled &&
+              _activeCity == null &&
+              _feedScope == 'city' &&
+              widget.session.user.cityLocked)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _LockedFeedPlaceholder(
+                city: widget.session.user.city,
+                threshold: widget.session.user.cityThreshold,
+                memberCount: widget.session.user.cityMemberCount,
+                isLight: isLight,
+              ),
+            )
+          else if (posts.isEmpty)
             SliverFillRemaining(
               hasScrollBody: false,
               child: Center(
@@ -7164,257 +7197,90 @@ class _ChevronPainter extends CustomPainter {
   bool shouldRepaint(_ChevronPainter old) => old.color != color;
 }
 
-// ── Greece feed announcement popup ────────────────────────────────────────────
+// ── Locked city feed placeholder ──────────────────────────────────────────────
 
-class _GreecePopup extends StatefulWidget {
-  const _GreecePopup({required this.onTryNow});
-  final VoidCallback onTryNow;
+/// Shown in the city-feed tab when the user's home city is still locked.
+class _LockedFeedPlaceholder extends StatelessWidget {
+  const _LockedFeedPlaceholder({
+    required this.city,
+    required this.threshold,
+    required this.memberCount,
+    required this.isLight,
+  });
 
-  @override
-  State<_GreecePopup> createState() => _GreecePopupState();
-}
-
-class _GreecePopupState extends State<_GreecePopup>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _scale;
-  late final Animation<double> _fade;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 320),
-    );
-    _scale = Tween<double>(begin: 0.88, end: 1.0).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
-    );
-    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    _ctrl.forward();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _close() async {
-    await _ctrl.reverse();
-    if (mounted) Navigator.of(context).pop();
-  }
+  final String city;
+  final int threshold;
+  final int memberCount;
+  final bool isLight;
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _scale,
-      child: FadeTransition(
-        opacity: _fade,
-        child: Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: _PopupCard(
-              onTryNow: () async {
-                await _ctrl.reverse();
-                if (!mounted) return;
-                Navigator.of(context).pop();
-                widget.onTryNow();
-              },
-              onClose: _close,
+    final progress = threshold > 0
+        ? (memberCount / threshold).clamp(0.0, 1.0)
+        : 0.0;
+    final label = isLight ? const Color(0xff666666) : const Color(0xff999999);
+    final trackColor = isLight ? const Color(0xffe0e0e0) : const Color(0xff3a3a3a);
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🔒', style: TextStyle(fontSize: 48)),
+            const SizedBox(height: 16),
+            Text(
+              'Το feed ${cityGenitive(city)} δεν είναι ακόμα ανοιχτό',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: isLight ? const Color(0xff1c1c1e) : const Color(0xffebebf5),
+              ),
             ),
-          ),
+            const SizedBox(height: 8),
+            Text(
+              'Χρειαζόμαστε $threshold μέλη από ${cityAccusative(city)} για να ανοίξει. '
+              'Στο μεταξύ μπορείς να δεις το feed ολόκληρης της Ελλάδας ή να καλέσεις φίλους από την πόλη σου!',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: label),
+            ),
+            const SizedBox(height: 20),
+            // X / Y counter
+            Text(
+              '$memberCount / $threshold μέλη',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: isLight ? const Color(0xff1c1c1e) : const Color(0xffebebf5),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Progress bar
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 8,
+                backgroundColor: trackColor,
+                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xff34c759)),
+              ),
+            ),
+            const SizedBox(height: 28),
+            FilledButton.icon(
+              onPressed: () {
+                // TODO: open share / invite sheet
+              },
+              icon: const Icon(Icons.person_add_outlined, size: 18),
+              label: const Text('Πρόσκλεσε φίλους'),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _PopupCard extends StatelessWidget {
-  const _PopupCard({required this.onTryNow, required this.onClose});
-  final VoidCallback onTryNow;
-  final VoidCallback onClose;
+// ── Greece feed announcement popup ────────────────────────────────────────────
 
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? const Color(0xff1a1a1a) : Colors.white;
-    final textColor = isDark ? Colors.white : Colors.black;
-    final subColor = isDark ? const Color(0xff999999) : const Color(0xff666666);
-
-    return ColoredBox(
-      color: bg,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // ── Header visual ──────────────────────────────────────────────
-          SizedBox(
-            height: 160,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Blue gradient background
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xff003D99), Color(0xff0060CC)],
-                    ),
-                  ),
-                ),
-                // Subtle white diagonal stripe — clean, geometric
-                CustomPaint(painter: _StripePainter()),
-                // Close button top-right
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  child: GestureDetector(
-                    onTap: onClose,
-                    child: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'X',
-                          style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700, height: 1),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // Centred globe — drawn, no icon font needed
-                Center(child: CustomPaint(size: const Size(60, 60), painter: _GlobePainter())),
-              ],
-            ),
-          ),
-
-          // ── Text ───────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Feed Ελλάδας',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: textColor,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Posts από χρήστες σε όλη την Ελλάδα, σε ένα feed.',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: subColor,
-                    height: 1.45,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // ── Buttons ────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  height: 48,
-                  child: FilledButton(
-                    onPressed: onTryNow,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xff0060CC),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: const Text(
-                      'Δοκίμασέ το',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                GestureDetector(
-                  onTap: onClose,
-                  child: Center(
-                    child: Text(
-                      'Αργότερα',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: subColor,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// Simple globe drawn with Canvas — no icon font dependency.
-class _GlobePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final r = size.width / 2;
-    final paint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2;
-
-    // Outer circle
-    canvas.drawCircle(Offset(cx, cy), r, paint);
-    // Horizontal equator
-    canvas.drawLine(Offset(0, cy), Offset(size.width, cy), paint);
-    // Vertical meridian
-    canvas.drawLine(Offset(cx, 0), Offset(cx, size.height), paint);
-    // Inner ellipses (latitude lines)
-    canvas.drawArc(
-      Rect.fromCenter(center: Offset(cx, cy), width: size.width * 0.7, height: size.height),
-      0, 3.14159 * 2, false, paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_GlobePainter old) => false;
-}
-
-// Subtle diagonal white stripes on the header background.
-class _StripePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.06)
-      ..strokeWidth = 28
-      ..style = PaintingStyle.stroke;
-    for (double x = -size.height; x < size.width + size.height; x += 56) {
-      canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_StripePainter old) => false;
-}
 
