@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:giphy_flutter_sdk/giphy_flutter_sdk.dart';
 
 import 'src/app.dart';
+import 'src/core/ambassador_attribution.dart';
 import 'src/core/code_push_service.dart';
 import 'src/core/link_preview.dart';
 import 'src/core/pinned_http.dart';
@@ -48,6 +49,13 @@ void main() {
     // next cold start, so there is nothing to wait for now — and a slow
     // network must never be something the first frame is behind.
     unawaited(CodePushService.instance.checkForUpdate());
+
+    // Reads whatever the installation carried in — a Play referrer on
+    // Android, the pasteboard on iOS — and only on the first launch after
+    // installing. It has to happen this early: on iOS the token sits on the
+    // clipboard, and the longer the app waits, the likelier the reader has
+    // copied something else over it.
+    unawaited(AmbassadorAttribution.bootstrapFromInstall());
   }
   runApp(const NeatApp());
 }

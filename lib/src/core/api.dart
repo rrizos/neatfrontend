@@ -197,6 +197,25 @@ Uri get setPasswordEndpoint =>
 Uri get logoutEndpoint => Uri.parse('$apiBaseUrl/api/auth/logout/');
 Uri get meEndpoint => Uri.parse('$apiBaseUrl/api/auth/me/');
 Uri get deleteAccountEndpoint => Uri.parse('$apiBaseUrl/api/auth/me/');
+// ── Invites ─────────────────────────────────────────────────────────────────
+//
+// The counters behind /invites. `sent` is a copy of the link; `joined` is the
+// app telling the server that this account came from one, which the server
+// re-checks before believing (invites/views.py).
+Uri get inviteSentEndpoint => Uri.parse('$apiBaseUrl/api/invites/sent/');
+Uri get inviteJoinedEndpoint => Uri.parse('$apiBaseUrl/api/invites/joined/');
+Uri get inviteClaimEndpoint => Uri.parse('$apiBaseUrl/api/invites/claim/');
+
+// ── Ambassadors ─────────────────────────────────────────────────────────────
+//
+// Paid referrals, so the app is never the one asserting who brought whom: it
+// asks the server for a single-use token when an ambassador link opens it,
+// and hands that token back after signing up. The server decides.
+Uri get ambassadorClickEndpoint =>
+    Uri.parse('$apiBaseUrl/api/ambassadors/click/');
+Uri get ambassadorClaimEndpoint =>
+    Uri.parse('$apiBaseUrl/api/ambassadors/claim/');
+
 Uri profileEndpoint(String username) =>
     Uri.parse('$apiBaseUrl/api/auth/profiles/$username/');
 Uri followEndpoint(String username) =>

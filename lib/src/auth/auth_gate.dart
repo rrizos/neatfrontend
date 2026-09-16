@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api.dart';
 import '../core/avatar_store.dart';
+import '../core/ambassador_attribution.dart';
+import '../core/invite_attribution.dart';
 import '../core/models.dart';
 import '../core/pending_post.dart';
 import '../core/profile_save_queue.dart';
@@ -190,6 +192,10 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     if (mounted) setState(() => _session = session);
     SessionTracker.instance.start(session.token);
     if (!kIsWeb) unawaited(PushService.instance.registerForSession(session.token));
+    // Every session, not only sign-ups: the two arrive here as the same
+    // object, and the server is the half that can tell them apart.
+    unawaited(InviteAttribution.reportIfPending(session.token));
+    unawaited(AmbassadorAttribution.claimIfPending(session.token));
   }
 
   Future<void> _logout() async {
@@ -407,6 +413,7 @@ class _CitySetupGateState extends State<_CitySetupGate> {
       children: [
         CitySetupPage(
           token: widget.session.token,
+          username: widget.session.user.username,
           themeMode: widget.themeMode,
           onCitySelected: _submit,
         ),

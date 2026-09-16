@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_localizations.dart';
 import 'core/avatar_store.dart';
+import 'core/ambassador_attribution.dart';
+import 'core/invite_attribution.dart';
 import 'auth/auth_gate.dart';
 import 'core/neat_loader.dart';
 
@@ -74,6 +76,9 @@ class _NeatAppState extends State<NeatApp> {
   }
 
   void _handleUri(Uri uri) {
+    if (_handleAmbassadorUri(uri)) return;
+    if (_handleInviteUri(uri)) return;
+
     int? postId;
     if (uri.scheme == 'neat' && uri.host == 'post' && uri.pathSegments.isNotEmpty) {
       // Custom scheme:  neat://post/123
@@ -91,6 +96,60 @@ class _NeatAppState extends State<NeatApp> {
     // HomePageState picks it up once it's mounted and has the session context
     // needed to build a ProfilePage.
     NeatApp.pendingDeepLinkPost.value = postId;
+  }
+
+  /// `https://neatapp.gr/a/<code>` and `neat://a/<code>` — a paid referral.
+  ///
+  /// Returns true when the link was an ambassador link, handled or not.
+  ///
+  /// The code is not kept. It is exchanged immediately for a token the server
+  /// mints and records against this device, because a code the app held onto
+  /// would be an assertion and a token is evidence. See
+  /// [AmbassadorAttribution].
+  bool _handleAmbassadorUri(Uri uri) {
+    String? code;
+    if (uri.scheme == 'neat' && uri.host == 'a' && uri.pathSegments.isNotEmpty) {
+      code = uri.pathSegments.first;
+    } else if ((uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host == 'neatapp.gr' &&
+        uri.pathSegments.length >= 2 &&
+        uri.pathSegments[0] == 'a') {
+      code = uri.pathSegments[1];
+    }
+    if (code == null || code.isEmpty) return false;
+
+    unawaited(AmbassadorAttribution.remember(code));
+    return true;
+  }
+
+  /// `https://neatapp.gr/<username>/invite` and `neat://invite/<username>`.
+  ///
+  /// Returns true when the link was an invitation, handled or not — there is
+  /// nothing after it for the post branch to find.
+  ///
+  /// Nothing is navigated to. Someone who already has the app has nothing to
+  /// be shown here (they are already a member, which is what the page was
+  /// asking for); the name is kept only so that a sign-up finished later can
+  /// be credited. See [InviteAttribution].
+  bool _handleInviteUri(Uri uri) {
+    String? inviter;
+    if (uri.scheme == 'neat' &&
+        uri.host == 'invite' &&
+        uri.pathSegments.isNotEmpty) {
+      inviter = uri.pathSegments.first;
+    } else if ((uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host == 'neatapp.gr' &&
+        uri.pathSegments.length >= 2 &&
+        uri.pathSegments[1] == 'invite') {
+      inviter = uri.pathSegments[0];
+    }
+    if (inviter == null || inviter.isEmpty) return false;
+
+    unawaited(InviteAttribution.remember(
+      inviter: inviter,
+      city: uri.queryParameters['city'] ?? '',
+    ));
+    return true;
   }
 
   @override

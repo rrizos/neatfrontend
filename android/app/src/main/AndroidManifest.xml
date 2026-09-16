@@ -38,6 +38,8 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="neat" android:host="post"/>
+                <data android:scheme="neat" android:host="invite"/>
+                <data android:scheme="neat" android:host="a"/>
             </intent-filter>
             <!-- App Links: intercept neatapp.gr/post/* when the app is installed -->
             <intent-filter android:autoVerify="true">
@@ -45,6 +47,24 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="https" android:host="neatapp.gr" android:pathPattern="/post/.*"/>
+            </intent-filter>
+            <!-- Invite links, for phones that already have the app: opening one
+                 again after installing is what credits the signup to whoever
+                 sent it. Anyone without the app gets the web page instead. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="neatapp.gr" android:pathPattern="/.*/invite"/>
+            </intent-filter>
+            <!-- Ambassador links. Taken only when the app is installed, which
+                 is exactly when there is a signup to credit; everyone else
+                 gets the landing page and the store button. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="neatapp.gr" android:pathPrefix="/a/"/>
             </intent-filter>
         </activity>
         <provider

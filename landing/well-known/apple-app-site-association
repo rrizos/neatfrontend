@@ -4,7 +4,9 @@
       {
         "appIDs": ["RZ36PNWS82.NeatApp.Neat"],
         "components": [
-          { "/": "/post/*", "comment": "Shared post links open in the app" }
+          { "/": "/post/*", "comment": "Shared post links open in the app" },
+          { "/": "/a/*", "comment": "Ambassador links. An installed app takes these so it can exchange the code for a claim token; anyone without the app gets the landing page." },
+          { "/": "/*/invite", "comment": "Invite links open in the app once it is installed \u2014 which is how a signup gets credited to whoever sent it. Someone without the app never reaches this and gets the web page instead." }
         ]
       }
     ]
