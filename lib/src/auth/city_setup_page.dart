@@ -27,11 +27,18 @@ class CitySetupPage extends StatefulWidget {
   const CitySetupPage({
     super.key,
     required this.token,
+    this.username = '',
     required this.themeMode,
     required this.onCitySelected,
   });
 
   final String token;
+
+  /// The account exists by the time this screen is reached — sign-up writes
+  /// the session before the city is picked — so an invite shared from here
+  /// can still carry who is inviting. Without it the link renders as
+  /// "Ένας φίλος σου", which is the bug this closes.
+  final String username;
   final ThemeMode themeMode;
 
   /// Called once, with a non-empty city name.
@@ -72,7 +79,12 @@ class _CitySetupPageState extends State<CitySetupPage> {
 
   Future<void> _openMap() async {
     final city = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => CityPickPage(token: widget.token)),
+      MaterialPageRoute(
+        builder: (_) => CityPickPage(
+          token: widget.token,
+          username: widget.username,
+        ),
+      ),
     );
     // Backing out of the map lands here again rather than anywhere further
     // back — this screen is the flow's floor until a city exists.
@@ -283,6 +295,11 @@ class CityPickPage extends StatefulWidget {
   const CityPickPage({
     super.key,
     required this.token,
+    /// Who is inviting, for the link on a locked city's invite sheet. Empty at
+    /// sign-up, where there is no account yet to credit — which is exactly the
+    /// case that produced "Ένας φίλος σου" on the invite page instead of a
+    /// name.
+    this.username = '',
     /// Current home city, non-empty when opened from the bio edit sheet.
     /// When provided the map hides that city's pin (no point offering the
     /// city the user is already in) and shows heat data instead of the
@@ -291,6 +308,7 @@ class CityPickPage extends StatefulWidget {
   });
 
   final String token;
+  final String username;
   final String homeCity;
 
   @override
@@ -312,6 +330,7 @@ class _CityPickPageState extends State<CityPickPage> {
           children: [
             CityMapView(
               token: widget.token,
+              username: widget.username,
               homeCity: widget.homeCity,
               isSignUp: _isSignUp,
               isEditProfile: !_isSignUp,

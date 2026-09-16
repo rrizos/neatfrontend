@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' show Random;
+import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
@@ -26,6 +27,7 @@ import '../app.dart';
 import '../core/api.dart';
 import '../core/avatar_store.dart';
 import '../core/background_upload.dart';
+import '../core/invite_sheet.dart';
 import '../core/link_preview.dart';
 import '../core/media_cache.dart';
 import '../core/mentions.dart';
@@ -2583,6 +2585,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               hasScrollBody: false,
               child: _LockedFeedPlaceholder(
                 city: widget.session.user.city,
+                username: widget.session.user.username,
+                token: widget.session.token,
                 threshold: widget.session.user.cityThreshold,
                 memberCount: widget.session.user.cityMemberCount,
                 isLight: isLight,
@@ -2940,6 +2944,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                 child: CityMapView(
                                   token: widget.session.token,
                                   homeCity: widget.session.user.city,
+                                  username: widget.session.user.username,
                                   onOpenUserProfile: _pushProfileRoute,
                                   onCitySelected: _openCityFeed,
                                 ),
@@ -7200,82 +7205,258 @@ class _ChevronPainter extends CustomPainter {
 // ── Locked city feed placeholder ──────────────────────────────────────────────
 
 /// Shown in the city-feed tab when the user's home city is still locked.
-class _LockedFeedPlaceholder extends StatelessWidget {
+class _LockedFeedPlaceholder extends StatefulWidget {
   const _LockedFeedPlaceholder({
     required this.city,
+    required this.username,
+    required this.token,
     required this.threshold,
     required this.memberCount,
     required this.isLight,
   });
 
   final String city;
+  final String username;
+  final String token;
   final int threshold;
   final int memberCount;
   final bool isLight;
 
   @override
-  Widget build(BuildContext context) {
-    final progress = threshold > 0
-        ? (memberCount / threshold).clamp(0.0, 1.0)
-        : 0.0;
-    final label = isLight ? const Color(0xff666666) : const Color(0xff999999);
-    final trackColor = isLight ? const Color(0xffe0e0e0) : const Color(0xff3a3a3a);
+  State<_LockedFeedPlaceholder> createState() => _LockedFeedPlaceholderState();
+}
 
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('🔒', style: TextStyle(fontSize: 48)),
-            const SizedBox(height: 16),
-            Text(
-              'Το feed ${cityGenitive(city)} δεν είναι ακόμα ανοιχτό',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: isLight ? const Color(0xff1c1c1e) : const Color(0xffebebf5),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Χρειαζόμαστε $threshold μέλη από ${cityAccusative(city)} για να ανοίξει. '
-              'Στο μεταξύ μπορείς να δεις το feed ολόκληρης της Ελλάδας ή να καλέσεις φίλους από την πόλη σου!',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: label),
-            ),
-            const SizedBox(height: 20),
-            // X / Y counter
-            Text(
-              '$memberCount / $threshold μέλη',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: isLight ? const Color(0xff1c1c1e) : const Color(0xffebebf5),
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Progress bar
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 8,
-                backgroundColor: trackColor,
-                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xff34c759)),
-              ),
-            ),
-            const SizedBox(height: 28),
-            FilledButton.icon(
-              onPressed: () {
-                // TODO: open share / invite sheet
-              },
-              icon: const Icon(Icons.person_add_outlined, size: 18),
-              label: const Text('Πρόσκλεσε φίλους'),
-            ),
-          ],
+/// The city feed before the city exists.
+///
+/// Drawn as the feed itself, blurred, rather than as an empty state: the point
+/// to get across is that there is something here and it is not open yet, which
+/// a centred paragraph on a blank screen does not say. The shapes behind the
+/// glass are deliberately shapes — no real posts are fetched, because there
+/// are none to fetch and inventing them would be a lie about the city.
+class _LockedFeedPlaceholderState extends State<_LockedFeedPlaceholder> {
+  bool _copied = false;
+  Timer? _copiedTimer;
+
+  @override
+  void dispose() {
+    _copiedTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copyLink() async {
+    final link = inviteLink(city: widget.city, username: widget.username);
+    await Clipboard.setData(ClipboardData(text: link));
+    unawaited(reportInviteSent(token: widget.token, city: widget.city));
+    if (!mounted) return;
+    HapticFeedback.mediumImpact();
+    setState(() => _copied = true);
+    _copiedTimer?.cancel();
+    _copiedTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = widget.isLight;
+    final remaining = widget.threshold - widget.memberCount;
+    final progress = widget.threshold > 0
+        ? (widget.memberCount / widget.threshold).clamp(0.0, 1.0)
+        : 0.0;
+
+    const blue = Color(0xff2F80ED);
+    final ink = isLight ? const Color(0xff1c1c1e) : Colors.white;
+    final muted = isLight ? const Color(0xff6b7280) : const Color(0xff9ca3af);
+    final surface = isLight ? const Color(0xfff3f4f6) : const Color(0xff141414);
+    final hairline = isLight ? const Color(0xffe5e7eb) : const Color(0xff222222);
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // The locked feed, out of focus.
+        ImageFiltered(
+          imageFilter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          child: ListView.builder(
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            itemCount: 4,
+            itemBuilder: (_, _) => _GhostPost(surface: surface),
+          ),
         ),
+        // Enough veil that the shapes read as texture rather than as content
+        // somebody might try to make out.
+        Positioned.fill(
+          child: ColoredBox(
+            color: (isLight ? Colors.white : Colors.black).withValues(alpha: 0.55),
+          ),
+        ),
+        Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 340),
+              padding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
+              decoration: BoxDecoration(
+                color: isLight ? Colors.white : const Color(0xff0d0e12),
+                border: Border.all(color: hairline),
+                borderRadius: BorderRadius.circular(22),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Colors.black38, blurRadius: 30, offset: Offset(0, 14)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('🔒', style: TextStyle(fontSize: 40)),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Το feed ${cityGenitive(widget.city)} είναι κλειδωμένο',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 19,
+                      height: 1.25,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                      color: ink,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    widget.threshold > 0 && remaining > 0
+                        ? 'Μένουν $remaining άτομα από ${cityAccusative(widget.city)} '
+                            'για να ανοίξει.'
+                        : 'Ανοίγει μόλις μαζευτεί αρκετός κόσμος από '
+                            '${cityAccusative(widget.city)}.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 14.5, height: 1.45, color: muted),
+                  ),
+                  if (widget.threshold > 0) ...[
+                    const SizedBox(height: 16),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 6,
+                        backgroundColor: hairline,
+                        valueColor: const AlwaysStoppedAnimation<Color>(blue),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${widget.memberCount} από ${widget.threshold} άτομα',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: muted,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: FilledButton(
+                      onPressed: _copyLink,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _copied ? surface : blue,
+                        foregroundColor: _copied ? ink : Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: Text(
+                        _copied ? '✓  Αντιγράφηκε' : 'Αντιγραφή link πρόσκλησης',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton(
+                    onPressed: () => showInviteSheet(
+                      context,
+                      city: widget.city,
+                      username: widget.username,
+                      token: widget.token,
+                      memberCount: widget.memberCount,
+                      threshold: widget.threshold,
+                    ),
+                    style: TextButton.styleFrom(foregroundColor: muted),
+                    child: const Text(
+                      'Δες πώς λειτουργεί',
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Μέχρι τότε βλέπεις το feed της Ελλάδας.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12.5, height: 1.4, color: muted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A post-shaped smudge. Never carries content — it exists to be blurred.
+class _GhostPost extends StatelessWidget {
+  const _GhostPost({required this.surface});
+
+  final Color surface;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget bar(double width, double height) => Container(
+          width: width,
+          height: height,
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: surface,
+            borderRadius: BorderRadius.circular(6),
+          ),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(color: surface, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [bar(120, 11), bar(70, 9)],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          bar(double.infinity, 12),
+          bar(240, 12),
+          const SizedBox(height: 6),
+          Container(
+            height: 150,
+            decoration: BoxDecoration(
+              color: surface,
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+        ],
       ),
     );
   }

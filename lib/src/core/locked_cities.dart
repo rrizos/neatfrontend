@@ -243,6 +243,63 @@ String cityAccusative(String city) {
   return city;
 }
 
+/// A latin, URL-safe form of a city name, for the `?city=` of an invite link.
+///
+/// Which transliteration scheme this is does not matter — nothing reads the
+/// slug back as Greek, and no one types it. What matters is that the copy of
+/// this function in netlify/edge-functions/invite.js produces the same string
+/// for the same city: that is how the invite page turns `?city=patra` back
+/// into Πάτρα and its live counter. Change one and you must change the other.
+///
+/// A slug the page cannot match is not a failure — the invite page falls back
+/// to its city-less copy — so the two only have to agree, not be correct.
+String citySlug(String city) {
+  const accents = <String, String>{
+    'ά': 'α', 'έ': 'ε', 'ή': 'η', 'ί': 'ι', 'ό': 'ο', 'ύ': 'υ', 'ώ': 'ω',
+    'ϊ': 'ι', 'ϋ': 'υ', 'ΐ': 'ι', 'ΰ': 'υ',
+  };
+  const digraphs = <String, String>{'ου': 'ou', 'αυ': 'av', 'ευ': 'ev'};
+  const letters = <String, String>{
+    'α': 'a', 'β': 'v', 'γ': 'g', 'δ': 'd', 'ε': 'e', 'ζ': 'z', 'η': 'i',
+    'θ': 'th', 'ι': 'i', 'κ': 'k', 'λ': 'l', 'μ': 'm', 'ν': 'n', 'ξ': 'x',
+    'ο': 'o', 'π': 'p', 'ρ': 'r', 'σ': 's', 'ς': 's', 'τ': 't', 'υ': 'y',
+    'φ': 'f', 'χ': 'ch', 'ψ': 'ps', 'ω': 'o',
+  };
+
+  // Accents come off first, so that the digraph pass still recognises the
+  // "ευ" inside Λευκάδα when it arrives written as "εύ".
+  final plain = StringBuffer();
+  for (final ch in city.toLowerCase().split('')) {
+    plain.write(accents[ch] ?? ch);
+  }
+  final source = plain.toString();
+
+  final out = StringBuffer();
+  for (var i = 0; i < source.length; i++) {
+    final pair = i + 1 < source.length ? source.substring(i, i + 2) : '';
+    final digraph = digraphs[pair];
+    if (digraph != null) {
+      out.write(digraph);
+      i++;
+      continue;
+    }
+    final ch = source[i];
+    final letter = letters[ch];
+    if (letter != null) {
+      out.write(letter);
+    } else if (RegExp(r'[a-z0-9]').hasMatch(ch)) {
+      out.write(ch);
+    } else {
+      out.write('-');
+    }
+  }
+
+  return out
+      .toString()
+      .replaceAll(RegExp(r'-+'), '-')
+      .replaceAll(RegExp(r'^-|-$'), '');
+}
+
 /// Returns true when [cityName] should be treated as locked given [locks].
 ///
 /// Logic:

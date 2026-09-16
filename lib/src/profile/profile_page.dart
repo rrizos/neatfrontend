@@ -2319,6 +2319,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
       MaterialPageRoute(
         builder: (_) => CityPickPage(
           token: widget.token,
+          username: widget.profile.username,
           homeCity: widget.profile.city, // hides current city pin on bio map
         ),
       ),

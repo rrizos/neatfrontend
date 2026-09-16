@@ -13,6 +13,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/api.dart';
+import '../core/invite_sheet.dart';
 import '../core/locked_cities.dart';
 import '../core/media_cache.dart';
 import '../core/neat_loader.dart';
@@ -341,6 +342,7 @@ class CityMapView extends StatefulWidget {
     super.key,
     required this.token,
     required this.homeCity,
+    this.username = '',
     required this.onOpenUserProfile,
     required this.onCitySelected,
     this.isSignUp = false,
@@ -351,6 +353,10 @@ class CityMapView extends StatefulWidget {
 
   final String token;
   final String homeCity;
+
+  /// Who is doing the inviting, for the link on a locked city's invite sheet.
+  /// Empty at sign-up, where there is no account yet — the sheet copes.
+  final String username;
   final ValueChanged<String> onOpenUserProfile;
   final ValueChanged<String> onCitySelected;
   final bool isSignUp;
@@ -799,6 +805,8 @@ class _CityMapViewState extends State<CityMapView> {
                             city: city,
                             imageUrl: city.imageUrl,
                             lockInfo: _cityLocks[city.name],
+                            username: widget.username,
+                            token: widget.token,
                             onClose: _closeCard,
                             onJoin: _joinCity,
                           )
@@ -1559,6 +1567,8 @@ class _LockedCityCard extends StatelessWidget {
     required this.onJoin,
     this.imageUrl,
     this.lockInfo,
+    this.username = '',
+    this.token = '',
   });
 
   final GreeceCity city;
@@ -1566,6 +1576,8 @@ class _LockedCityCard extends StatelessWidget {
   final VoidCallback onJoin;
   final String? imageUrl;
   final CityLockInfo? lockInfo;
+  final String username;
+  final String token;
 
   @override
   Widget build(BuildContext context) {
@@ -1731,11 +1743,21 @@ class _LockedCityCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    // Secondary: invite (no-op for now)
+                    // Secondary: invite. Forced dark because this card is
+                    // dark on any theme, and a light sheet over it would be
+                    // the only light thing on the screen.
                     SizedBox(
                       height: 44,
                       child: OutlinedButton(
-                        onPressed: () {}, // TODO: invitation flow
+                        onPressed: () => showInviteSheet(
+                          context,
+                          city: city.name,
+                          username: username,
+                          token: token,
+                          memberCount: memberCount,
+                          threshold: threshold,
+                          forceDark: true,
+                        ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white70,
                           side: const BorderSide(color: Color(0xff3a3a3e)),
