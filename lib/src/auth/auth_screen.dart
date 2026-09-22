@@ -14,6 +14,7 @@ import '../map/map_snapshot.dart';
 import 'app_intro_page.dart';
 import 'social_buttons.dart';
 import 'forgot_password_screen.dart';
+import 'username_rules.dart';
 
 class AuthScreen extends StatefulWidget {
 const AuthScreen({
@@ -78,6 +79,17 @@ super.dispose();
 }
 
 Future<void> _submit() async {
+if (_signup) {
+// The same rule the server enforces, applied before the round trip. A
+// name it would refuse is one whose profile could never be opened, so
+// saying so here beats creating the account and finding out later.
+final problem = usernameFormatError(
+_username.text.trim(), AppLocalizations.of(context));
+if (problem != null) {
+setState(() => _error = problem);
+return;
+}
+}
 setState(() {
 _loading = true;
 _error = null;
@@ -148,10 +160,18 @@ Image.asset(
 const SizedBox(height: 20),
 TextField(
 controller: _username,
+autocorrect: false,
+enableSuggestions: false,
+// Only while signing up. Signing in has to accept an email address, and
+// the accounts made before this rule existed still hold spaces and Greek
+// letters their owners have to be able to type.
+inputFormatters: _signup ? usernameInputFormatters : null,
+maxLength: _signup ? usernameMaxLength : null,
 style: TextStyle(color: isLight ? Colors.black : Colors.white),
 cursorColor: isLight ? Colors.black : Colors.white,
 decoration: _fieldDecoration(
-_signup ? l10n.username : l10n.emailOrUsername, isLight),
+_signup ? l10n.username : l10n.emailOrUsername, isLight)
+.copyWith(counterText: ''),
 ),
 if (_signup) ...[
 const SizedBox(height: 12),

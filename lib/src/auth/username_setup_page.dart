@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../core/onboarding_ui.dart';
+import 'username_rules.dart';
 
 /// The step where an Apple or Google sign-up replaces the username the server
 /// invented for it.
@@ -42,30 +42,16 @@ class _UsernameSetupPageState extends State<UsernameSetupPage> {
   final _controller = TextEditingController();
   String? _error;
 
-  static const _minLength = 3;
-  static const _maxLength = 20;
-  static final _allowed = RegExp(r'^[a-zA-Z0-9._]+$');
-
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
 
-  String? _localError(String name, AppLocalizations l10n) {
-    if (name.length < _minLength) return l10n.usernameSetupTooShort;
-    if (name.length > _maxLength) return l10n.usernameSetupTooLong;
-    if (!_allowed.hasMatch(name)) return l10n.usernameSetupBadChars;
-    if (name.startsWith('.') || name.endsWith('.')) {
-      return l10n.usernameSetupBadChars;
-    }
-    return null;
-  }
-
   void _submit() {
     final l10n = AppLocalizations.of(context);
     final name = _controller.text.trim();
-    final error = _localError(name, l10n);
+    final error = usernameFormatError(name, l10n);
     if (error != null) {
       setState(() => _error = error);
       return;
@@ -110,13 +96,9 @@ class _UsernameSetupPageState extends State<UsernameSetupPage> {
                       onChanged: (_) {
                         if (shown != null) setState(() => _error = null);
                       },
-                      maxLength: _maxLength,
+                      maxLength: usernameMaxLength,
                       style: TextStyle(color: fg, fontSize: 17),
-                      inputFormatters: [
-                        // Stops the impossible characters at the keyboard
-                        // rather than explaining them afterwards.
-                        FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9._]')),
-                      ],
+                      inputFormatters: usernameInputFormatters,
                       decoration: InputDecoration(
                         prefixText: '@',
                         prefixStyle: TextStyle(

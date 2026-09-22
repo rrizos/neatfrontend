@@ -139,17 +139,26 @@ Uri adminUsersEndpoint([String query = '']) {
   if (query.trim().isEmpty) return uri;
   return uri.replace(queryParameters: {'q': query.trim()});
 }
+/// A username as it can be put in a URL path.
+///
+/// Usernames are only allowed letters, numbers, dots and underscores now (see
+/// auth/username_rules.dart), but accounts created before that rule existed
+/// hold spaces, Greek letters and emoji. Interpolated raw, those produce a URL
+/// the request never comes back from — which is why those profiles would not
+/// open. Percent-encoding is what the server decodes back.
+String _pathSegment(String username) => Uri.encodeComponent(username);
+
 Uri adminVerifyUserEndpoint(String username) =>
-    Uri.parse('$apiBaseUrl/api/auth/admin/users/$username/verify/');
+    Uri.parse('$apiBaseUrl/api/auth/admin/users/${_pathSegment(username)}/verify/');
 Uri adminSetOfficialEligibilityEndpoint(String username) =>
-    Uri.parse('$apiBaseUrl/api/auth/admin/users/$username/official-eligibility/');
+    Uri.parse('$apiBaseUrl/api/auth/admin/users/${_pathSegment(username)}/official-eligibility/');
 Uri adminDeleteUserEndpoint(String username) =>
-    Uri.parse('$apiBaseUrl/api/auth/admin/users/$username/delete/');
+    Uri.parse('$apiBaseUrl/api/auth/admin/users/${_pathSegment(username)}/delete/');
 Uri commentLikeEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/like/');
 Uri commentReportEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/report/');
 Uri commentPinEndpoint(int id) => Uri.parse('$apiBaseUrl/api/posts/comments/$id/pin/');
 Uri userPostsEndpoint(String username, {String scope = 'city'}) {
-  final uri = Uri.parse('$apiBaseUrl/api/posts/user/$username/');
+  final uri = Uri.parse('$apiBaseUrl/api/posts/user/${_pathSegment(username)}/');
   if (scope == 'city') return uri; // default — no param needed
   return uri.replace(queryParameters: {'scope': scope});
 }
@@ -217,16 +226,16 @@ Uri get ambassadorClaimEndpoint =>
     Uri.parse('$apiBaseUrl/api/ambassadors/claim/');
 
 Uri profileEndpoint(String username) =>
-    Uri.parse('$apiBaseUrl/api/auth/profiles/$username/');
+    Uri.parse('$apiBaseUrl/api/auth/profiles/${_pathSegment(username)}/');
 Uri followEndpoint(String username) =>
-    Uri.parse('$apiBaseUrl/api/auth/profiles/$username/follow/');
+    Uri.parse('$apiBaseUrl/api/auth/profiles/${_pathSegment(username)}/follow/');
 Uri userBlockEndpoint(String username) =>
-    Uri.parse('$apiBaseUrl/api/auth/profiles/$username/block/');
+    Uri.parse('$apiBaseUrl/api/auth/profiles/${_pathSegment(username)}/block/');
 Uri get blockedUsersEndpoint => Uri.parse('$apiBaseUrl/api/auth/blocked/');
 Uri followersEndpoint(String username) =>
-    Uri.parse('$apiBaseUrl/api/auth/profiles/$username/followers/');
+    Uri.parse('$apiBaseUrl/api/auth/profiles/${_pathSegment(username)}/followers/');
 Uri followingEndpoint(String username) =>
-    Uri.parse('$apiBaseUrl/api/auth/profiles/$username/following/');
+    Uri.parse('$apiBaseUrl/api/auth/profiles/${_pathSegment(username)}/following/');
 Uri get suggestionsEndpoint => Uri.parse('$apiBaseUrl/api/auth/suggestions/');
 Uri searchUsersEndpoint([String query = '', bool connectionsOnly = false]) {
   final uri = Uri.parse('$apiBaseUrl/api/auth/search/');
