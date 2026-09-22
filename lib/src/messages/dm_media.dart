@@ -83,10 +83,17 @@ class DmMedia {
     }
   }
 
+  /// Why the last fetch came back empty, for the bubble to show.
+  ///
+  /// A failed load used to be indistinguishable from a tap that never landed;
+  /// this is what lets the UI say which of the two it was.
+  static String lastError = '';
+
   static Future<Uint8List?> load({
     required String token,
     required int conversationId,
     required int messageId,
+    String mediaUrl = '',
   }) {
     final cached = _memory[messageId];
     if (cached != null) return Future.value(cached);
@@ -96,25 +103,78 @@ class DmMedia {
       token: token,
       conversationId: conversationId,
       messageId: messageId,
+      mediaUrl: mediaUrl,
     ).whenComplete(() => _inFlight.remove(messageId));
+  }
+
+  /// The file itself, straight from where the message said it is.
+  ///
+  /// The server normally hands back an absolute URL, but a bare `/media/...`
+  /// turns up too (see the share path in messages_page.dart), and resolving it
+  /// against the API host is the difference between a download and a crash.
+  static Future<Uint8List?> _download(String url, int messageId) async {
+    final absolute = url.startsWith('/') ? '$apiBaseUrl$url' : url;
+    try {
+      final res = await http
+          .get(Uri.parse(absolute))
+          .timeout(const Duration(seconds: 45));
+      if (res.statusCode != 200 || res.bodyBytes.isEmpty) {
+        lastError = 'file http ${res.statusCode} (${res.bodyBytes.length}B)';
+        debugPrint('[dm_media] $messageId: $absolute gave $lastError');
+        return null;
+      }
+      return res.bodyBytes;
+    } catch (e) {
+      lastError = 'file $e';
+      debugPrint('[dm_media] $messageId: $absolute threw $e');
+      return null;
+    }
   }
 
   static Future<Uint8List?> _fetch({
     required String token,
     required int conversationId,
     required int messageId,
+    String mediaUrl = '',
   }) async {
     final onDisk = await _readFile(messageId);
     if (onDisk != null) {
       _remember(messageId, onDisk);
       return onDisk;
     }
+
+    // When the thread already said where the file is, go straight there.
+    //
+    // This is what the photo bubbles have always done, and asking the media
+    // endpoint to repeat an answer the payload already carried is a round trip
+    // that buys nothing. It was also the one request in this path that voice
+    // notes made and photos did not — so it is the one that has to be right
+    // for a voice note to play, and nothing else in the app depended on it.
+    if (mediaUrl.isNotEmpty) {
+      final direct = await _download(mediaUrl, messageId);
+      if (direct != null) {
+        _remember(messageId, direct);
+        unawaited(_writeFile(messageId, direct));
+        return direct;
+      }
+      // Falls through: an older server answers the endpoint with the bytes.
+    }
+
     try {
-      final res = await http.get(
-        messageMediaEndpoint(conversationId, messageId),
-        headers: authGetHeaders(token),
-      );
-      if (res.statusCode != 200) return null;
+      // Timeouts, because neither request had one: a connection that stalls
+      // mid-body never completes, and the bubble waiting on it span its
+      // spinner for as long as the chat stayed open.
+      final res = await http
+          .get(
+            messageMediaEndpoint(conversationId, messageId),
+            headers: authGetHeaders(token),
+          )
+          .timeout(const Duration(seconds: 25));
+      if (res.statusCode != 200) {
+        lastError = 'endpoint http ${res.statusCode}';
+        debugPrint('[dm_media] $messageId: media endpoint said ${res.statusCode}');
+        return null;
+      }
       final body = jsonDecode(res.body) as Map<String, dynamic>;
 
       // Two shapes. The server now stores DM media as files and answers with a
@@ -124,17 +184,22 @@ class DmMedia {
       Uint8List? bytes;
       final url = body['url']?.toString() ?? '';
       if (url.isNotEmpty) {
-        final file = await http.get(Uri.parse(url));
-        if (file.statusCode != 200 || file.bodyBytes.isEmpty) return null;
-        bytes = file.bodyBytes;
+        bytes = await _download(url, messageId);
+        if (bytes == null) return null;
       } else {
         bytes = payloadBytes(body['text']?.toString() ?? '');
       }
-      if (bytes == null || bytes.isEmpty) return null;
+      if (bytes == null || bytes.isEmpty) {
+        lastError = 'nothing decoded';
+        debugPrint('[dm_media] $messageId: nothing decoded '
+            '(url=${url.isEmpty ? "none" : url})');
+        return null;
+      }
       _remember(messageId, bytes);
       unawaited(_writeFile(messageId, bytes));
       return bytes;
     } catch (e) {
+      lastError = 'endpoint $e';
       debugPrint('[dm_media] $messageId: $e');
       return null;
     }

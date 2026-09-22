@@ -3262,6 +3262,7 @@ class _MessageRow extends StatelessWidget {
     if (voiceData != null) {
       return _VoiceBubble(
         bytes: voiceData.bytes.isEmpty ? null : voiceData.bytes,
+        mediaUrl: message.mediaUrl,
         messageId: message.id,
         conversationId: conversationId,
         token: token,
@@ -3762,6 +3763,7 @@ class _TemporaryPhotoBubble extends StatelessWidget {
 class _VoiceBubble extends StatefulWidget {
   const _VoiceBubble({
     required this.bytes,
+    required this.mediaUrl,
     required this.messageId,
     required this.conversationId,
     required this.token,
@@ -3774,6 +3776,10 @@ class _VoiceBubble extends StatefulWidget {
   /// The recording, when the message carried it. Null means it is fetched on
   /// play — a voice note nobody listens to is never downloaded at all.
   final Uint8List? bytes;
+
+  /// Where the file is, when the thread payload said so. Empty falls back to
+  /// asking the media endpoint, which is all an older server can answer.
+  final String mediaUrl;
   final int messageId;
   final int conversationId;
   final String token;
@@ -3790,6 +3796,10 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
   late final AudioPlayer _player;
   bool _playing = false;
   bool _loading = false;
+
+  /// Set when a tap could not produce sound, so the bubble can say so instead
+  /// of sitting there looking like the tap never landed. Tapping again retries.
+  bool _failed = false;
   Duration _position = Duration.zero;
   String? _tempPath;
 
@@ -3797,6 +3807,14 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
   void initState() {
     super.initState();
     _player = AudioPlayer();
+    // audioplayers claims the audio session once, when the plugin starts up.
+    // The recorder then moves it to playAndRecord and never gives it back, so
+    // from the first voice note anyone records until the app is killed, every
+    // note plays under a recording session. Claiming playback per player puts
+    // it back.
+    unawaited(_player.setAudioContext(
+      AudioContext(iOS: AudioContextIOS(category: AVAudioSessionCategory.playback)),
+    ));
     _player.onPlayerStateChanged.listen((s) {
       if (mounted) setState(() => _playing = s == PlayerState.playing);
     });
@@ -3817,14 +3835,69 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
 
   Future<void> _toggle() async {
     if (_playing) { await _player.pause(); return; }
+    if (_failed) setState(() => _failed = false); // a tap is also a retry
     if (_tempPath == null) {
       final bytes = widget.bytes ?? await _fetch();
-      if (bytes == null || !mounted) return;
+      if (!mounted) return;
+      if (bytes == null || bytes.isEmpty) {
+        debugPrint('[voice] ${widget.messageId}: no bytes to play');
+        setState(() => _failed = true);
+        _say('Το ηχητικό δεν κατέβηκε', DmMedia.lastError);
+        return;
+      }
       final dir = await getTemporaryDirectory();
-      _tempPath = '${dir.path}/neat_play_${identityHashCode(this)}.aac';
-      await File(_tempPath!).writeAsBytes(bytes);
+      final path =
+          '${dir.path}/neat_play_${identityHashCode(this)}.${_containerExtension(bytes)}';
+      await File(path).writeAsBytes(bytes);
+      // Only once it is really on disk: a half-written path that stays cached
+      // would make every later tap fail too.
+      _tempPath = path;
+      debugPrint('[voice] ${widget.messageId}: ${bytes.length} bytes -> $path');
     }
-    await _player.play(DeviceFileSource(_tempPath!));
+    try {
+      await _player.play(DeviceFileSource(_tempPath!));
+    } catch (e) {
+      debugPrint('[voice] ${widget.messageId}: play failed: $e');
+      if (mounted) setState(() => _failed = true);
+      _say('Το ηχητικό δεν παίζει', '$e');
+    }
+  }
+
+  /// Tells the person the tap failed, and carries the technical reason with it
+  /// so a report of this is something anyone can act on.
+  void _say(String message, String detail) {
+    if (!mounted) return;
+    final short = detail.length > 120 ? '${detail.substring(0, 120)}…' : detail;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 8),
+        content: Text(short.isEmpty ? message : '$message — $short'),
+      ),
+    );
+  }
+
+  /// The file extension the bytes actually deserve.
+  ///
+  /// Voice notes arrive in two shapes: an iPhone records raw ADTS AAC, an
+  /// Android phone an MPEG-4 (.m4a) file. iOS picks its parser from the
+  /// extension alone — AVURLAsset never looks inside the file — so an Android
+  /// recording written to a `.aac` path fails to open and pressing play does
+  /// nothing at all, silently. That was every voice note sent from Android to
+  /// an iPhone. Sniffing costs eight bytes and fixes the ones already sent.
+  static String _containerExtension(Uint8List bytes) {
+    // 'ftyp' at offset 4 — an MPEG-4 container (m4a/mp4).
+    if (bytes.length >= 8 &&
+        bytes[4] == 0x66 &&
+        bytes[5] == 0x74 &&
+        bytes[6] == 0x79 &&
+        bytes[7] == 0x70) {
+      return 'm4a';
+    }
+    // ADTS sync word: twelve set bits, then two layer bits that must be zero.
+    if (bytes.length >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xF6) == 0xF0) {
+      return 'aac';
+    }
+    return 'm4a';
   }
 
   /// Downloads the recording the first time play is pressed. The spinner
@@ -3833,13 +3906,23 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
   Future<Uint8List?> _fetch() async {
     if (widget.messageId < 0) return null;
     setState(() => _loading = true);
-    final bytes = await DmMedia.load(
-      token: widget.token,
-      conversationId: widget.conversationId,
-      messageId: widget.messageId,
-    );
-    if (mounted) setState(() => _loading = false);
-    return bytes;
+    try {
+      return await DmMedia.load(
+        token: widget.token,
+        conversationId: widget.conversationId,
+        messageId: widget.messageId,
+        mediaUrl: widget.mediaUrl,
+      ).timeout(const Duration(seconds: 30));
+    } catch (e) {
+      DmMedia.lastError = '$e';
+      debugPrint('[voice] ${widget.messageId}: fetch failed: $e');
+      return null;
+    } finally {
+      // In a finally, because this is what kept the spinner turning: anything
+      // that threw or never answered left _loading true for as long as the
+      // chat stayed open, and every later tap awaited the same dead future.
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -3867,11 +3950,21 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
                       padding: const EdgeInsets.all(4),
                       child: CircularProgressIndicator(strokeWidth: 2, color: fg),
                     )
-                  : Icon(
-                      _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                      color: fg,
-                      size: 28,
-                    ),
+                  : _failed
+                      // A drawn glyph rather than a Material icon: a codepoint
+                      // that is not in the shipped release renders as an empty
+                      // box in a Shorebird patch.
+                      ? Center(
+                          child: Text(
+                            '↻',
+                            style: TextStyle(color: fg, fontSize: 20, height: 1),
+                          ),
+                        )
+                      : Icon(
+                          _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                          color: fg,
+                          size: 28,
+                        ),
             ),
             const SizedBox(width: 8),
             _WaveformBars(
@@ -4204,6 +4297,13 @@ class _ComposerState extends State<_Composer> {
     final ok = await _recorder.hasPermission();
     if (!ok || !mounted) return;
     final dir = await getTemporaryDirectory();
+    // Deliberately still `.aac`, which on iOS makes AVAudioRecorder write a
+    // raw ADTS stream rather than an MPEG-4 file. Recording `.m4a` here would
+    // be tidier — Android muxes MPEG-4 either way — but every build already in
+    // the wild names its playback file `.aac` and so cannot open an MPEG-4 at
+    // all (see _containerExtension). Switching the recorder before that fix is
+    // widespread would break voice notes for everyone who has not updated.
+    // Worth doing a release or two after this one, not now.
     _recPath = '${dir.path}/neat_voice_${DateTime.now().millisecondsSinceEpoch}.aac';
     await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: _recPath!);
     _waveform.clear();
