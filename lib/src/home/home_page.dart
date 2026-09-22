@@ -227,6 +227,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // initState has returned, and the navigator isn't mounted yet either.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) PushService.instance.replayPending();
+      if (mounted) unawaited(_maybeShowGreeceAnnouncement());
     });
     _realtime.start();
     // Instant nav-badge updates on native, on top of the existing on-demand
@@ -394,6 +395,38 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// Whether the server said there are posts older than the ones we hold.
   bool _hasOlderPosts = false;
   bool _loadingOlderPosts = false;
+
+  // ── Greece feed one-time announcement ────────────────────────
+
+  // v4: the popup now shows the feed's own dropdown rather than a flat
+  // illustration, so it is worth one more airing for everyone who dismissed v3.
+  static const _kGreeceAnnouncementKey = 'greece_announcement_v4';
+
+  Future<void> _maybeShowGreeceAnnouncement() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kGreeceAnnouncementKey) == true) return;
+    if (!mounted) return;
+    await prefs.setBool(_kGreeceAnnouncementKey, true);
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      barrierDismissible: true,
+      builder: (_) => _GreecePopup(
+        city: widget.session.user.city,
+        onTryNow: () {
+          if (!mounted) return;
+          setState(() {
+            _feedScope = 'greece';
+            _nav = 0;
+            _showInlineProfile = false;
+          });
+          unawaited(_load());
+        },
+      ),
+    );
+  }
 
   Future<void> _load() async {
     try {
@@ -681,29 +714,47 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
     if (!mounted) return;
     setState(() {
-      for (final item in _notificationsList) {
-        if (ids.contains(item.id)) {
-          final index = _notificationsList.indexOf(item);
-          if (index != -1) {
-            _notificationsList[index] = NotificationItem(
-              id: item.id,
-              actor: item.actor,
-              actorAvatarUrl: item.actorAvatarUrl,
-              verb: item.verb,
-              targetType: item.targetType,
-              targetId: item.targetId,
-              targetText: item.targetText,
-              imageUrl: item.imageUrl,
-              videoUrl: item.videoUrl,
-              isRead: true,
-              created: item.created,
-            );
-          }
+      for (var i = 0; i < _notificationsList.length; i++) {
+        if (ids.contains(_notificationsList[i].id)) {
+          _notificationsList[i] = _notificationsList[i].asRead();
         }
       }
     });
     // Half the icon badge is unread activity, so clearing some of it here has
     // to be reflected on the icon too.
+    unawaited(PushService.instance.refreshBadge());
+  }
+
+  /// Opening the tab is what counts as reading it.
+  ///
+  /// Marking one notification per tap left the badge lit over a list the user
+  /// had already looked through, and cleared it only for the handful of rows
+  /// they happened to open. Seeing the list is the act — so the whole lot is
+  /// marked read the moment it has been shown, server-side rather than only
+  /// for the fifty rows this page fetched, or the badge would survive on the
+  /// older ones underneath.
+  ///
+  /// Called *after* the sheet's own fetch has resolved, so the rows still
+  /// carry their unread highlight for the viewing that cleared them; they come
+  /// back plain the next time the tab is opened.
+  Future<void> _markAllNotificationsRead() async {
+    try {
+      await http.post(
+        notificationsEndpoint,
+        headers: authJsonHeaders(widget.session.token),
+        body: jsonEncode({'all': true}),
+      );
+    } catch (_) {
+      return; // Nothing was cleared, so leave the badge where it is.
+    }
+    if (!mounted) return;
+    setState(() {
+      for (var i = 0; i < _notificationsList.length; i++) {
+        if (!_notificationsList[i].isRead) {
+          _notificationsList[i] = _notificationsList[i].asRead();
+        }
+      }
+    });
     unawaited(PushService.instance.refreshBadge());
   }
 
@@ -1760,6 +1811,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           onFollow: _follow,
           onUnfollow: _unfollow,
           onOpenUserProfile: _pushProfileRoute,
+          onSeen: _markAllNotificationsRead,
           onTapItem: (item, eventType) async {
             await _markNotificationsRead([item]);
             if (!mounted) return;
@@ -5220,6 +5272,7 @@ class _NotificationsSheet extends StatefulWidget {
     required this.onUnfollow,
     required this.onTapItem,
     required this.onOpenUserProfile,
+    required this.onSeen,
   });
   final Future<List<NotificationItem>> Function() fetchNotifications;
   final Set<String> followingAuthors;
@@ -5229,6 +5282,9 @@ class _NotificationsSheet extends StatefulWidget {
   final Future<void> Function(String username) onUnfollow;
   final Future<void> Function(NotificationItem, String? eventType) onTapItem;
   final ValueChanged<String> onOpenUserProfile;
+
+  /// Everything here has now been seen. Fired once, after the list is in hand.
+  final Future<void> Function() onSeen;
 
   @override
   State<_NotificationsSheet> createState() => _NotificationsSheetState();
@@ -5248,6 +5304,9 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       _loadEventData(items);
       return items;
     });
+    // Whatever the fetch did — even if it fell back to the cached list — the
+    // tab has been opened, and that is what marks it read.
+    _future.whenComplete(() => unawaited(widget.onSeen()));
   }
 
   Future<void> _loadEventData(List<NotificationItem> items) async {
@@ -7464,4 +7523,525 @@ class _GhostPost extends StatelessWidget {
 
 // ── Greece feed announcement popup ────────────────────────────────────────────
 
+class _GreecePopup extends StatefulWidget {
+  const _GreecePopup({required this.city, required this.onTryNow});
 
+  /// The user's own city, so the mock header below reads like their own feed
+  /// rather than a generic screenshot.
+  final String city;
+  final VoidCallback onTryNow;
+
+  @override
+  State<_GreecePopup> createState() => _GreecePopupState();
+}
+
+class _GreecePopupState extends State<_GreecePopup>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+  late final Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _scale = Tween<double>(begin: 0.88, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
+    );
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _close() async {
+    await _ctrl.reverse();
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _scale,
+      child: FadeTransition(
+        opacity: _fade,
+        child: Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: _PopupCard(
+              city: widget.city,
+              onTryNow: () async {
+                await _ctrl.reverse();
+                if (!mounted) return;
+                Navigator.of(context).pop();
+                widget.onTryNow();
+              },
+              onClose: _close,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PopupCard extends StatelessWidget {
+  const _PopupCard({
+    required this.city,
+    required this.onTryNow,
+    required this.onClose,
+  });
+  final String city;
+  final VoidCallback onTryNow;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xff1a1a1a) : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black;
+    final subColor = isDark ? const Color(0xff999999) : const Color(0xff666666);
+    // A calm, faintly blue-tinted backdrop: the mock below is the thing worth
+    // looking at, so the surface behind it stays quiet and lets it float.
+    final backdrop = isDark
+        ? const [Color(0xff262c3a), Color(0xff161a24)]
+        : const [Color(0xffeef2fa), Color(0xffdfe7f5)];
+    final closeBg = isDark ? const Color(0x22ffffff) : const Color(0x14000000);
+    final closeFg = isDark ? Colors.white70 : const Color(0xff5a5e66);
+
+    return ColoredBox(
+      color: bg,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Header visual ──────────────────────────────────────────────
+          // Not an illustration: a miniature of the feed itself with the scope
+          // menu open, so the popup shows the exact tap it is asking for.
+          // Drawn rather than shipped as a screenshot so it follows the theme,
+          // carries the user's own city, and stays sharp on every screen.
+          SizedBox(
+            height: 202,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: backdrop,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 22),
+                  child: _FeedDropdownPreview(city: city),
+                ),
+                // Close button top-right
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: GestureDetector(
+                    onTap: onClose,
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: closeBg,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          'X',
+                          style: TextStyle(
+                            color: closeFg,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            height: 1,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Text ───────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Feed Ελλάδας',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Posts από χρήστες σε όλη την Ελλάδα, σε ένα feed.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: subColor,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Buttons ────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 48,
+                  child: FilledButton(
+                    onPressed: onTryNow,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xff0060CC),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text(
+                      'Δοκίμασέ το',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: onClose,
+                  child: Center(
+                    child: Text(
+                      'Αργότερα',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: subColor,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A miniature of the feed with the scope menu open: the city tab with its ▾,
+/// the menu under it showing the city ticked and Ελλάδα beneath, and the feed
+/// itself greyed out behind — a screenshot of the app, drawn.
+///
+/// Every colour and weight here is copied from _FeedHeader's own menu so the
+/// mock and the real thing cannot drift apart visually.
+class _FeedDropdownPreview extends StatelessWidget {
+  const _FeedDropdownPreview({required this.city});
+  final String city;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final screenBg = isLight ? Colors.white : const Color(0xff0b0b0d);
+    final barBg = isLight ? const Color(0xfff3f4f6) : Colors.black;
+    final activeClr = isLight ? Colors.black : Colors.white;
+    final inactiveClr = isLight ? const Color(0xff888888) : Colors.white38;
+    final hairline = isLight ? const Color(0x11000000) : const Color(0x1affffff);
+
+    return Center(
+      child: Container(
+        width: 240,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isLight ? 0.16 : 0.45),
+              blurRadius: 22,
+              offset: const Offset(0, 9),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: ColoredBox(
+            color: screenBg,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // The header bar itself: [city ▾] | [Ακολουθείτε]
+                Container(
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: barBg,
+                    border: Border(bottom: BorderSide(color: hairline)),
+                  ),
+                  child: Stack(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Center(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const SizedBox(width: 11), // balances the ▾
+                                  Flexible(
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(
+                                        city,
+                                        maxLines: 1,
+                                        style: TextStyle(
+                                          color: activeClr,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  CustomPaint(
+                                    size: const Size(8, 5),
+                                    painter: _ChevronPainter(activeClr),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Center(
+                              child: Text(
+                                'Ακολουθείτε',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: inactiveClr,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Selected-tab indicator, under the city tab
+                      Positioned(
+                        left: 35,
+                        bottom: 0,
+                        child: Container(
+                          width: 50,
+                          height: 3,
+                          decoration: BoxDecoration(
+                            color: activeClr,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // The feed underneath, greyed out, with the open menu over it
+                SizedBox(
+                  height: 118,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: _GhostFeed(isLight: isLight)),
+                      Positioned(
+                        left: 14,
+                        top: 8,
+                        child: _menu(isLight, activeClr),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _menu(bool isLight, Color textColor) {
+    return Container(
+      width: 150,
+      decoration: BoxDecoration(
+        color: isLight ? Colors.white : const Color(0xff1c1c1e),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isLight ? const Color(0x0f000000) : const Color(0x1fffffff),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isLight ? 0.18 : 0.55),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _previewMenuRow(city, selected: true, textColor: textColor),
+          _previewMenuRow('Ελλάδα', selected: false, textColor: textColor),
+        ],
+      ),
+    );
+  }
+
+  /// One row of the mock menu. The tick is painted rather than taken from the
+  /// icon font: Shorebird cannot patch font assets, so a codepoint that is not
+  /// already in the shipped release would render as an empty box.
+  Widget _previewMenuRow(String label,
+      {required bool selected, required Color textColor}) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 5, 12, 5),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 13,
+            child: selected
+                ? Center(
+                    child: CustomPaint(
+                      size: const Size(11, 9),
+                      painter: _TickPainter(const Color(0xff34C759)),
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(width: 7),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The blurred-out feed behind the open menu — the same skeleton shapes the
+/// locked-city placeholder uses, at mock scale.
+class _GhostFeed extends StatelessWidget {
+  const _GhostFeed({required this.isLight});
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    final shape = isLight ? const Color(0xffe9ebef) : const Color(0xff1d1e22);
+    final block = isLight ? const Color(0xffeff1f4) : const Color(0xff16171a);
+
+    Widget bar(double w, double h) => Container(
+          width: w,
+          height: h,
+          margin: const EdgeInsets.only(bottom: 6),
+          decoration: BoxDecoration(
+            color: shape,
+            borderRadius: BorderRadius.circular(h / 2),
+          ),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(color: shape, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [bar(74, 7), bar(44, 6)],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          bar(double.infinity, 7),
+          bar(150, 7),
+          const SizedBox(height: 4),
+          Expanded(
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: block,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(10),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// The menu's check mark, drawn so it needs no icon font.
+class _TickPainter extends CustomPainter {
+  const _TickPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.9
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
+    final path = Path()
+      ..moveTo(size.width * 0.06, size.height * 0.52)
+      ..lineTo(size.width * 0.36, size.height * 0.88)
+      ..lineTo(size.width * 0.96, size.height * 0.12);
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_TickPainter old) => old.color != color;
+}

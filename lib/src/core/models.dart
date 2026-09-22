@@ -558,6 +558,27 @@ class NotificationItem {
   final bool isRead;
   final DateTime created;
 
+  /// The same notification, read.
+  ///
+  /// Written out field by field because the class is immutable and there is no
+  /// copyWith; doing it in one place keeps a field from being quietly dropped
+  /// on the way through — `targetCommentId` used to be, which cost a tapped
+  /// comment notification its scroll position.
+  NotificationItem asRead() => NotificationItem(
+        id: id,
+        actor: actor,
+        actorAvatarUrl: actorAvatarUrl,
+        verb: verb,
+        targetType: targetType,
+        targetId: targetId,
+        targetCommentId: targetCommentId,
+        targetText: targetText,
+        imageUrl: imageUrl,
+        videoUrl: videoUrl,
+        isRead: true,
+        created: created,
+      );
+
   factory NotificationItem.fromJson(Map<String, dynamic> json) {
     int parseInt(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
     return NotificationItem(
