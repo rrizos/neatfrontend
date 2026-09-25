@@ -2410,6 +2410,10 @@ class _ConversationPageState extends State<ConversationPage>
             jsonDecode(res.body) as Map<String, dynamic>,
           );
           if (mounted) {
+            // The bytes are in hand; the server has just named them. Without
+            // this the sender downloads their own recording back before they
+            // can play it, which is the one fetch nobody should ever need.
+            if (mediaBytes != null) DmMedia.remember(saved.id, mediaBytes);
             setState(() {
               final at = _messages.indexWhere((m) => m.id == opt.id);
               if (at >= 0) {
@@ -3800,6 +3804,10 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
   /// Set when a tap could not produce sound, so the bubble can say so instead
   /// of sitting there looking like the tap never landed. Tapping again retries.
   bool _failed = false;
+
+  /// True once this note has actually produced sound, which is the only
+  /// evidence that the audio session was ours to play on.
+  bool _started = false;
   Duration _position = Duration.zero;
   String? _tempPath;
 
@@ -3816,12 +3824,15 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
       AudioContext(iOS: AudioContextIOS(category: AVAudioSessionCategory.playback)),
     ));
     _player.onPlayerStateChanged.listen((s) {
+      if (s == PlayerState.playing) _started = true;
       if (mounted) setState(() => _playing = s == PlayerState.playing);
     });
     _player.onPositionChanged.listen((p) {
+      if (p > Duration.zero) _started = true;
       if (mounted) setState(() => _position = p);
     });
     _player.onPlayerComplete.listen((_) {
+      _started = true;
       if (mounted) setState(() { _playing = false; _position = Duration.zero; });
     });
   }
@@ -3836,6 +3847,7 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
   Future<void> _toggle() async {
     if (_playing) { await _player.pause(); return; }
     if (_failed) setState(() => _failed = false); // a tap is also a retry
+    _started = false;
     if (_tempPath == null) {
       final bytes = widget.bytes ?? await _fetch();
       if (!mounted) return;
@@ -3855,12 +3867,33 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
       debugPrint('[voice] ${widget.messageId}: ${bytes.length} bytes -> $path');
     }
     try {
+      // Claimed here and not only in initState. The recorder moves the session
+      // to playAndRecord while it runs and hands it back on its own schedule,
+      // so a bubble built before a recording — every bubble in the chat you
+      // just recorded in — was left holding a session set up for a microphone.
+      // That is why playing a note you had only just sent did nothing until
+      // you left the chat and came back, which built the bubble afresh.
+      await _player.setAudioContext(
+        AudioContext(iOS: AudioContextIOS(category: AVAudioSessionCategory.playback)),
+      );
       await _player.play(DeviceFileSource(_tempPath!));
+      _watchForSilence();
     } catch (e) {
       debugPrint('[voice] ${widget.messageId}: play failed: $e');
       if (mounted) setState(() => _failed = true);
       _say('Το ηχητικό δεν παίζει', '$e');
     }
+  }
+
+  /// Not every failure throws: a session someone else owns simply never
+  /// starts, and the button would sit there looking pressed. If nothing is
+  /// playing shortly after being asked to, say so and let the tap be retried.
+  void _watchForSilence() {
+    Future.delayed(const Duration(seconds: 4), () {
+      if (!mounted || _started) return;
+      setState(() => _failed = true);
+      _say('Το ηχητικό δεν ξεκίνησε', 'player never started');
+    });
   }
 
   /// Tells the person the tap failed, and carries the technical reason with it

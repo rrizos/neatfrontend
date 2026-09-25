@@ -221,6 +221,18 @@ class DmMedia {
     }
   }
 
+  /// Keeps bytes this device already has, under the id the server gave them.
+  ///
+  /// Used by the sender the moment a voice note is accepted: the recording is
+  /// already in memory here, and without this the one person guaranteed to
+  /// have the file was the one made to download it back before they could
+  /// hear it — over the connection that had just finished uploading it.
+  static void remember(int messageId, Uint8List bytes) {
+    if (messageId <= 0 || bytes.isEmpty) return;
+    _remember(messageId, bytes);
+    unawaited(_writeFile(messageId, bytes));
+  }
+
   static void _remember(int messageId, Uint8List bytes) {
     if (!_memory.containsKey(messageId)) _order.add(messageId);
     _memory[messageId] = bytes;
